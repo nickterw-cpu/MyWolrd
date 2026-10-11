@@ -3425,6 +3425,10 @@ const GCAL_SNAPSHOT = { updatedAt: "", events: [] };
 
 function gcalDayOf(s) { return (s || "").slice(0, 10); }
 function gcalTimeOf(s) { return (s || "").length > 10 ? s.slice(11, 16) : ""; }
+function fmtCalendarDate(dateStr) {
+  const year = dateStr.slice(0, 4);
+  return year === String(new Date().getFullYear()) ? fmtDateShort(dateStr) : `${fmtDateShort(dateStr)}/${year}`;
+}
 function gcalLocalStr(d) {
   const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -3647,7 +3651,7 @@ function GoogleAgendaView({ gcal, setGcal }) {
     );
   } else if (mode === "semana") {
     const start = startOfWeek(addDays(today, offset * 7));
-    rangeLabel = `${fmtDateShort(start)} a ${fmtDateShort(addDays(start, 6))}`;
+    rangeLabel = `${fmtCalendarDate(start)} a ${fmtCalendarDate(addDays(start, 6))}`;
     body = (
       <div style={{ overflowX: "auto" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(120px, 1fr))", gap: 8, minWidth: 840 }}>
@@ -3686,7 +3690,7 @@ function GoogleAgendaView({ gcal, setGcal }) {
             <div className="cr-card">
               {m.items.map((e) => (
                 <div className="cr-list-row" key={e.id} style={{ cursor: "pointer" }} onClick={() => setDetail(e)}>
-                  <span className="cr-chip" style={{ background: "#DCE7F3", color: "#27476B", minWidth: 62, justifyContent: "center" }}>{fmtDateShort(gcalDayOf(e.s))}</span>
+                  <span className="cr-chip" style={{ background: "#DCE7F3", color: "#27476B", minWidth: 84, justifyContent: "center" }}>{fmtCalendarDate(gcalDayOf(e.s))}</span>
                   <span style={{ flex: 1 }}>{e.t}</span>
                   <span className="cr-sub" style={{ margin: 0 }}>{e.ad ? "dia inteiro" : gcalTimeOf(e.s) + (gcalTimeOf(e.e) ? " a " + gcalTimeOf(e.e) : "")}</span>
                   {e.meet && <button className="cr-btn primary" style={{ padding: "3px 10px" }} onClick={(ev) => { ev.stopPropagation(); openExternalLink(e.meet); }}>Meet</button>}
@@ -3743,7 +3747,7 @@ function GoogleAgendaView({ gcal, setGcal }) {
       {body}
 
       {dayOpen && (
-        <Modal size="small" title={`${fmtDateShort(dayOpen)}`} onClose={() => setDayOpen(null)}>
+        <Modal size="small" title={`${fmtCalendarDate(dayOpen)}`} onClose={() => setDayOpen(null)}>
           {dayEvents.length === 0 && <p className="cr-empty">Nada agendado neste dia.</p>}
           {dayEvents.map((e) => (
             <div className="cr-list-row" key={e.id} style={{ cursor: "pointer" }} onClick={() => { setDayOpen(null); setDetail(e); }}>
@@ -3755,7 +3759,7 @@ function GoogleAgendaView({ gcal, setGcal }) {
       )}
       {detail && (
         <Modal title={detail.t} onClose={() => setDetail(null)}>
-          <p style={{ fontSize: 15 }}><strong>Quando:</strong> {fmtDateShort(gcalDayOf(detail.s))}{detail.ad ? " (dia inteiro)" : ` das ${gcalTimeOf(detail.s)} às ${gcalTimeOf(detail.e)}`}</p>
+          <p style={{ fontSize: 15 }}><strong>Quando:</strong> {fmtCalendarDate(gcalDayOf(detail.s))}{detail.ad ? " (dia inteiro)" : ` das ${gcalTimeOf(detail.s)} às ${gcalTimeOf(detail.e)}`}</p>
           {detail.loc && <p style={{ fontSize: 15 }}><strong>Local:</strong> {detail.loc}</p>}
           <div className="cr-row" style={{ gap: 8 }}>
             {detail.meet && <button className="cr-btn primary" onClick={() => openExternalLink(detail.meet)}><Link2 size={14} /> Entrar na reunião (Meet)</button>}
