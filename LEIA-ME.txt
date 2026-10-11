@@ -1,0 +1,24 @@
+CENTRAL, sistema de gestão pessoal (versão 9)
+
+O que tem nesta pasta
+- central.html : o sistema completo em um arquivo só. Funciona sem internet.
+- App.jsx      : o código-fonte (React) do sistema. É a versão para usar dentro do Claude
+                 e para quem for continuar o desenvolvimento.
+
+Como abrir o sistema
+1. Dê dois cliques no central.html. Ele deve abrir no Chrome.
+   Se abrir como texto (mostrando código), clique com o botão direito no arquivo,
+   escolha "Abrir com" e depois "Google Chrome".
+   Ou arraste o arquivo para dentro de uma janela do Chrome.
+2. Os dados ficam guardados no próprio navegador. Para levar para outro lugar,
+   use Configurações > Exportar backup e depois Importar backup.
+
+Como usar o App.jsx
+- Dentro do Claude: o arquivo funciona como aplicativo e guarda os dados na sua conta.
+- Em outro projeto React: é um componente único (export default App), com as
+  bibliotecas react e lucide-react. Os dados usam a API window.storage do Claude;
+  fora do Claude troque por localStorage (o central.html já faz isso).
+
+Observações
+- O central.html já vem com o código traduzido e o React embutido, por isso é grande.
+- As anotações iniciais (importadas do Notion) estão dentro dos dois arquivos.
