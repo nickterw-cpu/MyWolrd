@@ -18,8 +18,21 @@ A aplicação web reúne:
 - Atalhos, páginas personalizadas e busca.
 - Configurações de áreas, categorias, listas e aparência.
 - Exportação e importação de backup em JSON.
+- Instalação da aplicação web como PWA em celulares e computadores compatíveis.
 
 As páginas e categorias disponíveis podem ser personalizadas nas configurações.
+
+## Instalar no celular
+
+A aplicação web pode ser instalada como PWA quando acessada por HTTPS (ou em `localhost`):
+
+- **Android:** abra a aplicação no Chrome e escolha **Instalar app** no aviso da Central ou no menu do navegador.
+- **iPhone/iPad:** abra a aplicação no Safari, toque em **Compartilhar** e escolha **Adicionar à Tela de Início**.
+- No computador, navegadores compatíveis também oferecem a opção de instalação.
+
+A interface, os ícones e as fontes Fraunces e Manrope são incluídos no build; o service worker guarda os arquivos da aplicação e mostra um aviso quando uma nova versão está pronta. A navegação usa o hash da URL (por exemplo, `#/financas`), então voltar no navegador retorna à página anterior.
+
+O service worker disponibiliza os arquivos da interface sem rede, mas os dados da conta ainda precisam ser carregados do Supabase. Edição offline com sincronização posterior não está disponível nesta versão.
 
 ## Como os dados funcionam
 
@@ -146,7 +159,10 @@ O arquivo `vercel.json` encaminha as rotas da aplicação para `index.html`, per
 | `src/AppShell.jsx` | Sessão, login Google e tela de autenticação |
 | `src/lib/supabase.js` | Configuração do cliente Supabase |
 | `src/lib/userData.js` | Leitura, gravação e cache de dados do usuário |
+| `src/lib/localDate.js` | Formatação de datas no fuso local |
+| `src/components/` | Avisos de atualização, instalação e notificações |
 | `src/styles.css` | Estilos da aplicação web |
+| `public/` | Ícones da aplicação instalável |
 | `supabase/migrations/` | Esquema da tabela e políticas RLS |
 | `central.html` | Versão independente, com dados locais no navegador |
 | `vercel.json` | Reescrita das rotas SPA na Vercel |

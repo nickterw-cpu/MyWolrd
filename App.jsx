@@ -1,5 +1,8 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef, createContext, useContext } from "react";
 import { reloadUserData, storageDelete, storageGet, storageSet } from "./src/lib/userData.js";
+import { localDateStr } from "./src/lib/localDate.js";
+import { shareOrDownloadFile } from "./src/lib/shareFile.js";
+import { notify } from "./src/components/ToastHost.jsx";
 import {
   Home, CalendarDays, Target, Repeat, Wallet, NotebookPen, Link2, Settings as SettingsIcon,
   Plus, Trash2, Pencil, X, Check, Search, Download, Upload, Sparkles, Flame, ChevronLeft, ChevronRight,
@@ -42,7 +45,7 @@ const KEYS = {
 };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => localDateStr();
 const fmtBRL = (n) =>
   (n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtDateShort = (d) => {
@@ -596,7 +599,7 @@ function AreaManagerModal({ areas, setAreas, usageCount, onClose }) {
 // abertura em nova aba (comum em previews restritos), copia o link e avisa,
 // em vez de o clique simplesmente não fazer nada.
 function openExternalLink(url) {
-  if (!url) { alert("Esse item ainda não tem um link cadastrado."); return; }
+  if (!url) { notify("Esse item ainda não tem um link cadastrado."); return; }
   let win = null;
   try {
     win = window.open(url, "_blank", "noopener,noreferrer");
@@ -604,13 +607,13 @@ function openExternalLink(url) {
     win = null;
   }
   if (!win || win.closed || typeof win.closed === "undefined") {
-    const done = () => alert("Não consegui abrir automaticamente (o navegador bloqueou). Copiei o link — cole numa nova aba:\n\n" + url);
+    const done = () => notify("Não consegui abrir automaticamente. O link foi copiado; cole-o em uma nova aba.");
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(url).then(done).catch(() => {
-        alert("Não consegui abrir automaticamente. Copie este link manualmente:\n\n" + url);
+        notify("Não consegui abrir nem copiar automaticamente. Copie o link manualmente.");
       });
     } else {
-      alert("Não consegui abrir automaticamente. Copie este link manualmente:\n\n" + url);
+      notify("Não consegui abrir automaticamente. Copie o link manualmente.");
     }
   }
 }
@@ -774,7 +777,6 @@ function runStructureMigration(notes, hobbies, selfcare) {
 
 const GlobalStyle = () => (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Manrope:wght@400;500;600;700&display=swap');
     .central-root {
       --bg: #F0ECE1;
       --card: #FBF8F2;
@@ -784,21 +786,21 @@ const GlobalStyle = () => (
       --rose: #591208;
       --sage: #6E534A;
       --clay: #7A1712;
-      font-family: 'Manrope', sans-serif;
+      font-family: 'Manrope Variable', sans-serif;
       color: var(--ink);
       background: var(--bg);
-      height: 100vh;
+      height: 100dvh;
       overflow: hidden;
       display: flex;
       width: 100%;
     }
     .central-root * { box-sizing: border-box; }
-    .cr-serif { font-family: 'Fraunces', serif; }
+    .cr-serif { font-family: 'Fraunces Variable', serif; }
     .cr-sidebar {
       width: 220px; flex-shrink: 0; background: var(--card);
       border-right: 1px solid var(--line); padding: 24px 14px;
       display: flex; flex-direction: column; gap: 4px;
-      height: 100vh; overflow-y: auto;
+      height: 100dvh; overflow-y: auto;
     }
     .cr-navrow { display: flex; align-items: center; gap: 2px; }
     .cr-navrow .cr-navitem { flex: 1; min-width: 0; }
@@ -812,7 +814,7 @@ const GlobalStyle = () => (
     }
     .cr-navitem:hover { background: #F3EDE4; color: var(--ink); }
     .cr-navitem.active { background: #F0DAD3; color: var(--ink); font-weight: 600; }
-    .cr-main { flex: 1; padding: 28px 36px 60px; max-width: 1180px; height: 100vh; overflow-y: auto; }
+    .cr-main { flex: 1; padding: 28px 36px 60px; max-width: 1180px; height: 100dvh; overflow-y: auto; }
     .cr-h1 { font-size: 26px; margin: 0 0 4px; }
     .cr-sub { color: var(--ink-soft); font-size: 14px; margin: 0 0 24px; }
     .cr-card {
@@ -867,7 +869,7 @@ const GlobalStyle = () => (
     .cr-fullpage-body .cr-textarea { min-height: 120px; }
     .cr-modal {
       background: #fff; border-radius: 18px; padding: 22px; width: 100%; max-width: 440px;
-      max-height: 85vh; overflow-y: auto;
+      max-height: 85dvh; overflow-y: auto;
     }
     .cr-field { margin-bottom: 12px; }
     .cr-empty { color: var(--ink-soft); font-size: 13.5px; padding: 20px 4px; text-align: center; }
@@ -879,17 +881,45 @@ const GlobalStyle = () => (
     .cr-tabbtn.active { background: var(--ink); color: #fff; border-color: var(--ink); }
     .cr-heat { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
     .cr-heat-cell { aspect-ratio: 1; border-radius: 4px; background: #EFE8DE; }
+    .cr-mobile-nav, .cr-mobile-drawer-backdrop { display: none; }
     @media (max-width: 860px) {
-      .central-root { flex-direction: column; height: auto; overflow: visible; }
-      .cr-sidebar { width: 100%; height: auto; overflow-y: visible; flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); }
-      .cr-brand { display: none; }
-      .cr-navitem { flex-shrink: 0; width: auto; white-space: nowrap; }
-      .cr-navrow, .cr-navtools { flex-shrink: 0; margin: 0; }
+      .central-root { flex-direction: column; height: 100dvh; min-height: 100dvh; overflow: hidden; }
+      .cr-sidebar { display: none; }
       .cr-fullpage { left: 0; }
-      .cr-fullpage-head { padding: 12px 16px; }
-      .cr-fullpage-body { padding: 16px 16px 80px; }
-      .cr-main { padding: 18px; height: auto; overflow-y: visible; }
+      .cr-fullpage { padding-bottom: env(safe-area-inset-bottom); }
+      .cr-fullpage-head { padding: calc(12px + env(safe-area-inset-top)) 16px 12px; }
+      .cr-fullpage-body { padding: 16px 16px calc(80px + env(safe-area-inset-bottom)); }
+      .cr-main { width: 100%; max-width: none; min-height: 0; height: auto; overflow-y: auto; padding: calc(18px + env(safe-area-inset-top)) 16px calc(92px + env(safe-area-inset-bottom)); }
       .cr-grid-2, .cr-grid-3, .cr-grid-4 { grid-template-columns: 1fr; }
+      .cr-mobile-nav {
+        position: fixed; z-index: 40; right: 0; bottom: 0; left: 0;
+        display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px;
+        padding: 5px 8px calc(5px + env(safe-area-inset-bottom));
+        border-top: 1px solid var(--line); background: var(--card);
+      }
+      .cr-mobile-tab {
+        display: flex; min-width: 0; min-height: 48px; flex-direction: column;
+        align-items: center; justify-content: center; gap: 2px; padding: 3px 2px;
+        border: 0; border-radius: 9px; background: transparent; color: var(--ink-soft);
+        font: inherit; font-size: 10px; cursor: pointer;
+      }
+      .cr-mobile-tab.active { background: #F0DAD3; color: var(--ink); font-weight: 700; }
+      .cr-mobile-drawer-backdrop {
+        position: fixed; z-index: 45; inset: 0; display: flex; align-items: flex-end;
+        background: rgb(33 29 26 / 38%);
+      }
+      .cr-mobile-drawer {
+        width: 100%; max-height: 85dvh; overflow-y: auto; padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+        border-radius: 18px 18px 0 0; background: var(--card); box-shadow: 0 -8px 32px rgb(33 29 26 / 12%);
+      }
+      .cr-mobile-drawer .cr-navrow { display: flex; }
+      .cr-mobile-drawer .cr-navitem { width: auto; flex: 1; min-height: 44px; }
+      .cr-mobile-drawer-actions { display: flex; gap: 8px; margin-bottom: 10px; }
+      .cr-mobile-drawer-actions .cr-btn { flex: 1; justify-content: center; min-height: 44px; }
+      .central-root button { min-height: 44px; }
+      .central-root .cr-input, .central-root .cr-select, .central-root .cr-textarea,
+      .central-root input, .central-root select, .central-root textarea { min-height: 44px; font-size: 16px; }
+      .central-root .cr-textarea { min-height: 90px; }
     }
   `}</style>
 );
@@ -1395,14 +1425,14 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
 function addDays(dateStr, n) {
   const d = new Date(dateStr + "T00:00:00");
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return localDateStr(d);
 }
 
 function startOfWeek(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
   const day = (d.getDay() + 6) % 7; // segunda = 0
   d.setDate(d.getDate() - day);
-  return d.toISOString().slice(0, 10);
+  return localDateStr(d);
 }
 
 function fmtWeekday(dateStr) {
@@ -1806,7 +1836,7 @@ function last7Days() {
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    arr.push(d.toISOString().slice(0, 10));
+    arr.push(localDateStr(d));
   }
   return arr;
 }
@@ -1815,7 +1845,7 @@ function streakFor(habit) {
   let streak = 0;
   let d = new Date();
   while (true) {
-    const key = d.toISOString().slice(0, 10);
+    const key = localDateStr(d);
     if (habit.log[key]) { streak++; d.setDate(d.getDate() - 1); }
     else break;
   }
@@ -1899,7 +1929,7 @@ function addMonths(dateStr, n) {
   const base = new Date(y, m - 1 + n, 1);
   const lastDay = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
   base.setDate(Math.min(d, lastDay));
-  return base.toISOString().slice(0, 10);
+  return localDateStr(base);
 }
 
 function effectiveStatus(tx) {
@@ -2863,17 +2893,13 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
   const [showBackupText, setShowBackupText] = useState(false);
   const backupJson = JSON.stringify(allData, null, 2);
 
-  const exportData = () => {
+  const exportData = async () => {
     try {
       const blob = new Blob([backupJson], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = "central-de-comando-backup.json"; a.style.display = "none";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const result = await shareOrDownloadFile(blob, "central-de-comando-backup.json", "Backup da Central");
+      if (result === "shared") notify("Backup compartilhado.");
     } catch (e) {
+      notify("Não foi possível exportar o backup. Tente novamente.");
       setShowBackupText(true);
     }
   };
@@ -2886,9 +2912,9 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
       try {
         const parsed = JSON.parse(ev.target.result);
         await restoreBackup(parsed);
-        alert("Backup importado e salvo no Supabase.");
+        notify("Backup importado e salvo no Supabase.");
       } catch (err) {
-        alert(err instanceof Error ? `Não foi possível importar o backup: ${err.message}` : "Não foi possível importar o backup.");
+        notify(err instanceof Error ? `Não foi possível importar o backup: ${err.message}` : "Não foi possível importar o backup.");
       }
     };
     reader.readAsText(file);
@@ -3021,9 +3047,9 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
           </p>
           <button className="cr-btn primary" style={{ marginBottom: 10 }} onClick={() => {
             if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText(backupJson).then(() => alert("Copiado!")).catch(() => alert("Não consegui copiar automaticamente — selecione o texto manualmente."));
+              navigator.clipboard.writeText(backupJson).then(() => notify("Backup copiado.")).catch(() => notify("Não consegui copiar automaticamente; selecione o texto manualmente."));
             } else {
-              alert("Selecione o texto abaixo manualmente e copie.");
+              notify("Selecione o texto abaixo manualmente e copie.");
             }
           }}>Copiar tudo</button>
           <textarea readOnly value={backupJson} className="cr-textarea" style={{ minHeight: 260, fontSize: 11, fontFamily: "monospace" }} onFocus={(e) => e.target.select()} />
@@ -4654,7 +4680,7 @@ function rerouteBeautyItems(beauty, shopping, selfcare) {
 function addDaysStr(dateStr, days) {
   const d = new Date(dateStr + "T00:00:00");
   d.setDate(d.getDate() + Number(days));
-  return d.toISOString().slice(0, 10);
+  return localDateStr(d);
 }
 
 const FREQUENCY_PRESETS = [
@@ -4709,7 +4735,7 @@ function statusMessage(m, name) {
 
 // Gera e baixa um arquivo .ics (compatível com Google Calendar, Apple Calendar etc.)
 // pra usuária importar manualmente. Nunca cria evento sozinho, é sempre uma ação dela.
-function downloadICS(title, dateStr, notes) {
+async function downloadICS(title, dateStr, notes) {
   const dt = dateStr.replace(/-/g, "");
   const ics = [
     "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Central//Procedimentos//PT",
@@ -4723,15 +4749,9 @@ function downloadICS(title, dateStr, notes) {
   ].join("\r\n");
   try {
     const blob = new Blob([ics], { type: "text/calendar" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `${title.replace(/[^a-z0-9]+/gi, "-")}.ics`; a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    await shareOrDownloadFile(blob, `${title.replace(/[^a-z0-9]+/gi, "-")}.ics`, title);
   } catch (e) {
-    alert("Não consegui gerar o arquivo do calendário aqui. Copie a data manualmente: " + fmtDateShort(dateStr));
+    notify("Não consegui gerar o arquivo do calendário. Copie a data manualmente: " + fmtDateShort(dateStr));
   }
 }
 
@@ -6388,8 +6408,35 @@ const NAV = [
   { id: "settings", label: "Configurações", icon: SettingsIcon },
 ];
 
+const TAB_ROUTES = {
+  dashboard: "dashboard", search: "buscar", tasks: "planejamento", goals: "metas",
+  habits: "habitos", finance: "financas", study: "estudos", career: "carreira",
+  beauty: "procedimentos", selfcare: "bem-estar", hobbies: "hobbies",
+  personaldev: "desenvolvimento-pessoal", shopping: "wishlist", notes: "notas",
+  vision: "vision-board", apps: "apps", settings: "configuracoes",
+  routines: "rotinas", house: "casa", journal: "diario",
+};
+const ROUTE_TABS = Object.fromEntries(Object.entries(TAB_ROUTES).map(([tab, route]) => [route, tab]));
+
+function tabFromHash(hash) {
+  let route = hash.replace(/^#\/?/, "");
+  try { route = decodeURIComponent(route); } catch { /* Use the literal route if it is malformed. */ }
+  if (route.startsWith("pagina-")) return `page:${route.slice("pagina-".length)}`;
+  return ROUTE_TABS[route] || route || "dashboard";
+}
+
+function hashForTab(tab) {
+  if (tab.startsWith("page:")) return `#/pagina-${encodeURIComponent(tab.slice(5))}`;
+  return `#/${TAB_ROUTES[tab] || tab}`;
+}
+
 export default function App({ onSignOut }) {
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTabState] = useState(() => tabFromHash(window.location.hash));
+  const setTab = useCallback((nextTab) => {
+    setTabState(nextTab);
+    const nextHash = hashForTab(nextTab);
+    if (window.location.hash !== nextHash) window.history.pushState(null, "", nextHash);
+  }, []);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
 
@@ -6424,6 +6471,7 @@ export default function App({ onSignOut }) {
   const [pageModal, setPageModal] = useState(null);
   const [confirmPage, setConfirmPage] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [mobileMore, setMobileMore] = useState(false);
 
   const loadAllData = useCallback(async () => {
     setLoadError("");
@@ -6612,6 +6660,23 @@ export default function App({ onSignOut }) {
 
   useEffect(() => { loadAllData(); }, [loadAllData]);
 
+  useEffect(() => {
+    const onHashChange = () => setTabState(tabFromHash(window.location.hash));
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const deleted = settings.deletedPages || [];
+    const builtinPageExists = NAV.some((item) => item.id === tab && !deleted.includes(tab));
+    const customPageExists = tab.startsWith("page:")
+      && pages.some((page) => `page:${page.id}` === tab);
+    if (!builtinPageExists && !customPageExists && !["routines", "house", "journal"].includes(tab)) {
+      setTab("dashboard");
+    }
+  }, [loaded, pages, settings.deletedPages, setTab, tab]);
+
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -6796,6 +6861,33 @@ export default function App({ onSignOut }) {
     };
     return <ListManagerModal key={key} listKey={key} items={getList(key)} setItems={setItems} usageCount={usage} onDeleteItem={onDeleteItem} onRename={onRename} onClose={() => setManager(null)} />;
   };
+  const renderNavItem = (n) => {
+    const Icon = n.icon;
+    return (
+      <div className="cr-navrow" key={n.id}>
+        <button className={`cr-navitem ${tab === n.id ? "active" : ""}`} aria-current={tab === n.id ? "page" : undefined}
+          onClick={() => { setTab(n.id); setMobileMore(false); }}>
+          <Icon size={16} /> {n.label}
+        </button>
+        {navEdit && n.id !== "settings" && (
+          <>
+            <button className="cr-btn ghost" style={{ padding: "4px 5px" }} title="Subir" onClick={() => movePage(n.id, -1)}>↑</button>
+            <button className="cr-btn ghost" style={{ padding: "4px 5px" }} title="Descer" onClick={() => movePage(n.id, 1)}>↓</button>
+          </>
+        )}
+        {navEdit && (
+          <button className="cr-btn ghost" style={{ padding: "4px 6px" }} title="Renomear"
+            onClick={() => setPageModal({ id: n.custom ? n.pageId : n.id, name: n.label, builtin: !n.custom })}><Pencil size={12} /></button>
+        )}
+        {navEdit && n.id !== "settings" && (
+          <button className="cr-btn ghost danger" style={{ padding: "4px 6px" }} title="Excluir página"
+            onClick={() => setConfirmPage(n)}><Trash2 size={12} /></button>
+        )}
+      </div>
+    );
+  };
+  const mobileShortcutIds = ["dashboard", "tasks", "finance", "search"];
+  const mobileShortcuts = mobileShortcutIds.map((id) => navItems.find((item) => item.id === id)).filter(Boolean);
   return (
     <ListsContext.Provider value={listsCtx}>
     <div className="central-root" style={{ "--clay": theme.clay, "--rose": theme.rose, "--sage": theme.sage }}>
@@ -6807,36 +6899,48 @@ export default function App({ onSignOut }) {
           <button className="cr-btn ghost" onClick={() => setPageModal("new")} title="Criar uma nova página"><Plus size={13} /> Página</button>
           <button className="cr-btn ghost" onClick={() => setNavEdit(!navEdit)} title="Renomear ou excluir páginas"><Pencil size={12} /> {navEdit ? "Pronto" : "Editar"}</button>
         </div>
-        {navItems.map((n) => {
-          const Icon = n.icon;
-          return (
-            <div className="cr-navrow" key={n.id}>
-              <button className={`cr-navitem ${tab === n.id ? "active" : ""}`} onClick={() => setTab(n.id)}>
-                <Icon size={16} /> {n.label}
-              </button>
-              {navEdit && n.id !== "settings" && (
-                <>
-                  <button className="cr-btn ghost" style={{ padding: "4px 5px" }} title="Subir" onClick={() => movePage(n.id, -1)}>↑</button>
-                  <button className="cr-btn ghost" style={{ padding: "4px 5px" }} title="Descer" onClick={() => movePage(n.id, 1)}>↓</button>
-                </>
-              )}
-              {navEdit && (
-                <button className="cr-btn ghost" style={{ padding: "4px 6px" }} title="Renomear"
-                  onClick={() => setPageModal({ id: n.custom ? n.pageId : n.id, name: n.label, builtin: !n.custom })}><Pencil size={12} /></button>
-              )}
-              {navEdit && n.id !== "settings" && (
-                <button className="cr-btn ghost danger" style={{ padding: "4px 6px" }} title="Excluir página"
-                  onClick={() => setConfirmPage(n)}><Trash2 size={12} /></button>
-              )}
-            </div>
-          );
-        })}
+        {navItems.map(renderNavItem)}
         <button className="cr-navitem" style={{ marginTop: "auto", fontSize: 12 }} onClick={handleRefresh} disabled={refreshing}>
           <Download size={14} /> {refreshing ? "Atualizando…" : "Atualizar dados"}
         </button>
         <button className="cr-navitem" style={{ fontSize: 12 }} onClick={onSignOut}>Sair da conta Google</button>
-        <p className="cr-sub" style={{ margin: "4px 10px 0", fontSize: 11, opacity: 0.8 }} title="Se esse número for menor que o que o Claude informou, você está abrindo uma cópia antiga do arquivo.">Central, {APP_BUILD}</p>
+        <p className="cr-sub" style={{ margin: "4px 10px 0", fontSize: 11, opacity: 0.8 }}>Central, {APP_BUILD}</p>
       </div>
+      <nav className="cr-mobile-nav" aria-label="Navegação principal">
+        {mobileShortcuts.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button key={item.id} type="button" className={`cr-mobile-tab ${tab === item.id ? "active" : ""}`}
+              aria-current={tab === item.id ? "page" : undefined} onClick={() => setTab(item.id)}>
+              <Icon size={19} /><span>{item.id === "tasks" ? "Planejamento" : item.label}</span>
+            </button>
+          );
+        })}
+        <button type="button" className={`cr-mobile-tab ${mobileMore || !mobileShortcutIds.includes(tab) ? "active" : ""}`}
+          aria-expanded={mobileMore} onClick={() => setMobileMore((open) => !open)}>
+          <ListChecks size={19} /><span>Mais</span>
+        </button>
+      </nav>
+      {mobileMore && (
+        <div className="cr-mobile-drawer-backdrop" onClick={() => setMobileMore(false)}>
+          <section className="cr-mobile-drawer" role="dialog" aria-modal="true" aria-label="Mais páginas"
+            onClick={(event) => event.stopPropagation()}>
+            <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+              <h2 className="cr-serif" style={{ margin: 0, fontSize: 20 }}>✦ Central</h2>
+              <button className="cr-btn ghost" type="button" onClick={() => setMobileMore(false)} aria-label="Fechar menu"><X size={18} /></button>
+            </div>
+            <div className="cr-mobile-drawer-actions">
+              <button className="cr-btn ghost" type="button" onClick={() => { setPageModal("new"); setMobileMore(false); }}><Plus size={14} /> Página</button>
+              <button className="cr-btn ghost" type="button" onClick={() => setNavEdit((edit) => !edit)}><Pencil size={14} /> {navEdit ? "Concluir edição" : "Editar páginas"}</button>
+            </div>
+            {navItems.map(renderNavItem)}
+            <button className="cr-navitem" type="button" onClick={handleRefresh} disabled={refreshing}>
+              <Download size={14} /> {refreshing ? "Atualizando…" : "Atualizar dados"}
+            </button>
+            <button className="cr-navitem" type="button" onClick={onSignOut}>Sair da conta Google</button>
+          </section>
+        </div>
+      )}
       <div className="cr-main">
         {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={finance} notes={notes} areas={areas} settings={settings} personaldev={personaldev} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab} />}
         {tab === "search" && <GlobalSearchView query={searchQuery} setQuery={setSearchQuery} all={searchData} goTo={setTab} />}
