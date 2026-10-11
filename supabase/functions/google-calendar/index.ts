@@ -74,7 +74,7 @@ async function handleRequest(request: Request): Promise<Response> {
   const accessToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!accessToken) return jsonResponse({ error: "Entre novamente para acessar a agenda." }, 401);
 
-  let body: { icsUrl?: unknown };
+  let body: { action?: unknown; icsUrl?: unknown; refreshToken?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -128,6 +128,27 @@ async function handleRequest(request: Request): Promise<Response> {
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  if (body.action === "save-refresh-token") {
+    if (
+      typeof body.refreshToken !== "string"
+      || body.refreshToken.length < 20
+      || body.refreshToken.length > 4096
+    ) {
+      return jsonResponse({ error: "O Google não retornou um refresh token válido. Reconecte sua conta." }, 400);
+    }
+    const { error } = await admin.from("google_tokens").upsert({
+      user_id: user.id,
+      refresh_token: body.refreshToken,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+    if (error) {
+      console.error("Não foi possível guardar a autorização Google do usuário.", error);
+      return jsonResponse({ error: "Não foi possível guardar a autorização Google. Tente reconectar sua conta." }, 500);
+    }
+    return jsonResponse({ saved: true });
+  }
+
   const { data: tokenRow, error: tokenError } = await admin
     .from("google_tokens")
     .select("refresh_token")

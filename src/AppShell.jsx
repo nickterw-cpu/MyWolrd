@@ -53,14 +53,16 @@ export default function AppShell() {
   useEffect(() => {
     if (!session?.provider_refresh_token || !supabase) return undefined;
     let active = true;
-    supabase.from("google_tokens").upsert({
-      user_id: session.user.id,
-      refresh_token: session.provider_refresh_token,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "user_id" }).then(({ error }) => {
+    supabase.functions.invoke("google-calendar", {
+      body: { action: "save-refresh-token", refreshToken: session.provider_refresh_token },
+    }).then(({ error }) => {
       if (!active || !error) return;
+      console.error("Não foi possível salvar a autorização da Agenda Google.", error.message);
+      setStorageError("Não foi possível guardar a autorização da Agenda Google. Confira se a atualização da função e da migração foi publicada.");
+    }).catch((error) => {
+      if (!active) return;
       console.error("Não foi possível salvar a autorização da Agenda Google.", error);
-      setStorageError("Não foi possível guardar a autorização da Agenda Google. Reconecte sua conta Google.");
+      setStorageError("Não foi possível guardar a autorização da Agenda Google. Confira sua conexão e tente novamente.");
     });
     return () => { active = false; };
   }, [session, supabase]);

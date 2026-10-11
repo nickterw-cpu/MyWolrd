@@ -142,7 +142,7 @@ O provedor Google retorna primeiro ao Supabase; a URL de redirecionamento do Sup
 
 ### Google Agenda ao vivo
 
-A conexão ao vivo usa o escopo somente leitura `https://www.googleapis.com/auth/calendar.readonly`. Depois de aplicar a migração `supabase/migrations/20261011000000_create_google_tokens.sql`, publique a Edge Function a partir da raiz do repositório:
+A conexão ao vivo usa o escopo somente leitura `https://www.googleapis.com/auth/calendar.readonly`. Aplique as migrações `supabase/migrations/20261011000000_create_google_tokens.sql` e `supabase/migrations/20261011010000_secure_google_tokens_writes.sql`, depois publique a Edge Function atualizada a partir da raiz do repositório:
 
 ```sh
 supabase functions deploy google-calendar
@@ -150,7 +150,7 @@ supabase functions deploy google-calendar
 
 O `supabase/config.toml` desativa a validação JWT automática do gateway **somente para essa função**, para que o preflight CORS `OPTIONS` do navegador possa chegar ao handler. A função valida o token Bearer com `auth.getUser()` antes de executar qualquer operação; não remova essa validação.
 
-No Supabase, configure `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` em **Edge Functions → Secrets**. São as credenciais do mesmo cliente OAuth configurado em **Authentication → Sign In / Providers → Google**. Nunca inclua o Client Secret em `.env.local`, no código frontend ou em variáveis `VITE_*`. A tabela `google_tokens` não concede leitura ao cliente; somente a Edge Function acessa os refresh tokens com a chave administrativa do ambiente Supabase.
+No Supabase, configure `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` em **Edge Functions → Secrets**. São as credenciais do mesmo cliente OAuth configurado em **Authentication → Sign In / Providers → Google**. Nunca inclua o Client Secret em `.env.local`, no código frontend ou em variáveis `VITE_*`. O navegador envia o refresh token à Edge Function autenticada, que o grava com o papel `service_role`; a tabela `google_tokens` não concede leitura nem escrita direta ao papel `authenticated`.
 
 Ao entrar ou reconectar pelo botão da agenda, o Google pede a permissão de leitura e o aplicativo guarda o refresh token. A Edge Function troca esse token por um access token, consulta a agenda principal em uma janela de 30 dias anteriores a 365 dias futuros e percorre todas as páginas. Os eventos em cache permanecem na Central e podem ser consultados offline, mas a atualização exige conexão. Se o Google revogar ou expirar a autorização, use **Reconectar Google** na tela da agenda.
 
