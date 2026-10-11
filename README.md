@@ -7,6 +7,10 @@ O repositório contém a Central em duas versões:
 
 A versão web usa autenticação Google. Os dados são separados por usuário no Supabase, com políticas RLS; use o mesmo Google nos aparelhos em que deseja acessar os dados. A atualização entre aparelhos é manual pelo botão **Atualizar dados**.
 
+## Dados iniciais e privacidade
+
+A versão web não inclui mais registros de demonstração nem cópias de dados importados no código-fonte. Uma conta Supabase sem registros começa com listas de conteúdo vazias; os dados já salvos por uma conta são carregados normalmente e não são apagados por esta alteração. Para trazer dados, use **Configurações → Importar backup**.
+
 ## Rodar localmente
 
 Requer Node.js 18 ou superior.
