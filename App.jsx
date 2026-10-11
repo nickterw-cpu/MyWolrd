@@ -3598,7 +3598,7 @@ function gcalSourceLabel(g) {
 }
 
 function GoogleAgendaView({ gcal, setGcal }) {
-  const [mode, setMode] = useState("mes");
+  const [mode, setMode] = useState(() => ["google", "ics-link"].includes(gcal.source) ? "lista" : "mes");
   const [offset, setOffset] = useState(0);
   const [showBreaks, setShowBreaks] = useState(false);
   const [query, setQuery] = useState("");
@@ -3662,7 +3662,9 @@ function GoogleAgendaView({ gcal, setGcal }) {
       </div>
     );
   } else {
-    const upcoming = all.filter((e) => gcalDayOf(e.e && e.ad ? e.e : e.s) >= today).sort((a, b) => a.s.localeCompare(b.s));
+    const upcoming = all.filter((e) => (
+      e.ad ? gcalDayOf(e.e) > today : gcalDayOf(e.s) >= today
+    )).sort((a, b) => a.s.localeCompare(b.s));
     rangeLabel = "próximos eventos";
     const months = [];
     upcoming.forEach((e) => {
@@ -3673,7 +3675,11 @@ function GoogleAgendaView({ gcal, setGcal }) {
     });
     body = (
       <div>
-        {months.length === 0 && <p className="cr-empty">Nenhum evento por enquanto. Use "Atualizar / conectar" para trazer sua agenda.</p>}
+        {months.length === 0 && <p className="cr-empty">
+          {all.length
+            ? `A agenda foi carregada com ${all.length} evento(s), mas não há eventos futuros no período consultado.`
+            : "Nenhum evento futuro por enquanto. Use \"Atualizar / conectar\" para trazer sua agenda."}
+        </p>}
         {months.map((m) => (
           <div key={m.ym}>
             <SectionTitle title={monthLabel(m.ym)} count={`${m.items.length} eventos`} />
@@ -3758,12 +3764,14 @@ function GoogleAgendaView({ gcal, setGcal }) {
           <p className="cr-sub" style={{ marginTop: 16 }}>Este evento vem do Google Agenda. Para editar ou excluir, use o próprio Google Agenda e depois atualize aqui.</p>
         </Modal>
       )}
-      {connect && <GoogleConnectModal gcal={gcal} setGcal={setGcal} onClose={() => setConnect(false)} />}
+      {connect && <GoogleConnectModal gcal={gcal} setGcal={setGcal}
+        onCalendarUpdated={() => { setMode("lista"); setOffset(0); setConnect(false); }}
+        onClose={() => setConnect(false)} />}
     </div>
   );
 }
 
-function GoogleConnectModal({ gcal, setGcal, onClose }) {
+function GoogleConnectModal({ gcal, setGcal, onCalendarUpdated, onClose }) {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [reconnectRequired, setReconnectRequired] = useState(false);
@@ -3790,9 +3798,12 @@ function GoogleConnectModal({ gcal, setGcal, onClose }) {
     try {
       const { events, updatedAt } = await fetchGoogleCalendarLive();
       const saved = await setGcal({ ...gcal, source: "google", icsUrl: "", updatedAt, events, lastError: "" });
-      setMsg(saved === false
-        ? "A agenda foi carregada, mas não foi possível salvar a atualização. Confira sua conexão e tente novamente."
-        : `Agenda atualizada: ${events.length} eventos da sua conta Google.`);
+      if (saved === false) {
+        setMsg("A agenda foi carregada, mas não foi possível salvar a atualização. Confira sua conexão e tente novamente.");
+        return;
+      }
+      onCalendarUpdated();
+      notify(`Agenda atualizada: ${events.length} evento(s) da sua conta Google.`);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Não consegui conectar à agenda Google.");
       setReconnectRequired(err?.reconnect === true);
@@ -3806,9 +3817,12 @@ function GoogleConnectModal({ gcal, setGcal, onClose }) {
     try {
       const { events, updatedAt } = await fetchSubscribedIcs(icsUrl.trim());
       const saved = await setGcal({ ...gcal, source: "ics-link", icsUrl: icsUrl.trim(), updatedAt, events, lastError: "" });
-      setMsg(saved === false
-        ? "A agenda foi carregada, mas não foi possível salvar a atualização. Confira sua conexão e tente novamente."
-        : `Assinatura atualizada: ${events.length} eventos carregados.`);
+      if (saved === false) {
+        setMsg("A agenda foi carregada, mas não foi possível salvar a atualização. Confira sua conexão e tente novamente.");
+        return;
+      }
+      onCalendarUpdated();
+      notify(`Assinatura atualizada: ${events.length} evento(s) carregado(s).`);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Não consegui carregar esse link .ics.");
     } finally {
