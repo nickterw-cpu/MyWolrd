@@ -142,11 +142,13 @@ O provedor Google retorna primeiro ao Supabase; a URL de redirecionamento do Sup
 
 ### Google Agenda ao vivo
 
-A conexão ao vivo usa o escopo somente leitura `https://www.googleapis.com/auth/calendar.readonly`. Depois de aplicar a migração `supabase/migrations/20261011000000_create_google_tokens.sql`, publique a Edge Function:
+A conexão ao vivo usa o escopo somente leitura `https://www.googleapis.com/auth/calendar.readonly`. Depois de aplicar a migração `supabase/migrations/20261011000000_create_google_tokens.sql`, publique a Edge Function a partir da raiz do repositório:
 
 ```sh
 supabase functions deploy google-calendar
 ```
+
+O `supabase/config.toml` desativa a validação JWT automática do gateway **somente para essa função**, para que o preflight CORS `OPTIONS` do navegador possa chegar ao handler. A função valida o token Bearer com `auth.getUser()` antes de executar qualquer operação; não remova essa validação.
 
 No Supabase, configure `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` em **Edge Functions → Secrets**. São as credenciais do mesmo cliente OAuth configurado em **Authentication → Sign In / Providers → Google**. Nunca inclua o Client Secret em `.env.local`, no código frontend ou em variáveis `VITE_*`. A tabela `google_tokens` não concede leitura ao cliente; somente a Edge Function acessa os refresh tokens com a chave administrativa do ambiente Supabase.
 
