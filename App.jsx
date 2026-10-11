@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef, createContext, useContext } from "react";
 import { reloadUserData, storageDelete, storageGet, storageSet } from "./src/lib/userData.js";
+import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { notify } from "./src/components/ToastHost.jsx";
@@ -3547,54 +3548,51 @@ function parseICS(text) {
   return events.sort((a, b) => a.s.localeCompare(b.s));
 }
 
-// ---------- conexão ao vivo (precisa de endereço https + ID de cliente do Google Cloud)
-function loadGoogleScript() {
-  return new Promise((resolve, reject) => {
-    if (window.google && window.google.accounts) return resolve();
-    const sc = document.createElement("script");
-    sc.src = "https://accounts.google.com/gsi/client";
-    sc.onload = () => resolve();
-    sc.onerror = () => reject(new Error("Não consegui carregar o login do Google (sem internet ou bloqueado)."));
-    document.head.appendChild(sc);
-  });
+async function callGoogleCalendarFunction(payload = {}) {
+  const { data, error } = await getSupabase().functions.invoke("google-calendar", { body: payload });
+  if (error) {
+    let responseBody = null;
+    if (error.context instanceof Response) {
+      try { responseBody = await error.context.clone().json(); } catch { responseBody = null; }
+    }
+    const failure = new Error(responseBody?.error || error.message || "Não foi possível acessar sua agenda Google.");
+    failure.reconnect = responseBody?.reconnect === true;
+    throw failure;
+  }
+  return data;
 }
-async function fetchGoogleCalendarLive(clientId) {
-  if (typeof location !== "undefined" && location.protocol === "file:") {
-    throw new Error("O Google não permite login a partir de um arquivo aberto direto no computador. Para a conexão ao vivo, o app precisa estar em um endereço https (hospedado) cadastrado no Google Cloud.");
+
+async function fetchGoogleCalendarLive() {
+  const data = await callGoogleCalendarFunction();
+  if (!Array.isArray(data?.events)) throw new Error("A resposta da agenda Google está inválida.");
+  return { events: data.events, updatedAt: data.updatedAt || new Date().toISOString() };
+}
+
+async function fetchSubscribedIcs(icsUrl) {
+  const data = await callGoogleCalendarFunction({ icsUrl });
+  if (typeof data?.ics !== "string") throw new Error("A resposta do link .ics está inválida.");
+  const events = parseICS(data.ics);
+  if (data.ics.includes("BEGIN:VEVENT") && events.length === 0) {
+    throw new Error("Não foi possível interpretar os eventos do link .ics.");
   }
-  await loadGoogleScript();
-  const token = await new Promise((resolve, reject) => {
-    const client = window.google.accounts.oauth2.initTokenClient({
-      client_id: clientId, scope: "https://www.googleapis.com/auth/calendar.readonly",
-      callback: (r) => (r.error ? reject(new Error(r.error_description || r.error)) : resolve(r.access_token)),
-    });
-    client.requestAccessToken();
+  return { events, updatedAt: new Date().toISOString() };
+}
+
+async function reconnectGoogleCalendar() {
+  const { error } = await getSupabase().auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: window.location.href,
+      scopes: "https://www.googleapis.com/auth/calendar.readonly",
+      queryParams: { access_type: "offline", prompt: "consent" },
+    },
   });
-  const now = new Date();
-  const timeMin = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30).toISOString();
-  const timeMax = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 365).toISOString();
-  const events = [];
-  let pageToken = "";
-  for (let page = 0; page < 8; page++) {
-    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=250&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}${pageToken ? "&pageToken=" + pageToken : ""}`;
-    const res = await fetch(url, { headers: { Authorization: "Bearer " + token } });
-    if (!res.ok) throw new Error("O Google respondeu com erro " + res.status + ". Confira se a API do Google Agenda está ativada no seu projeto.");
-    const data = await res.json();
-    (data.items || []).forEach((it) => {
-      if (it.status === "cancelled") return;
-      const ad = !!(it.start && it.start.date);
-      const s = ad ? it.start.date : gcalLocalStr(new Date(it.start.dateTime));
-      const e = ad ? it.end.date : gcalLocalStr(new Date(it.end.dateTime));
-      events.push({ id: it.id, t: it.summary || "(sem título)", s, e, ad, loc: it.location || "", meet: it.hangoutLink || findMeetLink(it.description), url: it.htmlLink || "" });
-    });
-    pageToken = data.nextPageToken || "";
-    if (!pageToken) break;
-  }
-  return events;
+  if (error) throw error;
 }
 
 function gcalSourceLabel(g) {
   if (g.source === "google") return "conexão ao vivo com o Google";
+  if (g.source === "ics-link") return "assinatura do Google Agenda por link .ics";
   if (g.source === "ics") return "arquivo .ics que você enviou";
   return "nenhuma agenda conectada ainda";
 }
@@ -3709,6 +3707,7 @@ function GoogleAgendaView({ gcal, setGcal }) {
                 ? "Nenhuma agenda conectada ainda. Quando você enviar o arquivo .ics ou conectar sua conta, os eventos reais aparecem aqui. Esta visão não mistura com as Rotinas."
                 : `Fonte: ${gcalSourceLabel(gcal)}${updated ? `, atualizada em ${updated.toLocaleDateString("pt-BR")} às ${updated.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}. Esta visão não mistura com as Rotinas.`}
             </p>
+            {gcal.lastError && <p className="cr-sub" role="alert" style={{ color: "#7A1712", margin: "8px 0 0" }}>{gcal.lastError} Abra "Atualizar / conectar" para tentar de novo.</p>}
           </div>
           <div className="cr-row">
             <button className="cr-btn primary" onClick={() => setConnect(true)}>Atualizar / conectar</button>
@@ -3767,7 +3766,8 @@ function GoogleAgendaView({ gcal, setGcal }) {
 function GoogleConnectModal({ gcal, setGcal, onClose }) {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  const [clientId, setClientId] = useState(gcal.clientId || "");
+  const [reconnectRequired, setReconnectRequired] = useState(false);
+  const [icsUrl, setIcsUrl] = useState(gcal.icsUrl || "");
 
   const onFile = (e) => {
     const f = e.target.files && e.target.files[0];
@@ -3777,28 +3777,58 @@ function GoogleConnectModal({ gcal, setGcal, onClose }) {
       try {
         const events = parseICS(String(reader.result));
         if (!events.length) { setMsg("Não encontrei eventos nesse arquivo. Confira se é o .ics do seu calendário."); return; }
-        setGcal({ ...gcal, source: "ics", updatedAt: new Date().toISOString(), events });
+        setGcal({ ...gcal, source: "ics", icsUrl: "", updatedAt: new Date().toISOString(), events, lastError: "" });
         setMsg(`Pronto: ${events.length} eventos carregados do arquivo.`);
-      } catch (err) { setMsg("Não consegui ler esse arquivo."); }
+      } catch (err) { setMsg(err instanceof Error ? `Não consegui ler esse arquivo: ${err.message}` : "Não consegui ler esse arquivo."); }
     };
     reader.onerror = () => setMsg("Não consegui abrir o arquivo.");
     reader.readAsText(f);
   };
   const live = async () => {
-    if (!clientId.trim()) { setMsg("Cole primeiro o ID de cliente do Google Cloud."); return; }
+    setBusy(true); setMsg("");
+    setReconnectRequired(false);
+    try {
+      const { events, updatedAt } = await fetchGoogleCalendarLive();
+      const saved = await setGcal({ ...gcal, source: "google", icsUrl: "", updatedAt, events, lastError: "" });
+      setMsg(saved === false
+        ? "A agenda foi carregada, mas não foi possível salvar a atualização. Confira sua conexão e tente novamente."
+        : `Agenda atualizada: ${events.length} eventos da sua conta Google.`);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Não consegui conectar à agenda Google.");
+      setReconnectRequired(err?.reconnect === true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const subscribe = async () => {
+    if (!icsUrl.trim()) { setMsg("Cole o link secreto .ics da sua agenda Google."); return; }
+    setBusy(true); setMsg(""); setReconnectRequired(false);
+    try {
+      const { events, updatedAt } = await fetchSubscribedIcs(icsUrl.trim());
+      const saved = await setGcal({ ...gcal, source: "ics-link", icsUrl: icsUrl.trim(), updatedAt, events, lastError: "" });
+      setMsg(saved === false
+        ? "A agenda foi carregada, mas não foi possível salvar a atualização. Confira sua conexão e tente novamente."
+        : `Assinatura atualizada: ${events.length} eventos carregados.`);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Não consegui carregar esse link .ics.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const reconnect = async () => {
     setBusy(true); setMsg("");
     try {
-      const events = await fetchGoogleCalendarLive(clientId.trim());
-      setGcal({ ...gcal, source: "google", updatedAt: new Date().toISOString(), events, clientId: clientId.trim() });
-      setMsg(`Conectado: ${events.length} eventos da sua conta do Google.`);
-    } catch (err) { setMsg(err.message || "Não consegui conectar."); }
-    setBusy(false);
+      await reconnectGoogleCalendar();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Não consegui iniciar a reconexão com o Google.");
+      setBusy(false);
+    }
   };
-  const restore = () => { setGcal({ ...gcal, source: "empty", updatedAt: "", events: [] }); setMsg("Agenda esvaziada. Envie outro arquivo .ics ou conecte outra conta."); };
+  const restore = () => { setGcal({ source: "empty", updatedAt: "", events: [] }); setIcsUrl(""); setMsg("Agenda esvaziada. Envie outro arquivo .ics ou conecte outra conta."); };
 
   return (
     <Modal title="Atualizar ou conectar o Google Agenda" onClose={onClose}>
-      {msg && <div className="cr-card" style={{ borderColor: GCAL_BLUE, marginBottom: 14 }}><strong>{msg}</strong></div>}
+      {msg && <div className="cr-card" role="status" style={{ borderColor: GCAL_BLUE, marginBottom: 14 }}><strong>{msg}</strong></div>}
 
       <h3 className="cr-serif" style={{ fontSize: 17 }}>1. Enviar o arquivo da sua agenda (.ics), funciona em qualquer lugar</h3>
       <ol className="cr-sub" style={{ lineHeight: 1.7 }}>
@@ -3808,18 +3838,22 @@ function GoogleConnectModal({ gcal, setGcal, onClose }) {
       </ol>
       <input type="file" accept=".ics,text/calendar" className="cr-input" onChange={onFile} />
 
-      <h3 className="cr-serif" style={{ fontSize: 17, marginTop: 26 }}>2. Conexão ao vivo com o Google (avançado)</h3>
+      <h3 className="cr-serif" style={{ fontSize: 17, marginTop: 26 }}>2. Conexão ao vivo com o Google</h3>
       <p className="cr-sub">
-        Possível, mas exige configuração sua: criar um projeto no Google Cloud, ativar a API do Google Agenda, criar um "ID de cliente OAuth" e cadastrar o endereço https onde este app está hospedado.
-        Não funciona a partir de arquivo aberto no computador nem dentro da prévia do Claude. Não consegui testar esta conexão daqui, então use o item 1 se algo falhar.
+        Atualize sua agenda com a conta Google conectada à Central. O acesso é somente leitura e não exige colar credenciais nesta tela.
       </p>
-      <div className="cr-row" style={{ flexWrap: "nowrap" }}>
-        <input className="cr-input" placeholder="ID de cliente (termina com .apps.googleusercontent.com)" value={clientId} onChange={(e) => setClientId(e.target.value)} />
-        <button className="cr-btn primary" disabled={busy} onClick={live}>{busy ? "Conectando…" : "Conectar ao Google"}</button>
+      <div className="cr-row" style={{ flexWrap: "wrap" }}>
+        <button className="cr-btn primary" disabled={busy} onClick={live}>{busy ? "Conectando…" : "Conectar / atualizar agenda"}</button>
+        {reconnectRequired && <button className="cr-btn" disabled={busy} onClick={reconnect}>Reconectar Google</button>}
       </div>
 
-      <h3 className="cr-serif" style={{ fontSize: 17, marginTop: 26 }}>3. Pedir para o Claude atualizar</h3>
-      <p className="cr-sub">Numa conversa com o Claude conectada à conta do Google que você quiser, peça "coloque minha agenda no app". Ele gera uma cópia dos eventos reais para colocar aqui.</p>
+      <h3 className="cr-serif" style={{ fontSize: 17, marginTop: 26 }}>3. Assinar por link .ics (opcional)</h3>
+      <p className="cr-sub">Cole o link secreto .ics do Google Agenda. Ele será guardado junto com os dados da agenda para atualizar a cópia de eventos quando você abrir o app. Trate esse link como uma senha.</p>
+      <div className="cr-row" style={{ flexWrap: "wrap" }}>
+        <input type="url" className="cr-input" placeholder="https://calendar.google.com/calendar/ical/…" value={icsUrl} onChange={(e) => setIcsUrl(e.target.value)} />
+        <button className="cr-btn primary" disabled={busy} onClick={subscribe}>{busy ? "Buscando…" : "Assinar / atualizar .ics"}</button>
+      </div>
+
       <button className="cr-btn" onClick={restore}>Esvaziar esta agenda (para conectar outra conta)</button>
 
       <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 20 }}>
@@ -6636,7 +6670,7 @@ export default function App({ onSignOut }) {
       { const rs = reconcileLists(finalSettings, { goals: finalGoals, beauty: finalBeauty, selfcare: finalSelfcare, hobbies: finalHobbies, career: finalCareer, study: finalStudy, tasks: finalTasks, shopping: finalShopping, habits: finalHabits });
         if (rs !== finalSettings) { finalSettings = rs; bg(storageSet(KEYS.settings, finalSettings)); } }
       // Google Agenda: usa o que você enviou/conectou; a cópia do Claude só é trocada por uma mais nova
-      { const usable = gcalSaved && (gcalSaved.source === "ics" || gcalSaved.source === "google");
+      { const usable = gcalSaved && (gcalSaved.source === "ics" || gcalSaved.source === "ics-link" || gcalSaved.source === "google");
         setGcalState(usable ? gcalSaved : { source: "empty", updatedAt: "", events: [], clientId: (gcalSaved && gcalSaved.clientId) || "" }); }
       setStudyAreasState(finalStudyAreas);
       setPagesState(pgs || []); setPlacesState(plc || []); setInvestmentsState(inv || []);
@@ -6706,6 +6740,25 @@ export default function App({ onSignOut }) {
   const setAccounts = useCallback((v) => { setAccountsState(v); return storageSet(KEYS.accounts, v); }, []);
   const setCards = useCallback((v) => { setCardsState(v); return storageSet(KEYS.cards, v); }, []);
   const setGcal = useCallback((v) => { setGcalState(v); return storageSet(KEYS.gcal, v); }, []);
+  const automaticCalendarRefresh = useRef(false);
+  useEffect(() => {
+    if (!loaded || automaticCalendarRefresh.current || !["google", "ics-link"].includes(gcal.source)) return;
+    automaticCalendarRefresh.current = true;
+    const refresh = async () => {
+      try {
+        const result = gcal.source === "google"
+          ? await fetchGoogleCalendarLive()
+          : await fetchSubscribedIcs(gcal.icsUrl);
+        const saved = await setGcal({ ...gcal, ...result, lastError: "" });
+        if (saved === false) throw new Error("A agenda foi atualizada, mas não foi possível salvar a cópia. Confira a conexão.");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Não foi possível atualizar a agenda.";
+        setGcal({ ...gcal, lastError: message });
+        notify(message);
+      }
+    };
+    void refresh();
+  }, [gcal, loaded, setGcal]);
   const setStudyAreas = useCallback((v) => { setStudyAreasState(v); return storageSet(KEYS.studyareas, v); }, []);
   const setPages = useCallback((v) => { setPagesState(v); return storageSet(KEYS.pages, v); }, []);
   const setPlaces = useCallback((v) => { setPlacesState(v); return storageSet(KEYS.places, v); }, []);

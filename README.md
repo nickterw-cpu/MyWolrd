@@ -140,6 +140,22 @@ Aplique o arquivo `supabase/migrations/20261010220000_create_central_user_data.s
 
 O provedor Google retorna primeiro ao Supabase; a URL de redirecionamento do Supabase é diferente da URL de callback do provedor no Google Cloud.
 
+### Google Agenda ao vivo
+
+A conexão ao vivo usa o escopo somente leitura `https://www.googleapis.com/auth/calendar.readonly`. Depois de aplicar a migração `supabase/migrations/20261011000000_create_google_tokens.sql`, publique a Edge Function:
+
+```sh
+supabase functions deploy google-calendar
+```
+
+No Supabase, configure `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` em **Edge Functions → Secrets**. São as credenciais do mesmo cliente OAuth configurado em **Authentication → Sign In / Providers → Google**. Nunca inclua o Client Secret em `.env.local`, no código frontend ou em variáveis `VITE_*`. A tabela `google_tokens` não concede leitura ao cliente; somente a Edge Function acessa os refresh tokens com a chave administrativa do ambiente Supabase.
+
+Ao entrar ou reconectar pelo botão da agenda, o Google pede a permissão de leitura e o aplicativo guarda o refresh token. A Edge Function troca esse token por um access token, consulta a agenda principal em uma janela de 30 dias anteriores a 365 dias futuros e percorre todas as páginas. Os eventos em cache permanecem na Central e podem ser consultados offline, mas a atualização exige conexão. Se o Google revogar ou expirar a autorização, use **Reconectar Google** na tela da agenda.
+
+Como alternativa, **Assinar por link .ics** busca o arquivo privado do Google pela Edge Function, contornando o CORS do navegador. O link da agenda é secreto: fica guardado nos dados da agenda e incluído nos backups. A importação manual de arquivo `.ics` continua disponível.
+
+Para configurar o Google Cloud: ative a Google Calendar API, configure a tela de consentimento OAuth com `calendar.readonly`, cadastre o callback do Supabase nas URIs de redirecionamento autorizadas e configure as URLs de retorno da aplicação no Supabase. Em modo de teste, o Google pode expirar refresh tokens depois de sete dias; para uso contínuo, publique o consentimento conforme os requisitos do Google.
+
 ## Publicar na Vercel
 
 1. Importe o repositório do GitHub na Vercel.
@@ -164,6 +180,7 @@ O arquivo `vercel.json` encaminha as rotas da aplicação para `index.html`, per
 | `src/styles.css` | Estilos da aplicação web |
 | `public/` | Ícones da aplicação instalável |
 | `supabase/migrations/` | Esquema da tabela e políticas RLS |
+| `supabase/functions/google-calendar/` | Acesso seguro à Google Calendar API e proxy .ics |
 | `central.html` | Versão independente, com dados locais no navegador |
 | `vercel.json` | Reescrita das rotas SPA na Vercel |
 

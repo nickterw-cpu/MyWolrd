@@ -50,12 +50,31 @@ export default function AppShell() {
     return () => window.removeEventListener("central:storage-error", showStorageError);
   }, []);
 
+  useEffect(() => {
+    if (!session?.provider_refresh_token || !supabase) return undefined;
+    let active = true;
+    supabase.from("google_tokens").upsert({
+      user_id: session.user.id,
+      refresh_token: session.provider_refresh_token,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" }).then(({ error }) => {
+      if (!active || !error) return;
+      console.error("Não foi possível salvar a autorização da Agenda Google.", error);
+      setStorageError("Não foi possível guardar a autorização da Agenda Google. Reconecte sua conta Google.");
+    });
+    return () => { active = false; };
+  }, [session, supabase]);
+
   const signInWithGoogle = useCallback(async () => {
     setAuthError("");
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: window.location.origin },
+        options: {
+          redirectTo: window.location.origin,
+          scopes: "https://www.googleapis.com/auth/calendar.readonly",
+          queryParams: { access_type: "offline", prompt: "consent" },
+        },
       });
       if (error) throw error;
     } catch (error) {
