@@ -1,8 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { corsHeaders as supabaseCorsHeaders } from "npm:@supabase/supabase-js@2/cors";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+  ...supabaseCorsHeaders,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -53,7 +53,20 @@ function validateIcsUrl(value: unknown): URL | null {
   return url;
 }
 
-Deno.serve(async (request) => {
+function getKeyFromEnvironment(value: string | undefined, name: string): string | null {
+  if (!value) return null;
+  let keys: Record<string, unknown>;
+  try {
+    keys = JSON.parse(value);
+  } catch (error) {
+    console.error(`A variável ${name} não contém um mapa JSON válido.`, error);
+    return null;
+  }
+  const key = keys.default;
+  return typeof key === "string" && key.length > 0 ? key : null;
+}
+
+async function handleRequest(request: Request): Promise<Response> {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return jsonResponse({ error: "Método não permitido." }, 405);
 
@@ -72,8 +85,11 @@ Deno.serve(async (request) => {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const anonKey = request.headers.get("apikey")
+    || Deno.env.get("SUPABASE_ANON_KEY")
+    || getKeyFromEnvironment(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS"), "SUPABASE_PUBLISHABLE_KEYS");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+    || getKeyFromEnvironment(Deno.env.get("SUPABASE_SECRET_KEYS"), "SUPABASE_SECRET_KEYS");
   const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
   const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
   if (!supabaseUrl || !anonKey || !serviceRoleKey) {
@@ -186,4 +202,13 @@ Deno.serve(async (request) => {
   } while (pageToken);
 
   return jsonResponse({ events, updatedAt: new Date().toISOString() });
+}
+
+Deno.serve(async (request) => {
+  try {
+    return await handleRequest(request);
+  } catch (error) {
+    console.error("Erro inesperado na Edge Function google-calendar.", error);
+    return jsonResponse({ error: "Ocorreu um erro interno ao acessar a agenda Google." }, 500);
+  }
 });
