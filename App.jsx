@@ -84,10 +84,10 @@ function isFormReady(form) {
 }
 
 // Salva sozinho, pouco depois de qualquer alteração (e ao fechar a janela).
-function useAutoSave(form, onSave, finalize, forcedId) {
+function useAutoSave(form, onSave, finalize, forcedId, isReady = isFormReady) {
   const [status, setStatus] = useState("");
-  const latest = useRef({ form, onSave, finalize });
-  latest.current = { form, onSave, finalize };
+  const latest = useRef({ form, onSave, finalize, isReady });
+  latest.current = { form, onSave, finalize, isReady };
   const timer = useRef(null);
   const dirty = useRef(false);
   const mounted = useRef(true);
@@ -98,8 +98,8 @@ function useAutoSave(form, onSave, finalize, forcedId) {
     clearTimeout(timer.current);
     timer.current = null;
     if (!dirty.current) return;
-    const { form: f, onSave: save, finalize: fin } = latest.current;
-    if (!isFormReady(f)) { if (mounted.current) setStatus(""); return; }
+    const { form: f, onSave: save, finalize: fin, isReady: ready } = latest.current;
+    if (!ready(f)) { if (mounted.current) setStatus(""); return; }
     dirty.current = false;
     const data = fin ? fin(f) : f;
     if (!data) { if (mounted.current) setStatus(""); return; }
@@ -156,12 +156,21 @@ function toggleTaskDone(tasks, id) {
   const target = tasks.find((x) => x.id === id);
   if (!target) return tasks;
   const nowDone = !target.done;
-  let next = tasks.map((x) => (x.id === id ? { ...x, done: nowDone, doneAt: nowDone ? todayStr() : "" } : x));
+  const nextStatus = defaultTaskStatus(nowDone);
+  let next = tasks.map((x) => (x.id === id ? {
+    ...x,
+    done: nowDone,
+    status: nextStatus.id,
+    doneAt: nowDone ? todayStr() : "",
+  } : x));
   if (nowDone && target.repeat && target.repeat !== "nenhuma" && !target.nextCreated && target.dueDate) {
     const nextDate = nextRecurringDate(target.dueDate, target.repeat);
     if (nextDate) {
       next = next.map((x) => (x.id === id ? { ...x, nextCreated: true } : x));
-      next = [{ ...target, id: uid(), dueDate: nextDate, done: false, doneAt: "", nextCreated: false }, ...next];
+      next = [{
+        ...target, id: uid(), dueDate: nextDate, done: false, status: defaultTaskStatus(false).id,
+        doneAt: "", nextCreated: false,
+      }, ...next];
     }
   }
   return next;
@@ -249,6 +258,14 @@ const LIST_REGISTRY = {
     label: "Prioridades", colorFlag: true, usedBy: [["tasks", "priority"], ["shopping", "priority"]],
     defaults: [{ id: "alta", name: "Alta", color: "#C8453A" }, { id: "media", name: "Média", color: "#E3B22E" }, { id: "baixa", name: "Baixa", color: "#F2B27C" }],
   },
+  taskStatus: {
+    label: "Status das tarefas", closedFlag: true, flagLabel: "conclui a tarefa", usedBy: [["tasks", "status"]],
+    defaults: [
+      { id: "pendente", name: "Pendente" },
+      { id: "em andamento", name: "Em andamento" },
+      { id: "concluida", name: "Concluída", closed: true },
+    ],
+  },
   routineCategory: {
     label: "Categorias das rotinas (cores do calendário)", colorFlag: true,
     defaults: [
@@ -333,6 +350,15 @@ function listName(key, id) {
 function isClosedItem(key, id) {
   const it = getList(key).find((i) => i.id === id);
   return !!(it && it.closed);
+}
+function defaultTaskStatus(done = false) {
+  const statuses = getList("taskStatus");
+  return statuses.find((status) => !!status.closed === done) || statuses[0] || { id: "" };
+}
+function taskStatusId(task) {
+  const statuses = getList("taskStatus");
+  if (task.status && statuses.some((status) => status.id === task.status)) return task.status;
+  return defaultTaskStatus(!!task.done).id;
 }
 function getPriceBands() { return Array.isArray(ACTIVE_SETTINGS.priceBands) ? ACTIVE_SETTINGS.priceBands : DEFAULT_PRICE_BANDS; }
 
@@ -815,7 +841,7 @@ const GlobalStyle = () => (
     }
     .cr-navitem:hover { background: #F3EDE4; color: var(--ink); }
     .cr-navitem.active { background: #F0DAD3; color: var(--ink); font-weight: 600; }
-    .cr-main { flex: 1; padding: 28px 36px 60px; max-width: 1180px; height: 100dvh; overflow-y: auto; }
+    .cr-main { flex: 1; min-width: 0; padding: 28px 36px 60px; max-width: 1180px; height: 100dvh; overflow-y: auto; }
     .cr-h1 { font-size: 26px; margin: 0 0 4px; }
     .cr-sub { color: var(--ink-soft); font-size: 14px; margin: 0 0 24px; }
     .cr-card {
@@ -850,8 +876,9 @@ const GlobalStyle = () => (
     .cr-progress-fill { height: 100%; border-radius: 8px; background: var(--clay); }
     .cr-list-row {
       display: flex; align-items: center; gap: 12px; padding: 10px 4px;
-      border-bottom: 1px solid var(--line);
+      min-width: 0; border-bottom: 1px solid var(--line);
     }
+    .cr-list-row > span { overflow-wrap: anywhere; }
     .cr-list-row:last-child { border-bottom: none; }
     .cr-checkbox {
       width: 19px; height: 19px; border-radius: 6px; border: 1.5px solid #C9BEAE;
@@ -883,15 +910,25 @@ const GlobalStyle = () => (
     .cr-heat { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
     .cr-heat-cell { aspect-ratio: 1; border-radius: 4px; background: #EFE8DE; }
     .cr-mobile-nav, .cr-mobile-drawer-backdrop { display: none; }
+    @media (min-width: 861px) and (max-width: 1100px) {
+      .cr-main { padding-right: 24px; padding-left: 24px; }
+      .cr-grid-3, .cr-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
     @media (max-width: 860px) {
       .central-root { flex-direction: column; height: 100dvh; min-height: 100dvh; overflow: hidden; }
       .cr-sidebar { display: none; }
       .cr-fullpage { left: 0; }
       .cr-fullpage { padding-bottom: env(safe-area-inset-bottom); }
-      .cr-fullpage-head { padding: calc(12px + env(safe-area-inset-top)) 16px 12px; }
+      .cr-fullpage-head { flex-wrap: wrap; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; }
       .cr-fullpage-body { padding: 16px 16px calc(80px + env(safe-area-inset-bottom)); }
       .cr-main { width: 100%; max-width: none; min-height: 0; height: auto; overflow-y: auto; padding: calc(18px + env(safe-area-inset-top)) 16px calc(92px + env(safe-area-inset-bottom)); }
       .cr-grid-2, .cr-grid-3, .cr-grid-4 { grid-template-columns: 1fr; }
+      .cr-row { flex-wrap: wrap; }
+      .cr-row > .cr-field { flex: 1 1 220px !important; min-width: 0; }
+      .cr-list-row { flex-wrap: wrap; gap: 8px; }
+      .cr-list-row > * { min-width: 0; }
+      .cr-modal-backdrop { padding: 8px; }
+      .cr-modal { max-height: calc(100dvh - 16px); padding: 18px; }
       .cr-mobile-nav {
         position: fixed; z-index: 40; right: 0; bottom: 0; left: 0;
         display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px;
@@ -1444,21 +1481,22 @@ function fmtWeekday(dateStr) {
 function TasksView({ tasks, setTasks, areas, embedded }) {
   const [filterArea, setFilterArea] = useState("todas");
   const [filterStatus, setFilterStatus] = useState("todas");
+  const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null); // task object or "new"
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState("lista");
   const [anchorDate, setAnchorDate] = useState(todayStr());
   const [showDone, setShowDone] = useState(false);
   const doneCount = tasks.filter((t) => t.done).length;
-  const showDoneNow = showDone || filterStatus === "concluidas";
+  const selectedStatus = getList("taskStatus").find((status) => status.id === filterStatus);
+  const showDoneNow = showDone || !!selectedStatus?.closed;
   const visibleTasks = tasks.filter((t) => showDoneNow || !t.done);
 
   const filtered = tasks.filter((tk) => {
     if (!showDoneNow && tk.done) return false;
     if (filterArea !== "todas" && tk.area !== filterArea) return false;
-    if (filterStatus === "pendentes" && tk.done) return false;
-    if (filterStatus === "concluidas" && !tk.done) return false;
     if (filterStatus === "atrasadas" && (tk.done || !tk.dueDate || tk.dueDate >= todayStr())) return false;
+    if (filterStatus !== "todas" && filterStatus !== "atrasadas" && taskStatusId(tk) !== filterStatus) return false;
     if (query && !tk.title.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   }).sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
@@ -1499,12 +1537,13 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
               <option value="todas">Todas as áreas</option>
               {areas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
+            <button className="cr-btn" title="Gerenciar áreas" onClick={() => ctx.openAreas()}><SettingsIcon size={13} /> Gerenciar áreas</button>
             <select className="cr-select" style={{ maxWidth: 160 }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
               <option value="todas">Todos os status</option>
-              <option value="pendentes">Pendentes</option>
+              {getList("taskStatus").map((status) => <option key={status.id} value={status.id}>{status.name}</option>)}
               <option value="atrasadas">Atrasadas</option>
-              <option value="concluidas">Concluídas</option>
             </select>
+            <button className="cr-btn" title="Gerenciar status" onClick={() => ctx.openManager("taskStatus")}><SettingsIcon size={13} /> Gerenciar status</button>
           </div>
           <div className="cr-card">
             {filtered.length === 0 && <p className="cr-empty">Nenhuma tarefa encontrada.</p>}
@@ -1518,6 +1557,7 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
                 <span style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none", color: tk.done ? "var(--ink-soft)" : "var(--ink)" }}>{tk.title}</span>
                 {tk.repeat && tk.repeat !== "nenhuma" && <span className="cr-chip">↻ {tk.repeat}</span>}
                 {tk.dueDate && <span className="cr-chip" style={isOverdue ? { background: "#F6DEDA", color: "#A1493C" } : undefined}>{isOverdue ? "atrasada · " : ""}{fmtDateShort(tk.dueDate)}{tk.time ? ` ${tk.time}` : ""}</span>}
+                <span className="cr-chip">{listName("taskStatus", taskStatusId(tk))}</span>
                 <PriorityChip id={tk.priority} />
                 <AreaBadge area={tk.area} areas={areas} />
                 {tk.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(tk.link)}><Link2 size={12} /></button>}
@@ -1640,7 +1680,9 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
 }
 
 function TaskModal({ task, areas, onSave, onClose }) {
-  const [form, setForm] = useState(task || { title: "", area: areas[0]?.id, priority: "media", dueDate: todayStr(), time: "", link: "", done: false });
+  const [form, setForm] = useState(task
+    ? { ...task, status: taskStatusId(task) }
+    : { title: "", area: areas[0]?.id, priority: "media", dueDate: todayStr(), time: "", link: "", done: false, status: defaultTaskStatus(false).id });
   const autoStatus = useAutoSave(form, onSave, undefined);
   return (
     <Modal title={task ? "Editar tarefa" : "Nova tarefa"} onClose={onClose}>
@@ -1656,6 +1698,11 @@ function TaskModal({ task, areas, onSave, onClose }) {
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Prioridade</label>
           <ManagedSelect listKey="priority" value={form.priority} onChange={(v) => setForm({ ...form, priority: v })} /></div>
       </div>
+      <div className="cr-field"><label className="cr-label">Status</label>
+        <ManagedSelect listKey="taskStatus" value={form.status} onChange={(v) => {
+          const done = isClosedItem("taskStatus", v);
+          setForm({ ...form, status: v, done, doneAt: done ? (form.doneAt || todayStr()) : "" });
+        }} /></div>
       <div className="cr-field"><label className="cr-label">Repetir</label>
         <select className="cr-select" value={form.repeat || "nenhuma"} onChange={(e) => setForm({ ...form, repeat: e.target.value })}>
           <option value="nenhuma">Não repete</option><option value="diaria">Todo dia</option><option value="semanal">Toda semana</option>
@@ -2098,7 +2145,7 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
 
   const save = (data) => {
     const { installmentsCount, recurringEnabled, recurringMonths, ...base } = data;
-    setFinance(upsertById(finance, base));
+    return setFinance(upsertById(finance, base));
   };
   // parcelamento e recorrência geram vários lançamentos de uma vez, então têm um botão próprio
   const generate = (data) => {
@@ -2482,6 +2529,8 @@ function InvestmentModal({ item, categories, onSave, onClose }) {
 
 function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, cards, paymentMethods, categories }) {
   const ctx = useContext(ListsContext);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [form, setForm] = useState(item || {
     type: "saida", category: categories[0] || "", amount: "", date: todayStr(), desc: "",
     paymentMethod: "Pix", status: "pago", accountId: "", cardId: "", link: "",
@@ -2494,7 +2543,25 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
   const autoStatus = useAutoSave(form, onSave, (f) => {
     const gen = !isEdit && ((f.paymentMethod === "Crédito" && Number(f.installmentsCount) > 1) || !!f.recurringEnabled);
     return gen ? null : { ...f, amount: Number(f.amount) || 0 };
-  }, draftId.current);
+  }, draftId.current, (f) => Number(f.amount) > 0 && !!f.date);
+  const saveTransaction = async () => {
+    if (!(Number(form.amount) > 0) || !form.date || saving) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const saved = await onSave({ ...form, id: item?.id || draftId.current, amount: Number(form.amount) });
+      if (saved === false) {
+        setSaveError("Não foi possível confirmar o salvamento. Verifique a conexão e tente novamente.");
+        return;
+      }
+      onClose();
+    } catch (error) {
+      console.error("Não foi possível salvar o lançamento financeiro.", error);
+      setSaveError(error instanceof Error ? error.message : "Não foi possível salvar o lançamento. Tente novamente.");
+    } finally {
+      setSaving(false);
+    }
+  };
   useEffect(() => { if (needsGeneration && onDiscard) onDiscard(draftId.current); }, [needsGeneration]);
 
   return (
@@ -2512,7 +2579,7 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
       </div>
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor total (R$)</label>
-          <input type="number" className="cr-input" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
+          <input type="number" min="0.01" step="0.01" className="cr-input" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Data</label>
           <input type="date" className="cr-input" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
       </div>
@@ -2588,7 +2655,13 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
           </button>
         </div>
       ) : (
-        <AutoSaveFooter status={autoStatus} onClose={onClose} />
+        <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 14, alignItems: "center" }}>
+          <span className="cr-sub" style={{ margin: 0, fontSize: 12 }}>
+            {saveError || (saving ? "Salvando lançamento…" : autoStatus === "salvando" ? "Salvando…" : autoStatus === "salvo" ? "✓ Salvo automaticamente" : "Informe um valor maior que zero para salvar.")}
+          </span>
+          <button type="button" className="cr-btn primary" onClick={saveTransaction}
+            disabled={saving || !(Number(form.amount) > 0) || !form.date}>Salvar lançamento</button>
+        </div>
       )}
     </Modal>
   );
@@ -6687,6 +6760,17 @@ export default function App({ onSignOut }) {
       // Valores que já existem nos dados entram nas listas editáveis, assim nada some da tela
       { const rs = reconcileLists(finalSettings, { goals: finalGoals, beauty: finalBeauty, selfcare: finalSelfcare, hobbies: finalHobbies, career: finalCareer, study: finalStudy, tasks: finalTasks, shopping: finalShopping, habits: finalHabits });
         if (rs !== finalSettings) { finalSettings = rs; bg(storageSet(KEYS.settings, finalSettings)); } }
+      // Dá um status editável às tarefas antigas sem alterar seu estado de conclusão.
+      { const statuses = Array.isArray(finalSettings.lists?.taskStatus) ? finalSettings.lists.taskStatus : LIST_REGISTRY.taskStatus.defaults;
+        let changed = false;
+        finalTasks = finalTasks.map((task) => {
+          if (typeof task.status === "string") return task;
+          const status = statuses.find((item) => !!item.closed === !!task.done) || statuses[0];
+          if (!status) return task;
+          changed = true;
+          return { ...task, status: status.id };
+        });
+        if (changed) bg(storageSet(KEYS.tasks, finalTasks)); }
       // Google Agenda: usa o que você enviou/conectou; a cópia do Claude só é trocada por uma mais nova
       { const usable = gcalSaved && (gcalSaved.source === "ics" || gcalSaved.source === "ics-link" || gcalSaved.source === "google");
         setGcalState(usable ? gcalSaved : { source: "empty", updatedAt: "", events: [], clientId: (gcalSaved && gcalSaved.clientId) || "" }); }

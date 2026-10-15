@@ -20,7 +20,9 @@ A aplicação web reúne:
 - Exportação e importação de backup em JSON.
 - Instalação da aplicação web como PWA em celulares e computadores compatíveis.
 
-As páginas e categorias disponíveis podem ser personalizadas nas configurações.
+A interface adapta os menus, formulários, filtros e listas para celular, tablet e computador. Áreas, status e categorias podem ser gerenciados nas próprias telas ou em **Configurações → Listas, categorias e status**; objetivos de investimentos também são editáveis na área de investimentos. As mudanças atualizam os formulários e filtros sem apagar os registros associados.
+
+Lançamentos financeiros podem ser salvos automaticamente após informar um valor válido ou pelo botão **Salvar lançamento**. Eles permanecem sincronizados com a conta no Supabase e podem ser editados ou excluídos na lista.
 
 ## Instalar no celular
 
