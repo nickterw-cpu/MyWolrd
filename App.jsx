@@ -848,12 +848,13 @@ const GlobalStyle = () => (
     .cr-sub { color: var(--ink-soft); font-size: 14px; margin: 0 0 24px; }
     .cr-card {
       background: var(--card); border: 1px solid var(--line); border-radius: 16px;
-      padding: 18px 20px;
+      padding: 18px 20px; min-width: 0;
     }
     .cr-grid { display: grid; gap: 16px; }
-    .cr-grid-2 { grid-template-columns: repeat(2, 1fr); }
-    .cr-grid-3 { grid-template-columns: repeat(3, 1fr); }
-    .cr-grid-4 { grid-template-columns: repeat(4, 1fr); }
+    .cr-grid > * { min-width: 0; }
+    .cr-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cr-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .cr-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .cr-row { display: flex; align-items: center; gap: 10px; }
     .cr-btn {
       display: inline-flex; align-items: center; gap: 6px; border-radius: 10px;
@@ -880,6 +881,7 @@ const GlobalStyle = () => (
       display: flex; align-items: center; gap: 12px; padding: 10px 4px;
       min-width: 0; border-bottom: 1px solid var(--line);
     }
+    .cr-list-title { min-width: 0; flex: 1; }
     .cr-list-row > span { overflow-wrap: anywhere; }
     .cr-list-row:last-child { border-bottom: none; }
     .cr-checkbox {
@@ -924,12 +926,14 @@ const GlobalStyle = () => (
       .cr-fullpage-head { flex-wrap: wrap; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; }
       .cr-fullpage-body { padding: 16px 16px calc(80px + env(safe-area-inset-bottom)); }
       .cr-main { width: 100%; max-width: none; min-height: 0; height: auto; overflow-y: auto; padding: calc(18px + env(safe-area-inset-top)) 16px calc(92px + env(safe-area-inset-bottom)); }
-      .cr-grid-2, .cr-grid-3, .cr-grid-4 { grid-template-columns: 1fr; }
+      .cr-grid-2, .cr-grid-3, .cr-grid-4 { grid-template-columns: minmax(0, 1fr); }
       .cr-row { flex-wrap: wrap; }
       .cr-row > .cr-field { flex: 1 1 220px !important; min-width: 0; }
       .cr-list-row { flex-wrap: wrap; gap: 8px; }
       .cr-list-row > * { min-width: 0; }
-      .cr-task-row > .cr-task-title { flex: 1 1 calc(100% - 32px) !important; }
+      .cr-list-title { flex: 1 1 calc(100% - 32px) !important; }
+      .cr-calendar-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .cr-calendar-grid { min-width: 600px; }
       .cr-modal-backdrop { padding: 8px; }
       .cr-modal { max-height: calc(100dvh - 16px); padding: 18px; }
       .cr-mobile-nav {
@@ -1253,7 +1257,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
                   onClick={() => setTasks(toggleTaskDone(tasks, tk.id))}>
                   {tk.done && <Check size={13} />}
                 </div>
-                <span className="cr-task-title" style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none", color: tk.done ? "var(--ink-soft)" : "var(--ink)" }}>{tk.title}</span>
+                <span className="cr-list-title" style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none", color: tk.done ? "var(--ink-soft)" : "var(--ink)" }}>{tk.title}</span>
                 <AreaBadge area={tk.area} areas={areas} />
               </div>
             ))}
@@ -1272,7 +1276,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
                 <div className={`cr-checkbox ${h.log[today] ? "checked" : ""}`} onClick={() => toggleHabit(h)}>
                   {h.log[today] && <Check size={13} />}
                 </div>
-                <span style={{ flex: 1 }}>{h.name}</span>
+                <span className="cr-list-title" style={{ flex: 1 }}>{h.name}</span>
                 <AreaBadge area={h.area} areas={areas} />
               </div>
             ))}
@@ -1286,7 +1290,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
             {upcoming.map((tk) => (
               <div className="cr-list-row" key={tk.id}>
                 <span className="cr-chip">{fmtDateShort(tk.dueDate)}</span>
-                <span style={{ flex: 1 }}>{tk.title}</span>
+                <span className="cr-list-title" style={{ flex: 1 }}>{tk.title}</span>
                 <AreaBadge area={tk.area} areas={areas} />
               </div>
             ))}
@@ -1300,7 +1304,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
             {overdue.map((tk) => (
               <div className="cr-list-row" key={tk.id}>
                 <span className="cr-chip" style={{ background: "#F6DEDA", color: "#A1493C" }}>{fmtDateShort(tk.dueDate)}</span>
-                <span style={{ flex: 1 }}>{tk.title}</span>
+                <span className="cr-list-title" style={{ flex: 1 }}>{tk.title}</span>
                 <AreaBadge area={tk.area} areas={areas} />
               </div>
             ))}
@@ -1336,7 +1340,8 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
               <h3 className="cr-serif" style={{ margin: "0 0 12px", fontSize: 16 }}>Cronograma semanal</h3>
               <button className="cr-btn ghost" onClick={() => goTo("tasks")}>ver planejamento</button>
             </div>
-            <div className="cr-grid" style={{ gridTemplateColumns: "repeat(7, 1fr)", gap: 8 }}>
+            <div className="cr-calendar-scroll">
+            <div className="cr-grid cr-calendar-grid" style={{ gridTemplateColumns: "repeat(7, 1fr)", gap: 8 }}>
               {days.map((d) => {
                 const dayTasks = tasks.filter((tk) => tk.dueDate === d);
                 const isToday = d === todayStr();
@@ -1358,6 +1363,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
                   </div>
                 );
               })}
+            </div>
             </div>
           </div>
         );
@@ -1559,7 +1565,7 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
                 <div className={`cr-checkbox ${tk.done ? "checked" : ""}`} onClick={() => toggleDone(tk)}>
                   {tk.done && <Check size={13} />}
                 </div>
-                <span className="cr-task-title" style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none", color: tk.done ? "var(--ink-soft)" : "var(--ink)" }}>{tk.title}</span>
+                <span className="cr-list-title" style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none", color: tk.done ? "var(--ink-soft)" : "var(--ink)" }}>{tk.title}</span>
                 {tk.repeat && tk.repeat !== "nenhuma" && <span className="cr-chip">↻ {tk.repeat}</span>}
                 {tk.dueDate && <span className="cr-chip" style={isOverdue ? { background: "#F6DEDA", color: "#A1493C" } : undefined}>{isOverdue ? "atrasada · " : ""}{fmtDateShort(tk.dueDate)}{tk.time ? ` ${tk.time}` : ""}</span>}
                 <span className="cr-chip">{listName("taskStatus", taskStatusId(tk))}</span>
@@ -1593,7 +1599,7 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
                 <div className="cr-list-row cr-task-row" key={tk.id}>
                   <div className={`cr-checkbox ${tk.done ? "checked" : ""}`} onClick={() => toggleDone(tk)}>{tk.done && <Check size={13} />}</div>
                   {tk.time && <span className="cr-chip">{tk.time}</span>}
-                  <span className="cr-task-title" style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none" }}>{tk.title}</span>
+                  <span className="cr-list-title" style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none" }}>{tk.title}</span>
                   <PriorityChip id={tk.priority} />
                   <AreaBadge area={tk.area} areas={areas} />
                   {tk.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(tk.link)}><Link2 size={12} /></button>}
@@ -1617,7 +1623,8 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
               <button className="cr-btn ghost" onClick={() => setAnchorDate(addDays(anchorDate, 7))}>→</button>
               <button className="cr-btn ghost" onClick={() => setAnchorDate(todayStr())}>hoje</button>
             </div>
-            <div className="cr-grid" style={{ gridTemplateColumns: "repeat(7, 1fr)", gap: 8 }}>
+            <div className="cr-calendar-scroll">
+            <div className="cr-grid cr-calendar-grid" style={{ gridTemplateColumns: "repeat(7, 1fr)", gap: 8 }}>
               {days.map((d) => {
                 const dayTasks = tasksFor(d);
                 const isToday = d === todayStr();
@@ -1634,6 +1641,7 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
                   </div>
                 );
               })}
+            </div>
             </div>
           </div>
         );
@@ -1652,7 +1660,8 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
               <span className="cr-serif" style={{ fontSize: 15, textTransform: "capitalize" }}>{monthName}</span>
               <button className="cr-btn ghost" onClick={() => setAnchorDate(addDays(firstOfMonth, 32))}>→</button>
             </div>
-            <div className="cr-grid" style={{ gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+            <div className="cr-calendar-scroll">
+            <div className="cr-grid cr-calendar-grid" style={{ gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
               {["seg", "ter", "qua", "qui", "sex", "sáb", "dom"].map((d) => (
                 <p key={d} className="cr-sub" style={{ margin: 0, textAlign: "center", textTransform: "capitalize" }}>{d}</p>
               ))}
@@ -1672,6 +1681,7 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
                   </div>
                 );
               })}
+            </div>
             </div>
           </div>
         );
@@ -2295,7 +2305,7 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
               ? <p className="cr-sub" style={{ margin: 0 }}>Configure limites na aba Planejamento. Os limites acompanham apenas rendas efetivamente recebidas.</p>
               : planSummary.byCategory.map((entry) => (
                 <div className="cr-list-row" key={entry.id}>
-                  <span style={{ flex: 1 }}>{entry.category}</span>
+                  <span className="cr-list-title" style={{ flex: 1 }}>{entry.category}</span>
                   <span className="cr-chip">limite {fmtBRL(entry.limit)}</span>
                   <span className="cr-chip">gasto {fmtBRL(entry.spent)}</span>
                   <span className="cr-chip">comprometido {fmtBRL(entry.committed)}</span>
@@ -2376,7 +2386,7 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
                 {cardTx.length === 0 && <p className="cr-empty">Nenhuma compra neste cartão em {monthLabel(selectedMonth)}.</p>}
                 {cardTx.map((f) => (
                   <div className="cr-list-row" key={f.id}>
-                    <span style={{ flex: 1 }}>{f.desc || f.category}</span>
+                    <span className="cr-list-title" style={{ flex: 1 }}>{f.desc || f.category}</span>
                     {f.installmentGroup && <span className="cr-chip">{f.installmentGroup.index}/{f.installmentGroup.total}</span>}
                     <span className="cr-chip" style={{ background: effectiveStatus(f) === "atrasado" ? "#F6DEDA" : undefined }}>{STATUS_LABEL[effectiveStatus(f)]}</span>
                     <span style={{ fontWeight: 600, fontSize: 13.5 }}>{fmtBRL(f.amount)}</span>
@@ -2587,7 +2597,7 @@ function FinanceRow({ f, onEdit, onRemove }) {
   return (
     <div className="cr-list-row">
       <span className="cr-chip">{fmtDateShort(f.date)}</span>
-      <span style={{ flex: 1 }}>{f.desc || f.category}</span>
+      <span className="cr-list-title" style={{ flex: 1 }}>{f.desc || f.category}</span>
       <span className="cr-chip">{f.category}</span>
       {f.type === "saida" && <span className="cr-chip">{EXPENSE_CLASS_LABEL[f.expenseClass] || EXPENSE_CLASS_LABEL.variable}</span>}
       {f.type === "saida" && Number(f.plannedAmount) > 0 && Number(f.plannedAmount) !== Number(f.amount)
@@ -2983,7 +2993,7 @@ function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, 
         {accounts.length === 0 && <p className="cr-empty">Nenhuma conta cadastrada.</p>}
         {accounts.map((a) => (
           <div className="cr-list-row" key={a.id}>
-            <span style={{ flex: 1 }}>{a.name}</span>
+            <span className="cr-list-title" style={{ flex: 1 }}>{a.name}</span>
             <span className="cr-chip">{a.type}</span>
             <button className="cr-btn ghost" onClick={() => setEditingAccount(a)}><Pencil size={13} /></button>
             <button className="cr-btn ghost danger" onClick={() => setAccounts(accounts.filter((x) => x.id !== a.id))}><Trash2 size={13} /></button>
@@ -2999,7 +3009,7 @@ function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, 
         {cards.length === 0 && <p className="cr-empty">Nenhum cartão cadastrado.</p>}
         {cards.map((c) => (
           <div className="cr-list-row" key={c.id}>
-            <span style={{ flex: 1 }}>{c.name}</span>
+            <span className="cr-list-title" style={{ flex: 1 }}>{c.name}</span>
             <span className="cr-chip">limite {fmtBRL(c.limit)}</span>
             <span className="cr-chip">fecha dia {c.closingDay}</span>
             <span className="cr-chip">vence dia {c.dueDay}</span>
@@ -3255,7 +3265,7 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
           { key: "areas", label: "Áreas da vida", open: () => ctx.openAreas() },
           { key: "prices", label: "Faixas de preço dos procedimentos", open: () => ctx.openPrices() }].map((row) => (
           <div className="cr-list-row" key={row.key}>
-            <span style={{ flex: 1 }}>{row.label}</span>
+            <span className="cr-list-title" style={{ flex: 1 }}>{row.label}</span>
             <button className="cr-btn" onClick={row.open}><SettingsIcon size={13} /> Gerenciar</button>
           </div>
         ))}
@@ -3267,7 +3277,7 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
         {(deletedPages || []).length === 0 && <p className="cr-sub" style={{ margin: 0 }}>Nenhuma página excluída. Para excluir uma, use "Editar" no menu lateral.</p>}
         {(deletedPages || []).map((id) => (
           <div className="cr-list-row" key={id}>
-            <span style={{ flex: 1 }}>{pageOf(id)}</span>
+            <span className="cr-list-title" style={{ flex: 1 }}>{pageOf(id)}</span>
             <button className="cr-btn" onClick={() => onRestorePage(id)}>Restaurar página</button>
           </div>
         ))}
@@ -3313,7 +3323,7 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
           return (
             <div className="cr-list-row" key={w.id}>
               <div className={`cr-checkbox ${w.visible ? "checked" : ""}`} onClick={toggle}>{w.visible && <Check size={13} />}</div>
-              <span style={{ flex: 1 }}>{w.label}</span>
+              <span className="cr-list-title" style={{ flex: 1 }}>{w.label}</span>
               <button className="cr-btn ghost" disabled={i === 0} onClick={() => move(-1)}>↑</button>
               <button className="cr-btn ghost" disabled={i === list.length - 1} onClick={() => move(1)}>↓</button>
             </div>
@@ -4093,7 +4103,7 @@ function GoogleAgendaView({ gcal, setGcal }) {
               {m.items.map((e) => (
                 <div className="cr-list-row" key={e.id} style={{ cursor: "pointer" }} onClick={() => setDetail(e)}>
                   <span className="cr-chip" style={{ background: `${e.color}22`, borderLeft: `3px solid ${e.color}`, color: "#211D1A", minWidth: 84, justifyContent: "center" }}>{fmtCalendarDate(gcalDayOf(e.s))}</span>
-                  <span style={{ flex: 1 }}>{e.t}{gcal.calendars.length > 1 && <span className="cr-sub" style={{ margin: "0 0 0 8px", fontSize: 11.5, color: e.color }}>{e.calName}</span>}</span>
+                  <span className="cr-list-title" style={{ flex: 1 }}>{e.t}{gcal.calendars.length > 1 && <span className="cr-sub" style={{ margin: "0 0 0 8px", fontSize: 11.5, color: e.color }}>{e.calName}</span>}</span>
                   <span className="cr-sub" style={{ margin: 0 }}>{e.ad ? "dia inteiro" : gcalTimeOf(e.s) + (gcalTimeOf(e.e) ? " a " + gcalTimeOf(e.e) : "")}</span>
                   {e.meet && <button className="cr-btn primary" style={{ padding: "3px 10px" }} onClick={(ev) => { ev.stopPropagation(); openExternalLink(e.meet); }}>Meet</button>}
                 </div>
@@ -4168,7 +4178,7 @@ function GoogleAgendaView({ gcal, setGcal }) {
           {dayEvents.map((e) => (
             <div className="cr-list-row" key={e.id} style={{ cursor: "pointer" }} onClick={() => { setDayOpen(null); setDetail(e); }}>
               <span className="cr-chip" style={{ background: `${e.color}22`, borderLeft: `3px solid ${e.color}`, color: "#211D1A" }}>{e.ad ? "dia todo" : gcalTimeOf(e.s)}</span>
-              <span style={{ flex: 1 }}>{e.t}{gcal.calendars.length > 1 && <span className="cr-sub" style={{ margin: "0 0 0 8px", fontSize: 11.5, color: e.color }}>{e.calName}</span>}</span>
+              <span className="cr-list-title" style={{ flex: 1 }}>{e.t}{gcal.calendars.length > 1 && <span className="cr-sub" style={{ margin: "0 0 0 8px", fontSize: 11.5, color: e.color }}>{e.calName}</span>}</span>
             </div>
           ))}
         </Modal>
@@ -4724,7 +4734,7 @@ function PlanningTracker({ tasks, setTasks, routines }) {
         {pending.map((t) => (
           <div className="cr-list-row" key={t.id}>
             <div className="cr-checkbox" onClick={() => setTasks(toggleTaskDone(tasks, t.id))} />
-            <span style={{ flex: 1 }}>{t.title}</span>
+            <span className="cr-list-title" style={{ flex: 1 }}>{t.title}</span>
             <PriorityChip id={t.priority} />
             <span className="cr-chip" style={t.dueDate < today ? { background: "#F6DEDA", color: "#A1493C" } : undefined}>{fmtDateShort(t.dueDate)}</span>
           </div>
@@ -5406,7 +5416,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
               <h3 className="cr-serif" style={{ margin: "0 0 10px", fontSize: 15, color: "#A1493C" }}>Manutenção</h3>
               {dueAlerts.map(({ b, m }) => (
                 <div className="cr-list-row" key={b.id}>
-                  <span style={{ flex: 1 }}>{statusEmoji(m.level)} {b.name}</span>
+                  <span className="cr-list-title" style={{ flex: 1 }}>{statusEmoji(m.level)} {b.name}</span>
                   <span className="cr-chip" style={m.level === "atrasado" ? { background: "#F6DEDA", color: "#A1493C" } : { background: "#FBEBD4", color: "#96631C" }}>
                     {statusMessage(m, b.name)}
                   </span>
@@ -5739,7 +5749,7 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
           {(form.history || []).map((h) => (
             <div className="cr-list-row" key={h.id}>
               <span className="cr-chip">{fmtDateShort(h.date)}</span>
-              <span style={{ flex: 1 }}>{[h.professional, h.clinic].filter(Boolean).join(" · ") || "Realizado"}{h.result ? `: ${h.result}` : ""}</span>
+              <span className="cr-list-title" style={{ flex: 1 }}>{[h.professional, h.clinic].filter(Boolean).join(" · ") || "Realizado"}{h.result ? `: ${h.result}` : ""}</span>
               {h.cost > 0 && <strong>{fmtBRL(h.cost)}</strong>}
             </div>
           ))}
@@ -6097,7 +6107,7 @@ function GlobalSearchView({ query, setQuery, all, goTo }) {
         {results.map((r, i) => (
           <div className="cr-list-row" key={i}>
             <span className="cr-chip">{r.kind}</span>
-            <span style={{ flex: 1 }}>{r.label}</span>
+            <span className="cr-list-title" style={{ flex: 1 }}>{r.label}</span>
             <button className="cr-btn ghost" onClick={() => goTo(r.tab)}>abrir <ChevronRight size={13} /></button>
           </div>
         ))}
@@ -6128,7 +6138,7 @@ function HouseView({ house, setHouse }) {
             <div className={`cr-checkbox ${h.done ? "checked" : ""}`} onClick={() => setHouse(house.map((x) => x.id === h.id ? { ...x, done: !x.done } : x))}>
               {h.done && <Check size={13} />}
             </div>
-            <span style={{ flex: 1, textDecoration: h.done ? "line-through" : "none" }}>{h.item}</span>
+            <span className="cr-list-title" style={{ flex: 1, textDecoration: h.done ? "line-through" : "none" }}>{h.item}</span>
             <span className="cr-chip">{h.room}</span>
             <span className="cr-chip">{h.type}</span>
             {h.dueDate && <span className="cr-chip">{fmtDateShort(h.dueDate)}</span>}
@@ -6649,7 +6659,7 @@ function SelfCareView({ selfcare, setSelfcare }) {
               {(viewing.planSteps || []).map((st) => (
                 <div className="cr-list-row" key={st.id}>
                   <div className={`cr-checkbox ${st.done ? "checked" : ""}`} onClick={() => { const upd = { ...viewing, planSteps: viewing.planSteps.map((x) => x.id === st.id ? { ...x, done: !x.done } : x) }; setViewing(upd); save(upd); }}>{st.done && <Check size={13} />}</div>
-                  <span style={{ flex: 1, textDecoration: st.done ? "line-through" : "none" }}>{st.text}</span>
+                  <span className="cr-list-title" style={{ flex: 1, textDecoration: st.done ? "line-through" : "none" }}>{st.text}</span>
                   {st.due && <span className="cr-chip">até {fmtDateShort(st.due)}</span>}
                 </div>
               ))}
