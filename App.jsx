@@ -3,6 +3,7 @@ import { reloadUserData, storageDelete, storageGet, storageSet } from "./src/lib
 import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
+import { allocationValue, summarizeFinanceMonth } from "./src/lib/financePlan.js";
 import { notify } from "./src/components/ToastHost.jsx";
 import {
   Home, CalendarDays, Target, Repeat, Wallet, NotebookPen, Link2, Settings as SettingsIcon,
@@ -707,7 +708,7 @@ const DEFAULT_INVESTMENT_CATEGORIES = [
 ];
 
 // Número da versão que aparece no rodapé do menu (para saber se o arquivo aberto é o mais recente)
-const APP_BUILD = "versão 10";
+const APP_BUILD = "versão 11";
 
 const DEFAULT_SETTINGS = {
   name: "",
@@ -717,6 +718,7 @@ const DEFAULT_SETTINGS = {
   dashboardWidgets: DEFAULT_WIDGETS,
   paymentMethods: ["Débito", "Crédito", "Pix", "Dinheiro", "Transferência", "Boleto", "Outro"],
   financeCategories: ["Alimentação", "Transporte", "Beleza", "Estudos", "Lazer", "Moradia", "Saúde", "Assinaturas", "Outros"],
+  financePlan: { grossSalary: "", extraIncome: "", deductions: "", netSalary: "", payday: "5", allocations: [] },
   wheelChartType: "radar",
   investmentCategories: DEFAULT_INVESTMENT_CATEGORIES,
   pageNames: {},
@@ -1154,7 +1156,9 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
   const thisMonth = today.slice(0, 7);
   const monthTx = finance.filter((f) => f.date.slice(0, 7) === thisMonth);
   const income = monthTx.filter((f) => f.type === "entrada").reduce((s, f) => s + Number(f.amount), 0);
-  const expense = monthTx.filter((f) => f.type === "saida").reduce((s, f) => s + Number(f.amount), 0);
+  const expense = monthTx
+    .filter((f) => f.type === "saida" && !["reserve", "investment"].includes(f.expenseClass))
+    .reduce((s, f) => s + Number(f.amount), 0);
   const balance = income - expense;
 
   const upcoming = tasks
@@ -1993,11 +1997,25 @@ function monthLabel(m) {
 }
 
 const CATEGORY_PALETTE = ["#C9A57E", "#D9A79A", "#97A587", "#A99BC0", "#9DB4BE", "#D6A98C", "#B7A6C9", "#E0AFA6"];
+const EXPENSE_CLASS_LABEL = {
+  fixed: "Fixo",
+  variable: "Variável",
+  recurring: "Recorrente",
+  one_time: "Pontual",
+  procedure: "Procedimento",
+  hobby: "Hobby / lazer",
+  reserve: "Transferência para reserva",
+  investment: "Investimento",
+};
 
 function expenseCategoryData(finance, month) {
-  const monthTx = finance.filter((f) => f.date.slice(0, 7) === month);
+  const monthTx = finance.filter((f) => f.date?.slice(0, 7) === month && f.status !== "cancelado");
   const catMap = {};
-  monthTx.filter((f) => f.type === "saida").forEach((f) => {
+  monthTx.filter((f) =>
+    f.type === "saida"
+    && (!f.status || f.status === "pago")
+    && !["reserve", "investment"].includes(f.expenseClass)
+  ).forEach((f) => {
     const cat = f.category || "Outros";
     catMap[cat] = (catMap[cat] || 0) + Number(f.amount);
   });
@@ -2085,9 +2103,11 @@ function overallMood(tasks, goals, habits, finance) {
   const today = todayStr();
   const thisMonth = today.slice(0, 7);
 
-  const monthTx = finance.filter((f) => f.date.slice(0, 7) === thisMonth);
-  const income = monthTx.filter((f) => f.type === "entrada").reduce((s, f) => s + Number(f.amount), 0);
-  const expense = monthTx.filter((f) => f.type === "saida").reduce((s, f) => s + Number(f.amount), 0);
+  const monthTx = finance.filter((f) => f.date.slice(0, 7) === thisMonth && f.status !== "cancelado");
+  const income = monthTx.filter((f) => f.type === "entrada" && (!f.status || f.status === "pago")).reduce((s, f) => s + Number(f.amount), 0);
+  const expense = monthTx
+    .filter((f) => f.type === "saida" && (!f.status || f.status === "pago") && !["reserve", "investment"].includes(f.expenseClass))
+    .reduce((s, f) => s + Number(f.amount), 0);
   let financeScore = 60, financeLabel = "sem dados";
   if (income > 0 || expense > 0) {
     const ratio = income > 0 ? expense / income : 2;
@@ -2145,6 +2165,11 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
 
   const save = (data) => {
     const { installmentsCount, recurringEnabled, recurringMonths, ...base } = data;
+    if (base.type === "saida") {
+      base.plannedAmount = Number(base.plannedAmount) || Number(base.amount) || 0;
+    } else {
+      delete base.plannedAmount;
+    }
     return setFinance(upsertById(finance, base));
   };
   // parcelamento e recorrência geram vários lançamentos de uma vez, então têm um botão próprio
@@ -2158,24 +2183,30 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
   const discardDraft = (id) => { if (finance.some((x) => x.id === id)) setFinance(finance.filter((x) => x.id !== id)); };
   const remove = (id) => setFinance(finance.filter((x) => x.id !== id));
 
-  const today = todayStr();
   const selectedMonth = useMemo(() => {
     const d = new Date();
     d.setDate(1);
     d.setMonth(d.getMonth() + monthOffset);
-    return d.toISOString().slice(0, 7);
+    return localDateStr(d).slice(0, 7);
   }, [monthOffset]);
 
-  const monthTx = finance.filter((f) => f.date.slice(0, 7) === selectedMonth);
-  const income = monthTx.filter((f) => f.type === "entrada").reduce((s, f) => s + Number(f.amount), 0);
-  const expense = monthTx.filter((f) => f.type === "saida").reduce((s, f) => s + Number(f.amount), 0);
+  const monthTx = finance.filter((f) => f.date?.slice(0, 7) === selectedMonth && f.status !== "cancelado");
+  const planSummary = useMemo(
+    () => summarizeFinanceMonth(finance, settings.financePlan, selectedMonth),
+    [finance, settings.financePlan, selectedMonth],
+  );
+  const income = planSummary.receivedIncome;
+  const expense = planSummary.spent;
   const balance = income - expense;
-  const invoiceTotal = monthTx.filter((f) => f.paymentMethod === "Crédito").reduce((s, f) => s + Number(f.amount), 0);
+  const invoiceTotal = monthTx.filter((f) => f.paymentMethod === "Crédito").reduce((s, f) => s + Number(f.amount || 0), 0);
   const futureInstallments = finance.filter((f) => f.installmentGroup && f.date.slice(0, 7) > selectedMonth).reduce((s, f) => s + Number(f.amount), 0);
 
   const byMonth = useMemo(() => {
     const map = {};
     finance.forEach((f) => {
+      if (typeof f.date !== "string") return;
+      if (f.status === "cancelado" || (f.status && f.status !== "pago")
+        || (f.type === "saida" && ["reserve", "investment"].includes(f.expenseClass))) return;
       const m = f.date.slice(0, 7);
       map[m] = map[m] || { month: monthLabel(m), _m: m, entrada: 0, saida: 0 };
       map[m][f.type === "entrada" ? "entrada" : "saida"] += Number(f.amount);
@@ -2191,7 +2222,7 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
     const months = [];
     for (let i = 0; i < 4; i++) {
       const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + i);
-      const m = d.toISOString().slice(0, 7);
+      const m = localDateStr(d).slice(0, 7);
       const tx = finance.filter((f) => f.date.slice(0, 7) === m && f.status !== "cancelado");
       const inc = tx.filter((f) => f.type === "entrada").reduce((s, f) => s + Number(f.amount), 0);
       const exp = tx.filter((f) => f.type === "saida").reduce((s, f) => s + Number(f.amount), 0);
@@ -2205,13 +2236,14 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <div>
           <h1 className="cr-h1 cr-serif">Finanças</h1>
-          <p className="cr-sub">Entradas, saídas, parcelamento, recorrência e fluxo de caixa.</p>
+          <p className="cr-sub">Orçamento mensal, renda recebida, compromissos, despesas e investimentos.</p>
         </div>
         <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo lançamento</button>
       </div>
 
       <div className="cr-tabbar" style={{ marginTop: 14 }}>
         <button className={`cr-tabbtn ${tab === "visao" ? "active" : ""}`} onClick={() => setTab("visao")}>Visão mensal</button>
+        <button className={`cr-tabbtn ${tab === "planejamento" ? "active" : ""}`} onClick={() => setTab("planejamento")}>Planejamento</button>
         <button className={`cr-tabbtn ${tab === "lancamentos" ? "active" : ""}`} onClick={() => setTab("lancamentos")}>Lançamentos</button>
         <button className={`cr-tabbtn ${tab === "fatura" ? "active" : ""}`} onClick={() => setTab("fatura")}>Fatura</button>
         <button className={`cr-tabbtn ${tab === "fluxo" ? "active" : ""}`} onClick={() => setTab("fluxo")}>Fluxo de caixa</button>
@@ -2240,12 +2272,35 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
             );
           })()}
           <div className="cr-grid cr-grid-3" style={{ marginBottom: 16 }}>
-            <div className="cr-card"><p className="cr-label">Receitas do mês</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(income)}</p></div>
-            <div className="cr-card"><p className="cr-label">Despesas do mês</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(expense)}</p></div>
-            <div className="cr-card"><p className="cr-label">Saldo</p><p className="cr-serif" style={{ fontSize: 20, color: balance >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(balance)}</p></div>
+            <div className="cr-card"><p className="cr-label">Renda efetivamente recebida</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(income)}</p></div>
+            <div className="cr-card"><p className="cr-label">Gastos efetivamente realizados</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(expense)}</p></div>
+            <div className="cr-card"><p className="cr-label">Saldo após gastos de consumo</p><p className="cr-serif" style={{ fontSize: 20, color: balance >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(balance)}</p></div>
+            <div className="cr-card"><p className="cr-label">Despesas fixas pendentes</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.fixedCommitments)}</p></div>
+            <div className="cr-card"><p className="cr-label">Gastos fixos realizados</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.fixedSpent)}</p></div>
+            <div className="cr-card"><p className="cr-label">Gastos variáveis realizados</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.variableSpent)}</p></div>
+            <div className="cr-card"><p className="cr-label">Outras despesas pendentes</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.variableCommitments)}</p></div>
+            <div className="cr-card"><p className="cr-label">Reserva protegida ainda pendente</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.reservedRemaining)}</p></div>
+            <div className="cr-card"><p className="cr-label">Reservas e investimentos realizados</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.transferPaid)}</p></div>
+            <div className="cr-card"><p className="cr-label">Previsão de gastos do mês</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.projectedSpending)}</p></div>
+            <div className="cr-card"><p className="cr-label">Disponível sem comprometer metas</p><p className="cr-serif" style={{ fontSize: 20, color: planSummary.available >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(planSummary.available)}</p></div>
+            <div className="cr-card"><p className="cr-label">Percentual da renda recebido já gasto</p><p className="cr-serif" style={{ fontSize: 20 }}>{income > 0 ? `${Math.round((expense / income) * 100)}%` : "—"}</p></div>
             <div className="cr-card"><p className="cr-label">Fatura do cartão (crédito)</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(invoiceTotal)}</p></div>
             <div className="cr-card"><p className="cr-label">Parcelas futuras</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(futureInstallments)}</p></div>
             <div className="cr-card"><p className="cr-label">Lançamentos no mês</p><p className="cr-serif" style={{ fontSize: 20 }}>{monthTx.length}</p></div>
+          </div>
+          <div className="cr-card" style={{ marginBottom: 16 }}>
+            <p className="cr-label" style={{ marginBottom: 6 }}>Planejamento por categoria — {monthLabel(selectedMonth)}</p>
+            {planSummary.byCategory.length === 0
+              ? <p className="cr-sub" style={{ margin: 0 }}>Configure limites na aba Planejamento. Os limites acompanham apenas rendas efetivamente recebidas.</p>
+              : planSummary.byCategory.map((entry) => (
+                <div className="cr-list-row" key={entry.id}>
+                  <span style={{ flex: 1 }}>{entry.category}</span>
+                  <span className="cr-chip">limite {fmtBRL(entry.limit)}</span>
+                  <span className="cr-chip">gasto {fmtBRL(entry.spent)}</span>
+                  <span className="cr-chip">comprometido {fmtBRL(entry.committed)}</span>
+                  <strong style={{ color: entry.remaining >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(entry.remaining)}</strong>
+                </div>
+              ))}
           </div>
           {byMonth.length > 0 && (
             <div className="cr-card" style={{ marginBottom: 16 }}>
@@ -2292,6 +2347,10 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
         </div>
       )}
 
+      {tab === "planejamento" && (
+        <FinancePlanningPanel finance={finance} month={selectedMonth} settings={settings} setSettings={setSettings} summary={planSummary} />
+      )}
+
       {tab === "fatura" && (
         <div>
           <div className="cr-row" style={{ margin: "14px 0", alignItems: "center" }}>
@@ -2330,7 +2389,7 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
 
       {tab === "fluxo" && (
         <div>
-          <p className="cr-sub" style={{ margin: "14px 0" }}>Quanto dinheiro já está comprometido nos próximos meses (a partir dos lançamentos agendados).</p>
+          <p className="cr-sub" style={{ margin: "14px 0" }}>Previsão a partir dos lançamentos agendados e pagos. Renda futura não é saldo disponível até ser recebida.</p>
           <div className="cr-grid cr-grid-4">
             {cashFlow.map((m, i) => (
               <div className="cr-card" key={i}>
@@ -2359,6 +2418,169 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
   );
 }
 
+function FinancePlanningPanel({ finance, month, settings, setSettings, summary }) {
+  const plan = settings.financePlan || { grossSalary: "", extraIncome: "", deductions: "", netSalary: "", payday: "5", allocations: [] };
+  const allocations = Array.isArray(plan.allocations) ? plan.allocations : [];
+  const grossSalary = Number(plan.grossSalary) || 0;
+  const extraIncome = Number(plan.extraIncome) || 0;
+  const deductions = Number(plan.deductions) || 0;
+  const calculatedNet = Math.max(0, grossSalary + extraIncome - deductions);
+  const expectedNet = Number(plan.netSalary) > 0 ? Number(plan.netSalary) : calculatedNet;
+  const expectedAllocationTotal = allocations.reduce((total, allocation) =>
+    total + allocationValue(allocation, expectedNet), 0);
+  const plannedUnallocated = expectedNet - expectedAllocationTotal;
+  const setPlan = (next) => setSettings({ ...settings, financePlan: { ...plan, ...next } });
+  const updateAllocation = (id, changes) => setPlan({
+    allocations: allocations.map((allocation) => allocation.id === id ? { ...allocation, ...changes } : allocation),
+  });
+  const removeAllocation = (id) => setPlan({ allocations: allocations.filter((allocation) => allocation.id !== id) });
+  const addAllocation = () => setPlan({
+    allocations: [...allocations, {
+      id: uid(), category: "", mode: "percent", amount: "", priority: "normal", protected: false,
+    }],
+  });
+
+  const monthIncome = summary.receivedIncome;
+
+  return (
+    <div>
+      <p className="cr-sub" style={{ margin: "14px 0" }}>
+        Planeje sua renda e a distribuição do orçamento de {monthLabel(month)}. A renda prevista é apenas uma referência: dinheiro futuro só entra no cálculo de disponibilidade depois de ser registrado como recebido.
+      </p>
+      <div className="cr-grid cr-grid-3" style={{ marginBottom: 16 }}>
+        <div className="cr-card">
+          <p className="cr-label">Salário bruto mensal</p>
+          <input type="number" min="0" step="0.01" className="cr-input" value={plan.grossSalary ?? ""}
+            onChange={(event) => setPlan({ grossSalary: event.target.value })} aria-label="Salário bruto mensal" />
+        </div>
+        <div className="cr-card">
+          <p className="cr-label">Renda extra prevista</p>
+          <input type="number" min="0" step="0.01" className="cr-input" value={plan.extraIncome ?? ""}
+            onChange={(event) => setPlan({ extraIncome: event.target.value })} aria-label="Renda extra prevista" />
+        </div>
+        <div className="cr-card">
+          <p className="cr-label">Descontos e deduções</p>
+          <input type="number" min="0" step="0.01" className="cr-input" value={plan.deductions ?? ""}
+            onChange={(event) => setPlan({ deductions: event.target.value })} aria-label="Descontos e deduções" />
+        </div>
+        <div className="cr-card">
+          <p className="cr-label">Salário líquido esperado (opcional)</p>
+          <input type="number" min="0" step="0.01" className="cr-input" value={plan.netSalary ?? ""}
+            onChange={(event) => setPlan({ netSalary: event.target.value })} aria-label="Salário líquido esperado" />
+          <p className="cr-sub" style={{ margin: "6px 0 0" }}>Estimativa calculada: {fmtBRL(calculatedNet)}.</p>
+        </div>
+        <div className="cr-card">
+          <p className="cr-label">Dia previsto para receber</p>
+          <input type="number" min="1" max="31" step="1" className="cr-input" value={plan.payday ?? "5"}
+            onChange={(event) => setPlan({ payday: event.target.value })} aria-label="Dia previsto para receber" />
+        </div>
+        <div className="cr-card">
+          <p className="cr-label">Renda líquida prevista</p>
+          <p className="cr-serif" style={{ fontSize: 20, margin: 0 }}>{fmtBRL(expectedNet)}</p>
+          <p className="cr-sub" style={{ margin: "6px 0 0" }}>Recebido em {monthLabel(month)}: {fmtBRL(monthIncome)}</p>
+        </div>
+      </div>
+
+      <div className="cr-card" style={{ marginBottom: 16 }}>
+        <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+          <div>
+            <h2 className="cr-serif" style={{ fontSize: 18, margin: 0 }}>Distribuição do orçamento</h2>
+            <p className="cr-sub" style={{ margin: "4px 0 0" }}>Defina limites por percentual ou valor. Valores protegidos representam reserva/objetivos e reduzem o dinheiro livre sem serem tratados como consumo. Classifique a transferência realizada e use a mesma categoria da alocação para evitar desconto duplicado.</p>
+          </div>
+          <button className="cr-btn primary" onClick={addAllocation}><Plus size={14} /> Adicionar categoria</button>
+        </div>
+        {allocations.length === 0 && <p className="cr-empty">Nenhuma distribuição configurada ainda.</p>}
+        {allocations.map((allocation) => (
+          <div className="cr-card" key={allocation.id} style={{ marginTop: 10, padding: 12 }}>
+            <div className="cr-grid cr-grid-3">
+              <div className="cr-field">
+                <label className="cr-label">Categoria / objetivo</label>
+                <input className="cr-input" value={allocation.category || ""}
+                  onChange={(event) => updateAllocation(allocation.id, { category: event.target.value })}
+                  placeholder="ex.: Moradia, Reserva de emergência" />
+              </div>
+              <div className="cr-field">
+                <label className="cr-label">Tipo de limite</label>
+                <select className="cr-select" value={allocation.mode || "percent"}
+                  onChange={(event) => updateAllocation(allocation.id, { mode: event.target.value })}>
+                  <option value="percent">Percentual da renda recebida</option>
+                  <option value="fixed">Valor fixo mensal</option>
+                </select>
+              </div>
+              <div className="cr-field">
+                <label className="cr-label">{allocation.mode === "fixed" ? "Valor mensal (R$)" : "Percentual (%)"}</label>
+                <input type="number" min="0" step="0.01" className="cr-input" value={allocation.amount ?? ""}
+                  onChange={(event) => updateAllocation(allocation.id, { amount: event.target.value })} />
+              </div>
+              <div className="cr-field">
+                <label className="cr-label">Prioridade</label>
+                <select className="cr-select" value={allocation.priority || "normal"}
+                  onChange={(event) => updateAllocation(allocation.id, { priority: event.target.value })}>
+                  <option value="high">Prioritária</option>
+                  <option value="normal">Normal</option>
+                  <option value="low">Opcional</option>
+                </select>
+              </div>
+              <label className="cr-row" style={{ alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={allocation.protected === true}
+                  onChange={(event) => updateAllocation(allocation.id, { protected: event.target.checked })} />
+                <span className="cr-label" style={{ margin: 0 }}>Valor protegido (reserva/investimento)</span>
+              </label>
+              <div className="cr-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                <span className="cr-sub" style={{ margin: 0 }}>
+                  Limite planejado: {fmtBRL(allocationValue(allocation, expectedNet))} · recebido: {fmtBRL(allocationValue(allocation, monthIncome))}
+                </span>
+                <button className="cr-btn ghost danger" onClick={() => removeAllocation(allocation.id)} aria-label="Remover categoria">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {allocations.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div className="cr-row" style={{ justifyContent: "space-between" }}>
+              <span className="cr-sub" style={{ margin: 0 }}>Distribuído sobre o líquido esperado: {fmtBRL(expectedAllocationTotal)}</span>
+              <strong role={plannedUnallocated < 0 ? "alert" : undefined} style={{ color: plannedUnallocated >= 0 ? "#5C7A56" : "#A1493C" }}>
+                {plannedUnallocated < 0
+                  ? `Plano excede o líquido esperado em ${fmtBRL(Math.abs(plannedUnallocated))}`
+                  : `Líquido esperado sem distribuição: ${fmtBRL(plannedUnallocated)}`}
+              </strong>
+            </div>
+            <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 4 }}>
+              <span className="cr-sub" style={{ margin: 0 }}>Distribuído com dinheiro já recebido: {fmtBRL(summary.allocationTotal)}</span>
+              <span className="cr-sub" style={{ margin: 0 }}>Ainda não distribuído: {fmtBRL(summary.unallocated)}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="cr-card">
+        <h2 className="cr-serif" style={{ fontSize: 18, margin: "0 0 8px" }}>Dinheiro do mês: recebido, comprometido e gasto</h2>
+        <p className="cr-sub" style={{ margin: "0 0 12px" }}>
+          Só lançamentos de entrada com status pago contam como renda recebida. Despesas pendentes são compromissos, não gastos realizados. Ao registrar uma despesa, marque-a como paga quando o pagamento acontecer para que os valores não sejam contados duas vezes.
+        </p>
+        <div className="cr-grid cr-grid-3">
+          <div><p className="cr-label">Recebido</p><strong>{fmtBRL(summary.receivedIncome)}</strong></div>
+          <div><p className="cr-label">Gasto</p><strong>{fmtBRL(summary.spent)}</strong></div>
+          <div><p className="cr-label">Comprometido</p><strong>{fmtBRL(summary.commitments)}</strong></div>
+          <div><p className="cr-label">Protegido para objetivos (ainda não transferido)</p><strong>{fmtBRL(summary.reservedRemaining)}</strong></div>
+          <div><p className="cr-label">Transferido para reserva/investimento</p><strong>{fmtBRL(summary.transferPaid)}</strong></div>
+          <div><p className="cr-label">Disponível sem comprometer metas</p>
+            <strong style={{ color: summary.available >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(summary.available)}</strong>
+          </div>
+          <div><p className="cr-label">Líquido esperado (não recebido)</p><strong>{fmtBRL(expectedNet)}</strong></div>
+        </div>
+        {summary.available < 0 && (
+          <p role="alert" style={{ color: "#A1493C", marginBottom: 0 }}>
+            Seus gastos, compromissos e reservas excedem em {fmtBRL(Math.abs(summary.available))} a renda recebida deste mês. Não conte com rendas futuras para cobrir esse saldo.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FinanceRow({ f, onEdit, onRemove }) {
   const st = effectiveStatus(f);
   return (
@@ -2366,6 +2588,9 @@ function FinanceRow({ f, onEdit, onRemove }) {
       <span className="cr-chip">{fmtDateShort(f.date)}</span>
       <span style={{ flex: 1 }}>{f.desc || f.category}</span>
       <span className="cr-chip">{f.category}</span>
+      {f.type === "saida" && <span className="cr-chip">{EXPENSE_CLASS_LABEL[f.expenseClass] || EXPENSE_CLASS_LABEL.variable}</span>}
+      {f.type === "saida" && Number(f.plannedAmount) > 0 && Number(f.plannedAmount) !== Number(f.amount)
+        && <span className="cr-chip">prev. {fmtBRL(f.plannedAmount)}</span>}
       {f.paymentMethod && <span className="cr-chip">{f.paymentMethod}</span>}
       {f.installmentGroup && <span className="cr-chip">{f.installmentGroup.index}/{f.installmentGroup.total}</span>}
       {f.recurringId && <span className="cr-chip">recorrente</span>}
@@ -2532,7 +2757,7 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [form, setForm] = useState(item || {
-    type: "saida", category: categories[0] || "", amount: "", date: todayStr(), desc: "",
+    type: "saida", category: categories[0] || "", expenseClass: "variable", amount: "", plannedAmount: "", date: todayStr(), desc: "",
     paymentMethod: "Pix", status: "pago", accountId: "", cardId: "", link: "",
     installmentsCount: 1, recurringEnabled: false, recurringMonths: 12,
   });
@@ -2577,12 +2802,31 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
         </div>
         <datalist id="finance-categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
       </div>
+      {form.type === "saida" && (
+        <div className="cr-field">
+          <label className="cr-label">Classificação da despesa</label>
+          <select className="cr-select" value={form.expenseClass || "variable"}
+            onChange={(e) => setForm({ ...form, expenseClass: e.target.value })}>
+            {Object.entries(EXPENSE_CLASS_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </div>
+      )}
       <div className="cr-row">
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor total (R$)</label>
-          <input type="number" min="0.01" step="0.01" className="cr-input" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Data</label>
+        <div className="cr-field" style={{ flex: 1 }}>
+          <label className="cr-label">{form.type === "saida" && form.status === "pago" ? "Valor real pago (R$)" : "Valor do lançamento / previsto (R$)"}</label>
+          <input type="number" min="0.01" step="0.01" className="cr-input" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+        </div>
+        <div className="cr-field" style={{ flex: 1 }}>
+          <label className="cr-label">{form.type === "saida" && form.status !== "pago" ? "Vencimento previsto" : "Data do lançamento / pagamento"}</label>
           <input type="date" className="cr-input" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
       </div>
+      {form.type === "saida" && (
+        <div className="cr-field">
+          <label className="cr-label">Valor previsto original (R$), se diferente</label>
+          <input type="number" min="0" step="0.01" className="cr-input" value={form.plannedAmount ?? ""}
+            onChange={(e) => setForm({ ...form, plannedAmount: e.target.value })} placeholder="Opcional" />
+        </div>
+      )}
       <div className="cr-field"><label className="cr-label">Descrição</label>
         <input className="cr-input" value={form.desc} onChange={(e) => setForm({ ...form, desc: e.target.value })} /></div>
 
@@ -2595,7 +2839,11 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
             <button type="button" className="cr-btn ghost" style={{ padding: "6px 8px" }} title="Gerenciar formas de pagamento" onClick={() => ctx.openManager("paymentMethods")}><SettingsIcon size={14} /></button>
           </div></div>
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Status</label>
-          <ManagedSelect listKey="financeStatus" value={form.status} onChange={(v) => setForm({ ...form, status: v })} /></div>
+          <ManagedSelect listKey="financeStatus" value={form.status} onChange={(v) => setForm({
+            ...form,
+            status: v,
+            plannedAmount: form.type === "saida" && v === "pago" && !form.plannedAmount ? form.amount : form.plannedAmount,
+          })} /></div>
       </div>
 
       {isCredit && (
