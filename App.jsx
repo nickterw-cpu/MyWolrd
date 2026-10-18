@@ -929,6 +929,7 @@ const GlobalStyle = () => (
       .cr-row > .cr-field { flex: 1 1 220px !important; min-width: 0; }
       .cr-list-row { flex-wrap: wrap; gap: 8px; }
       .cr-list-row > * { min-width: 0; }
+      .cr-task-row > .cr-task-title { flex: 1 1 calc(100% - 32px) !important; }
       .cr-modal-backdrop { padding: 8px; }
       .cr-modal { max-height: calc(100dvh - 16px); padding: 18px; }
       .cr-mobile-nav {
@@ -1247,12 +1248,12 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
             </div>
             {tasksToday.length === 0 && <p className="cr-empty">Nenhuma tarefa para hoje ainda.</p>}
             {tasksToday.slice(0, 6).map((tk) => (
-              <div className="cr-list-row" key={tk.id}>
+              <div className="cr-list-row cr-task-row" key={tk.id}>
                 <div className={`cr-checkbox ${tk.done ? "checked" : ""}`}
                   onClick={() => setTasks(toggleTaskDone(tasks, tk.id))}>
                   {tk.done && <Check size={13} />}
                 </div>
-                <span style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none", color: tk.done ? "var(--ink-soft)" : "var(--ink)" }}>{tk.title}</span>
+                <span className="cr-task-title" style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none", color: tk.done ? "var(--ink-soft)" : "var(--ink)" }}>{tk.title}</span>
                 <AreaBadge area={tk.area} areas={areas} />
               </div>
             ))}
@@ -1554,11 +1555,11 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
             {filtered.map((tk) => {
               const isOverdue = !tk.done && tk.dueDate && tk.dueDate < todayStr();
               return (
-              <div className="cr-list-row" key={tk.id}>
+              <div className="cr-list-row cr-task-row" key={tk.id}>
                 <div className={`cr-checkbox ${tk.done ? "checked" : ""}`} onClick={() => toggleDone(tk)}>
                   {tk.done && <Check size={13} />}
                 </div>
-                <span style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none", color: tk.done ? "var(--ink-soft)" : "var(--ink)" }}>{tk.title}</span>
+                <span className="cr-task-title" style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none", color: tk.done ? "var(--ink-soft)" : "var(--ink)" }}>{tk.title}</span>
                 {tk.repeat && tk.repeat !== "nenhuma" && <span className="cr-chip">↻ {tk.repeat}</span>}
                 {tk.dueDate && <span className="cr-chip" style={isOverdue ? { background: "#F6DEDA", color: "#A1493C" } : undefined}>{isOverdue ? "atrasada · " : ""}{fmtDateShort(tk.dueDate)}{tk.time ? ` ${tk.time}` : ""}</span>}
                 <span className="cr-chip">{listName("taskStatus", taskStatusId(tk))}</span>
@@ -1589,10 +1590,10 @@ function TasksView({ tasks, setTasks, areas, embedded }) {
             <div className="cr-card">
               {dayTasks.length === 0 && <p className="cr-empty">Nada planejado para esse dia.</p>}
               {dayTasks.map((tk) => (
-                <div className="cr-list-row" key={tk.id}>
+                <div className="cr-list-row cr-task-row" key={tk.id}>
                   <div className={`cr-checkbox ${tk.done ? "checked" : ""}`} onClick={() => toggleDone(tk)}>{tk.done && <Check size={13} />}</div>
                   {tk.time && <span className="cr-chip">{tk.time}</span>}
-                  <span style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none" }}>{tk.title}</span>
+                  <span className="cr-task-title" style={{ flex: 1, textDecoration: tk.done ? "line-through" : "none" }}>{tk.title}</span>
                   <PriorityChip id={tk.priority} />
                   <AreaBadge area={tk.area} areas={areas} />
                   {tk.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(tk.link)}><Link2 size={12} /></button>}
