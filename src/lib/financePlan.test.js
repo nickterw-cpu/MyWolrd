@@ -85,4 +85,40 @@ describe("summarizeFinanceMonth", () => {
       projectedSpending: 600,
     });
   });
+
+  it("separates estimates from commitments and actual spending by category", () => {
+    const summary = summarizeFinanceMonth([
+      { date: "2026-10-05", type: "entrada", amount: 1000, status: "pago" },
+      { date: "2026-10-10", type: "saida", amount: 200, status: "pago", category: "Hobbies" },
+      { date: "2026-10-20", type: "saida", amount: 100, status: "agendado", category: "Hobbies" },
+      { date: "2026-10-25", type: "saida", amount: 100, status: "projetado", sourceKind: "previsao", category: "Hobbies" },
+    ], {
+      allocations: [{ id: "hobbies", category: "Hobbies", mode: "fixed", amount: 500 }],
+    }, "2026-10");
+
+    expect(summary).toMatchObject({
+      spent: 200,
+      commitments: 100,
+      estimatedPurchases: 100,
+      available: 700,
+      projectedSpending: 400,
+    });
+    expect(summary.byCategory[0]).toMatchObject({
+      limit: 500, spent: 200, committed: 100, planned: 100, remaining: 100,
+    });
+  });
+
+  it("deducts transfers once across protected allocations with the same category", () => {
+    const summary = summarizeFinanceMonth([
+      { date: "2026-10-05", type: "entrada", amount: 1000, status: "pago" },
+      { date: "2026-10-10", type: "saida", amount: 200, status: "pago", expenseClass: "reserve", category: "Reserva" },
+    ], {
+      allocations: [
+        { id: "emergency", category: "Reserva", mode: "fixed", amount: 300, protected: true },
+        { id: "travel", category: "Reserva", mode: "fixed", amount: 300, protected: true },
+      ],
+    }, "2026-10");
+
+    expect(summary).toMatchObject({ reserved: 600, reservedRemaining: 400, transferPaid: 200, available: 400 });
+  });
 });

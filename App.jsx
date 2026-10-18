@@ -4,6 +4,10 @@ import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, summarizeFinanceMonth } from "./src/lib/financePlan.js";
+import {
+  actualExpenseAverages, buildFinanceAlerts, buildFinanceForecast, buildIntegratedFinance,
+  createFinanceInstallments, nextFinanceDate,
+} from "./src/lib/financeIntegration.js";
 import { notify } from "./src/components/ToastHost.jsx";
 import {
   Home, CalendarDays, Target, Repeat, Wallet, NotebookPen, Link2, Settings as SettingsIcon,
@@ -302,10 +306,10 @@ const LIST_REGISTRY = {
     defaults: ["conta bancária", "carteira", "outra"].map((n) => ({ id: n, name: n })) },
   financeStatus: { label: "Status dos lançamentos", usedBy: [["finance", "status"]],
     defaults: [{ id: "pago", name: "Pago" }, { id: "pendente", name: "Pendente" }, { id: "agendado", name: "Agendado" }, { id: "cancelado", name: "Cancelado" }] },
-  wishStatus: { label: "Status dos desejos da Wishlist", closedFlag: true, flagLabel: "já comprado", usedBy: [["shopping", "status", (it) => inferShoppingKind(it) === "desejo"]],
-    defaults: [{ id: "desejado", name: "Desejado" }, { id: "comprado", name: "Comprado", closed: true }] },
+  wishStatus: { label: "Status dos desejos da Wishlist", closedFlag: true, flagLabel: "já comprado ou cancelado", usedBy: [["shopping", "status", (it) => inferShoppingKind(it) === "desejo"]],
+    defaults: [{ id: "desejado", name: "Desejado" }, { id: "comprado", name: "Comprado", closed: true }, { id: "cancelado", name: "Cancelado", closed: true }] },
   productStatus: { label: "Status dos produtos de rotina", closedFlag: true, flagLabel: "precisa recomprar", usedBy: [["shopping", "status", (it) => inferShoppingKind(it) === "rotina"]],
-    defaults: [{ id: "ainda tem", name: "Ainda tem" }, { id: "acabou", name: "Acabou", closed: true }, { id: "quero recomprar", name: "Quero recomprar", closed: true }, { id: "comprado", name: "Comprado" }] },
+    defaults: [{ id: "ainda tem", name: "Ainda tem" }, { id: "acabou", name: "Acabou", closed: true }, { id: "quero recomprar", name: "Quero recomprar", closed: true }, { id: "comprado", name: "Comprado" }, { id: "cancelado", name: "Cancelado", closed: true }] },
   workoutStatus: {
     label: "Status dos exercícios",
     defaults: [{ id: "planejado", name: "Planejado" }, { id: "feito", name: "Feito" }, { id: "parcial", name: "Parcial" }, { id: "pulado", name: "Pulado" }],
@@ -1160,11 +1164,10 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
 
   const thisMonth = today.slice(0, 7);
   const monthTx = finance.filter((f) => f.date.slice(0, 7) === thisMonth);
-  const income = monthTx.filter((f) => f.type === "entrada").reduce((s, f) => s + Number(f.amount), 0);
-  const expense = monthTx
-    .filter((f) => f.type === "saida" && !["reserve", "investment"].includes(f.expenseClass))
-    .reduce((s, f) => s + Number(f.amount), 0);
-  const balance = income - expense;
+  const financeSummary = summarizeFinanceMonth(finance, settings.financePlan, thisMonth);
+  const income = financeSummary.receivedIncome;
+  const expense = financeSummary.spent;
+  const balance = financeSummary.available;
 
   const upcoming = tasks
     .filter((tk) => !tk.done && tk.dueDate >= today)
@@ -1231,9 +1234,9 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
               </div>
             </div>
             <div className="cr-card">
-              <p className="cr-label">Saldo do mês</p>
+              <p className="cr-label">Disponível após compromissos e metas</p>
               <p className="cr-serif" style={{ fontSize: 22, margin: "2px 0", color: balance >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(balance)}</p>
-              <p className="cr-sub" style={{ margin: 0 }}>{fmtBRL(income)} entradas · {fmtBRL(expense)} saídas</p>
+              <p className="cr-sub" style={{ margin: 0 }}>{fmtBRL(income)} recebidos · {fmtBRL(expense)} gastos · {fmtBRL(financeSummary.commitments)} comprometidos</p>
             </div>
           </div>
         );
@@ -1403,7 +1406,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
       case "financeChart": {
         const byMonthDash = (() => {
           const map = {};
-          finance.forEach((f) => {
+          finance.filter((f) => (!f.status || f.status === "pago") && f.sourceKind !== "previsao").forEach((f) => {
             const m = f.date.slice(0, 7);
             map[m] = map[m] || { month: monthLabel(m), _m: m, entrada: 0, saida: 0 };
             map[m][f.type === "entrada" ? "entrada" : "saida"] += Number(f.amount);
@@ -2035,24 +2038,6 @@ function expenseCategoryData(finance, month) {
     .map(([label, value], i) => ({ label, value, color: CATEGORY_PALETTE[i % CATEGORY_PALETTE.length] }));
 }
 
-function generateInstallments(base, count) {
-  const total = Number(base.amount) || 0;
-  const per = Math.round((total / count) * 100) / 100;
-  const groupId = uid();
-  const list = [];
-  let allocated = 0;
-  for (let i = 0; i < count; i++) {
-    const amt = i === count - 1 ? Math.round((total - allocated) * 100) / 100 : per;
-    allocated += amt;
-    list.push({
-      ...base, id: uid(), amount: amt, date: addMonths(base.date, i),
-      installmentGroup: { id: groupId, index: i + 1, total: count, totalAmount: total },
-      status: i === 0 ? (base.date <= todayStr() ? "pago" : "agendado") : "agendado",
-    });
-  }
-  return list;
-}
-
 function generateRecurringOccurrences(base, monthsAhead) {
   const recurringId = uid();
   const list = [{ ...base, id: uid(), recurringId, status: base.date <= todayStr() ? "pago" : "agendado" }];
@@ -2166,13 +2151,17 @@ function overallMood(tasks, goals, habits, finance) {
   };
 }
 
-function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCards, settings, setSettings, investments, setInvestments }) {
+function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping, beauty, setBeauty, hobbies, setHobbies, accounts, setAccounts, cards, setCards, settings, setSettings, investments, setInvestments, goTo }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
   const [tab, setTab] = useState("visao");
   const [filterStatus, setFilterStatus] = useState("todos");
   const [monthOffset, setMonthOffset] = useState(0);
   const [invoiceCard, setInvoiceCard] = useState(cards[0]?.id || "");
+  const finance = useMemo(
+    () => buildIntegratedFinance({ finance: manualFinance, shopping, beauty, hobbies, today: todayStr() }),
+    [manualFinance, shopping, beauty, hobbies],
+  );
 
   const save = (data) => {
     const { installmentsCount, recurringEnabled, recurringMonths, ...base } = data;
@@ -2181,18 +2170,18 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
     } else {
       delete base.plannedAmount;
     }
-    return setFinance(upsertById(finance, base));
+    return setFinance(upsertById(manualFinance, base));
   };
   // parcelamento e recorrência geram vários lançamentos de uma vez, então têm um botão próprio
   const generate = (data) => {
     const { installmentsCount, recurringEnabled, recurringMonths, id, ...base } = data;
-    const rest = finance.filter((x) => x.id !== id);
-    if (base.paymentMethod === "Crédito" && Number(installmentsCount) > 1) setFinance([...generateInstallments(base, Number(installmentsCount)), ...rest]);
+    const rest = manualFinance.filter((x) => x.id !== id);
+    if (base.paymentMethod === "Crédito" && Number(installmentsCount) > 1) setFinance([...createFinanceInstallments(base, Number(installmentsCount)), ...rest]);
     else setFinance([...generateRecurringOccurrences(base, Number(recurringMonths) || 12), ...rest]);
     setEditing(null);
   };
-  const discardDraft = (id) => { if (finance.some((x) => x.id === id)) setFinance(finance.filter((x) => x.id !== id)); };
-  const remove = (id) => setFinance(finance.filter((x) => x.id !== id));
+  const discardDraft = (id) => { if (manualFinance.some((x) => x.id === id)) setFinance(manualFinance.filter((x) => x.id !== id)); };
+  const remove = (id) => setFinance(manualFinance.filter((x) => x.id !== id));
 
   const selectedMonth = useMemo(() => {
     const d = new Date();
@@ -2206,11 +2195,35 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
     () => summarizeFinanceMonth(finance, settings.financePlan, selectedMonth),
     [finance, settings.financePlan, selectedMonth],
   );
+  const forecast = useMemo(
+    () => buildFinanceForecast(finance, settings.financePlan, selectedMonth, 12),
+    [finance, settings.financePlan, selectedMonth],
+  );
+  const alerts = useMemo(
+    () => buildFinanceAlerts(finance, settings.financePlan, selectedMonth, todayStr()),
+    [finance, settings.financePlan, selectedMonth],
+  );
+  const averages = useMemo(() => actualExpenseAverages(finance, todayStr()), [finance]);
   const income = planSummary.receivedIncome;
   const expense = planSummary.spent;
   const balance = income - expense;
   const invoiceTotal = monthTx.filter((f) => f.paymentMethod === "Crédito").reduce((s, f) => s + Number(f.amount || 0), 0);
   const futureInstallments = finance.filter((f) => f.installmentGroup && f.date.slice(0, 7) > selectedMonth).reduce((s, f) => s + Number(f.amount), 0);
+  const installmentGroups = new Map();
+  finance.filter((transaction) => transaction.installmentGroup).forEach((transaction) => {
+    const group = transaction.installmentGroup;
+    if (group.id && !installmentGroups.has(group.id)) {
+      installmentGroups.set(group.id, Number(group.totalAmount) || Number(transaction.amount) * Number(group.total || 1));
+    }
+  });
+  const installmentTotal = [...installmentGroups.values()].reduce((sum, amount) => sum + amount, 0);
+  const currentMonthInstallments = monthTx.filter((transaction) => transaction.installmentGroup)
+    .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+  const forecastHorizon = (months) => forecast.slice(0, months).reduce((sum, entry) => ({
+    planned: sum.planned + entry.plannedBalance,
+    probable: sum.probable + entry.probableBalance,
+    attention: sum.attention + entry.attentionBalance,
+  }), { planned: 0, probable: 0, attention: 0 });
 
   const byMonth = useMemo(() => {
     const map = {};
@@ -2229,18 +2242,12 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
     .filter((f) => filterStatus === "todos" || effectiveStatus(f) === filterStatus)
     .slice().sort((a, b) => b.date.localeCompare(a.date));
 
-  const cashFlow = useMemo(() => {
-    const months = [];
-    for (let i = 0; i < 4; i++) {
-      const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + i);
-      const m = localDateStr(d).slice(0, 7);
-      const tx = finance.filter((f) => f.date.slice(0, 7) === m && f.status !== "cancelado");
-      const inc = tx.filter((f) => f.type === "entrada").reduce((s, f) => s + Number(f.amount), 0);
-      const exp = tx.filter((f) => f.type === "saida").reduce((s, f) => s + Number(f.amount), 0);
-      months.push({ month: monthLabel(m), income: inc, expense: exp, balance: inc - exp });
-    }
-    return months;
-  }, [finance]);
+  const cashFlow = forecast.slice(0, 4).map((entry) => ({
+    month: monthLabel(entry.month),
+    income: entry.expectedIncome,
+    expense: entry.expectedIncome - entry.plannedBalance,
+    balance: entry.plannedBalance,
+  }));
 
   return (
     <div>
@@ -2293,12 +2300,53 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
             <div className="cr-card"><p className="cr-label">Reserva protegida ainda pendente</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.reservedRemaining)}</p></div>
             <div className="cr-card"><p className="cr-label">Reservas e investimentos realizados</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.transferPaid)}</p></div>
             <div className="cr-card"><p className="cr-label">Previsão de gastos do mês</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.projectedSpending)}</p></div>
+            <div className="cr-card"><p className="cr-label">Despesas estimadas (não realizadas)</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.estimatedPurchases)}</p></div>
             <div className="cr-card"><p className="cr-label">Disponível sem comprometer metas</p><p className="cr-serif" style={{ fontSize: 20, color: planSummary.available >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(planSummary.available)}</p></div>
             <div className="cr-card"><p className="cr-label">Percentual da renda recebido já gasto</p><p className="cr-serif" style={{ fontSize: 20 }}>{income > 0 ? `${Math.round((expense / income) * 100)}%` : "—"}</p></div>
             <div className="cr-card"><p className="cr-label">Fatura do cartão (crédito)</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(invoiceTotal)}</p></div>
             <div className="cr-card"><p className="cr-label">Parcelas futuras</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(futureInstallments)}</p></div>
+            <div className="cr-card"><p className="cr-label">Valor original parcelado</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(installmentTotal)}</p></div>
+            <div className="cr-card"><p className="cr-label">Parcelas com vencimento no mês</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(currentMonthInstallments)}</p></div>
             <div className="cr-card"><p className="cr-label">Lançamentos no mês</p><p className="cr-serif" style={{ fontSize: 20 }}>{monthTx.length}</p></div>
           </div>
+          <div className="cr-card" style={{ marginBottom: 16 }}>
+            <h2 className="cr-serif" style={{ margin: "0 0 10px", fontSize: 17 }}>Previsão financeira e cenários</h2>
+            <p className="cr-sub" style={{ margin: "0 0 10px" }}>
+              As previsões usam somente salário informado, lançamentos agendados e estimativas das outras abas. Estimativas não são lançadas como gastos reais.
+            </p>
+            <div className="cr-grid cr-grid-3">
+              {[3, 6, 12].map((months) => {
+                const totals = forecastHorizon(months);
+                return (
+                  <div className="cr-card" key={months}>
+                    <p className="cr-label">Próximos {months} meses · saldo previsto acumulado</p>
+                    <p className="cr-sub" style={{ margin: "4px 0" }}>Planejado: {fmtBRL(totals.planned)}</p>
+                    <p className="cr-sub" style={{ margin: "4px 0" }}>Provável (sem opcionais baixos): {fmtBRL(totals.probable)}</p>
+                    <p className="cr-sub" style={{ margin: "4px 0" }}>Atenção (sem salário futuro presumido): {fmtBRL(totals.attention)}</p>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="cr-label" style={{ margin: "14px 0 6px" }}>Médias mensais de despesas reais (sem previsões nem transferências)</p>
+            <div className="cr-row" style={{ flexWrap: "wrap" }}>
+              {[
+                ["Mês", averages.monthly],
+                ["Trimestre", averages.quarterly],
+                ["Ano", averages.yearly],
+              ].map(([label, average]) => (
+                <span className="cr-chip" key={label}>
+                  {label}: {fmtBRL(average.value)}{average.sufficient ? "" : ` · dados insuficientes (${average.months} mês(es) com gasto)`}
+                </span>
+              ))}
+            </div>
+          </div>
+          {alerts.length > 0 && (
+            <div className="cr-card" role="status" style={{ marginBottom: 16, borderColor: "#E3B5AB" }}>
+              <h2 className="cr-serif" style={{ margin: "0 0 8px", fontSize: 17, color: "#A1493C" }}>Alertas financeiros</h2>
+              {alerts.map((alert) => <p key={alert.id} style={{ margin: "6px 0", color: alert.level === "alto" ? "#A1493C" : "var(--ink)" }}>{alert.message}</p>)}
+              {planSummary.available < 0 && <p style={{ margin: "8px 0 0", color: "#A1493C" }}>Considere adiar compras opcionais até que o saldo volte a ser positivo. Despesas reais continuam liberadas para registro.</p>}
+            </div>
+          )}
           <div className="cr-card" style={{ marginBottom: 16 }}>
             <p className="cr-label" style={{ marginBottom: 6 }}>Planejamento por categoria — {monthLabel(selectedMonth)}</p>
             {planSummary.byCategory.length === 0
@@ -2333,7 +2381,7 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
             <p className="cr-label" style={{ marginBottom: 6 }}>Lançamentos do mês</p>
             {monthTx.length === 0 && <p className="cr-empty">Nada neste mês.</p>}
             {monthTx.slice().sort((a, b) => b.date.localeCompare(a.date)).map((f) => (
-              <FinanceRow key={f.id} f={f} onEdit={() => setEditing(f)} onRemove={() => remove(f.id)} />
+              <FinanceRow key={f.id} f={f} onEdit={() => setEditing(f)} onRemove={() => remove(f.id)} goTo={goTo} />
             ))}
           </div>
         </div>
@@ -2352,7 +2400,7 @@ function FinanceView({ finance, setFinance, accounts, setAccounts, cards, setCar
           <div className="cr-card">
             {filteredTx.length === 0 && <p className="cr-empty">Nenhum lançamento encontrado.</p>}
             {filteredTx.map((f) => (
-              <FinanceRow key={f.id} f={f} onEdit={() => setEditing(f)} onRemove={() => remove(f.id)} />
+              <FinanceRow key={f.id} f={f} onEdit={() => setEditing(f)} onRemove={() => remove(f.id)} goTo={goTo} />
             ))}
           </div>
         </div>
@@ -2587,13 +2635,31 @@ function FinancePlanningPanel({ finance, month, settings, setSettings, summary }
             Seus gastos, compromissos e reservas excedem em {fmtBRL(Math.abs(summary.available))} a renda recebida deste mês. Não conte com rendas futuras para cobrir esse saldo.
           </p>
         )}
+        {summary.byCategory.length > 0 && (
+          <div className="cr-card" style={{ marginTop: 14 }}>
+            <h3 className="cr-serif" style={{ margin: "0 0 8px", fontSize: 16 }}>Limites por categoria: realizado x planejado</h3>
+            {summary.byCategory.map((category) => (
+              <div className="cr-list-row" key={category.id} style={{ flexWrap: "wrap" }}>
+                <span className="cr-list-title" style={{ flex: 1 }}>{category.category}</span>
+                <span className="cr-chip">Limite {fmtBRL(category.limit)}</span>
+                <span className="cr-chip">Realizado {fmtBRL(category.spent)}</span>
+                <span className="cr-chip">Comprometido {fmtBRL(category.committed)}</span>
+                {category.planned > 0 && <span className="cr-chip">Estimado {fmtBRL(category.planned)}</span>}
+                <span className="cr-chip" style={category.remaining < 0 ? { background: "#F6DEDA", color: "#A1493C" } : undefined}>
+                  Saldo do limite {fmtBRL(category.remaining)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function FinanceRow({ f, onEdit, onRemove }) {
+function FinanceRow({ f, onEdit, onRemove, goTo }) {
   const st = effectiveStatus(f);
+  const originTabs = { shopping: "shopping", beauty: "beauty", hobbies: "hobbies" };
   return (
     <div className="cr-list-row">
       <span className="cr-chip">{fmtDateShort(f.date)}</span>
@@ -2605,12 +2671,17 @@ function FinanceRow({ f, onEdit, onRemove }) {
       {f.paymentMethod && <span className="cr-chip">{f.paymentMethod}</span>}
       {f.installmentGroup && <span className="cr-chip">{f.installmentGroup.index}/{f.installmentGroup.total}</span>}
       {f.recurringId && <span className="cr-chip">recorrente</span>}
+      {f.sourceRef && <span className="cr-chip">{f.sourceKind === "previsao" ? "Estimativa" : "Integrado"} · {f.sourceLabel}</span>}
       <span className="cr-chip" style={st === "atrasado" ? { background: "#F6DEDA", color: "#A1493C" } : st === "cancelado" ? { opacity: 0.6 } : undefined}>{STATUS_LABEL[st]}</span>
       <span style={{ color: f.type === "entrada" ? "#5C7A56" : "#A1493C", fontWeight: 600, fontSize: 13.5 }}>
         {f.type === "entrada" ? "+" : "-"}{fmtBRL(f.amount)}
       </span>
-      <button className="cr-btn ghost" onClick={onEdit}><Pencil size={14} /></button>
-      <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={14} /></button>
+      {f.sourceRef
+        ? <button className="cr-btn ghost" title={`Abrir ${f.sourceLabel} na aba de origem`} onClick={() => goTo(originTabs[f.sourceRef.type] || "finance")}>Origem</button>
+        : <>
+          <button className="cr-btn ghost" onClick={onEdit}><Pencil size={14} /></button>
+          <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={14} /></button>
+        </>}
     </div>
   );
 }
@@ -5333,7 +5404,11 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
   const liveEditing = editing && editing !== "new" ? (beauty.find((x) => x.id === editing.id) || editing) : null;
 
   const save = (data) => { setBeauty(upsertById(beauty, { ...data, userEdited: true }, { history: data.history || [] })); };
-  const remove = (id) => setBeauty(beauty.filter((x) => x.id !== id));
+  const remove = (id) => setBeauty(beauty.flatMap((item) => {
+    if (item.id !== id) return [item];
+    if ((item.history || []).length > 0) return [{ ...item, archived: true, recurring: false }];
+    return [];
+  }));
   const originalOf = (b) => beauty.find((x) => x.id === b.id);
 
   const saveRealization = (procedureId, entry) => {
@@ -5344,13 +5419,16 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
       return {
         ...b, userEdited: true, history, dateDone: latest.date, professional: latest.professional,
         clinic: latest.clinic, cost: latest.cost, notes: latest.notes, result: latest.result,
+        nextExpenseDate: b.recurring
+          ? nextFinanceDate(latest.date, b.frequencyUnit === "dias" ? "" : `a cada ${b.frequencyValue} meses`, b.frequencyUnit === "dias" ? b.frequencyValue : 0)
+          : "",
       };
     }));
     setRegistering(null);
   };
 
   const statusList = getList("procStatus");
-  const procedures = beauty.map((b) => {
+  const procedures = beauty.filter((b) => !b.archived).map((b) => {
     const pl = placeOf(b, places);
     const st = inferProcStatus(b);
     return { ...b, _status: statusList.some((x) => x.id === st) ? st : "", _region: inferRegion(b), _band: priceBand(b.cost), _place: pl ? pl.name : (b.clinic || ""), _placeObj: pl };
@@ -5596,14 +5674,20 @@ function BeautyCard({ b, on, onEdit, onRemove, onRegister }) {
 }
 
 function RegistrarRealizacaoModal({ item, onSave, onClose }) {
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     date: todayStr(), professional: item.professional || "", clinic: item.clinic || "",
     cost: item.cost || "", notes: "", result: item.result || "",
   });
+  const save = () => {
+    if (saving || !form.date || form.date > todayStr()) return;
+    setSaving(true);
+    onSave({ ...form, cost: Number(form.cost) || 0 });
+  };
   return (
     <Modal title={`Registrar realização: ${item.name}`} onClose={onClose}>
       <div className="cr-field"><label className="cr-label">Data</label>
-        <input type="date" className="cr-input" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
+        <input type="date" max={todayStr()} className="cr-input" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Profissional</label>
           <input className="cr-input" value={form.professional} onChange={(e) => setForm({ ...form, professional: e.target.value })} /></div>
@@ -5616,8 +5700,8 @@ function RegistrarRealizacaoModal({ item, onSave, onClose }) {
         <input className="cr-input" value={form.result} onChange={(e) => setForm({ ...form, result: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Observações</label>
         <textarea className="cr-textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
-      <button className="cr-btn primary" style={{ width: "100%", justifyContent: "center" }}
-        onClick={() => onSave({ ...form, cost: Number(form.cost) || 0 })}>Registrar realização</button>
+      <button className="cr-btn primary" disabled={saving || !form.date || form.date > todayStr()}
+        style={{ width: "100%", justifyContent: "center" }} onClick={save}>Registrar realização</button>
     </Modal>
   );
 }
@@ -5625,14 +5709,15 @@ function RegistrarRealizacaoModal({ item, onSave, onClose }) {
 function BeautyModal({ item, places, onSave, onClose, onRegister }) {
   const [form, setForm] = useState(item || {
     procStatus: "quero", region: "", degree: "", placeId: "", bodyArea: "", category: "", goal: "",
-    image: "", professional: "", clinic: "", cost: "", dateDone: "",
+    image: "", professional: "", clinic: "", cost: "", dateDone: "", priority: "alta", plannedSessions: "", nextExpenseDate: "",
     recurring: false, frequencyUnit: "meses", frequencyValue: "", alertDays: DEFAULT_ALERT_DAYS,
     result: "", notes: "", link: "", name: "", history: [],
   });
   const autoStatus = useAutoSave(form, onSave, (f) => ({
-    ...f, cost: Number(f.cost) || 0, frequencyValue: f.recurring ? Number(f.frequencyValue) || "" : "",
+    ...f, cost: Number(f.cost) || 0, plannedSessions: Number(f.plannedSessions) || 0,
+    frequencyValue: f.recurring ? Number(f.frequencyValue) || "" : "",
   }));
-  const preview = form.recurring ? nextMaintenanceDate(form.dateDone, form.frequencyUnit, form.frequencyValue) : null;
+  const preview = form.recurring ? (form.nextExpenseDate || nextMaintenanceDate(form.dateDone, form.frequencyUnit, form.frequencyValue)) : null;
   const matchedPresetKey = FREQUENCY_PRESETS.find((f) => f.key !== "custom" && f.unit === form.frequencyUnit && f.value === Number(form.frequencyValue))?.key;
   const selectedKey = matchedPresetKey || (form.frequencyValue ? "custom" : "");
 
@@ -5683,10 +5768,20 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
       </div>
       <FormSection title="Valores e datas" />
       <div className="cr-row">
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Custo (R$)</label>
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor por sessão (R$)</label>
           <input type="number" className="cr-input" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} /></div>
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Data da última realização</label>
-          <input type="date" className="cr-input" value={form.dateDone || ""} onChange={(e) => setForm({ ...form, dateDone: e.target.value })} /></div>
+          <input type="date" max={todayStr()} className="cr-input" value={form.dateDone || ""} onChange={(e) => setForm({ ...form, dateDone: e.target.value })} /></div>
+      </div>
+      <div className="cr-field"><label className="cr-label">Quantidade total de sessões planejadas (opcional)</label>
+        <input type="number" min="1" className="cr-input" value={form.plannedSessions || ""}
+          onChange={(event) => setForm({ ...form, plannedSessions: Number(event.target.value) || "" })} /></div>
+      <div className="cr-row">
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Prioridade financeira</label>
+          <ManagedSelect listKey="priority" value={form.priority || "alta"} onChange={(value) => setForm({ ...form, priority: value })} /></div>
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Próxima sessão prevista</label>
+          <input type="date" className="cr-input" value={form.nextExpenseDate || preview || ""}
+            onChange={(event) => setForm({ ...form, nextExpenseDate: event.target.value })} /></div>
       </div>
 
       <FormSection title="Recorrência e alertas" />
@@ -6206,15 +6301,33 @@ function productStatus(s) {
 function ShoppingView({ shopping, setShopping }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
+  const [purchasing, setPurchasing] = useState(null);
   const [tab, setTab] = useState("desejo");
   const [filter, setFilter] = useState("todos");
   const [filterCategory, setFilterCategory] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
 
   const save = (data) => { setShopping(upsertById(shopping, data)); };
-  const remove = (id) => setShopping(shopping.filter((x) => x.id !== id));
+  const remove = (id) => setShopping(shopping.flatMap((item) => {
+    if (item.id !== id) return [item];
+    if ((item.purchaseHistory || []).length > 0) return [{ ...item, archived: true }];
+    return [];
+  }));
+  const registerPurchase = (item, purchase) => {
+    const purchaseHistory = Array.isArray(item.purchaseHistory) ? item.purchaseHistory : [];
+    if (purchaseHistory.some((entry) => entry.id === purchase.id)) return;
+    const kind = inferShoppingKind(item);
+    setShopping(upsertById(shopping, {
+      ...item,
+      status: kind === "desejo" ? "comprado" : "ainda tem",
+      lastPurchaseDate: purchase.date,
+      nextPurchaseDate: nextFinanceDate(purchase.date, item.purchaseFrequency, item.productDurationDays),
+      purchaseHistory: [purchase, ...purchaseHistory],
+    }));
+    setPurchasing(null);
+  };
 
-  const withKind = shopping.map((s) => {
+  const withKind = shopping.filter((s) => !s.archived).map((s) => {
     const kind = inferShoppingKind(s);
     return { ...s, _kind: kind, _status: kind === "rotina" ? productStatus(s) : s.status };
   });
@@ -6273,25 +6386,27 @@ function ShoppingView({ shopping, setShopping }) {
 
       {viewAll || filterCategory !== "todas" ? (
         <div className="cr-grid cr-grid-3">
-          {filtered.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} />)}
+          {filtered.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} />)}
         </div>
       ) : (
         byCategory().map(([cat, items]) => (
           <div key={cat} style={{ marginBottom: 22 }}>
             <SectionTitle title={cat} count={`${items.length} ${items.length === 1 ? "item" : "itens"}`} />
             <div className="cr-grid cr-grid-3">
-              {items.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} />)}
+              {items.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} />)}
             </div>
           </div>
         ))
       )}
 
       {editing && <ShoppingModal item={editing === "new" ? null : editing} defaultKind={tab} onSave={save} onClose={() => setEditing(null)} />}
+      {purchasing && <SourceExpenseModal item={purchasing} title={`Confirmar compra: ${purchasing.name}`} amount={purchasing.price}
+        onSave={(entry) => registerPurchase(purchasing, entry)} onClose={() => setPurchasing(null)} />}
     </div>
   );
 }
 
-function ShoppingCard({ s, onEdit, onRemove }) {
+function ShoppingCard({ s, onEdit, onRemove, onPurchase }) {
   const isRoutine = s._kind === "rotina";
   const st = s._status || s.status;
   const chipStyle = isRoutine
@@ -6307,24 +6422,67 @@ function ShoppingCard({ s, onEdit, onRemove }) {
         </div>
       </div>
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
-        {!isRoutine && <PriorityChip id={s.priority} />}
+        <PriorityChip id={s.priority} />
         <span className="cr-chip" style={chipStyle}>{listName(isRoutine ? "productStatus" : "wishStatus", st)}</span>
       </div>
       {isRoutine && s.notes && <p className="cr-sub" style={{ margin: "4px 0" }}>{s.notes}</p>}
       {s.price > 0 && <p style={{ fontSize: 15, fontWeight: 600, margin: "4px 0" }}>{fmtBRL(s.price)}</p>}
+      {s.purchaseFrequency && <p className="cr-sub" style={{ margin: "4px 0" }}>Frequência: {s.purchaseFrequency}</p>}
+      {s.nextPurchaseDate && <p className="cr-sub" style={{ margin: "4px 0" }}>Próxima compra prevista: {fmtDateShort(s.nextPurchaseDate)}</p>}
+      {(s.purchaseHistory || []).length > 0 && (
+        <p className="cr-sub" style={{ margin: "4px 0" }}>
+          Compras reais: {s.purchaseHistory.length} · última em {fmtDateShort(s.purchaseHistory[0].date)}
+        </p>
+      )}
       <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 6 }}>
         <span className="cr-sub" style={{ margin: 0 }}>{s.store}</span>
         {s.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(s.link)}>abrir loja</button>}
       </div>
+      {onPurchase && !isClosedItem(isRoutine ? "productStatus" : "wishStatus", st) && (
+        <button className="cr-btn primary" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={onPurchase}>
+          Confirmar compra
+        </button>
+      )}
     </div>
+  );
+}
+
+function SourceExpenseModal({ item, title, amount, onSave, onClose }) {
+  const [form, setForm] = useState({ date: todayStr(), amount: Number(amount) || "", description: "" });
+  const [saving, setSaving] = useState(false);
+  const save = () => {
+    if (!form.date || form.date > todayStr() || !(Number(form.amount) > 0) || saving) return;
+    setSaving(true);
+    onSave({
+      id: uid(), date: form.date, amount: Number(form.amount),
+      description: form.description.trim(), category: item.category || "",
+      priority: item.priority || "media",
+    });
+  };
+  return (
+    <Modal size="small" title={title} onClose={onClose}>
+      <div className="cr-field"><label className="cr-label">Data da despesa</label>
+        <input type="date" max={todayStr()} className="cr-input" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></div>
+      <div className="cr-field"><label className="cr-label">Valor realmente pago (R$)</label>
+        <input type="number" min="0.01" step="0.01" className="cr-input" value={form.amount}
+          onChange={(event) => setForm({ ...form, amount: event.target.value })} /></div>
+      <div className="cr-field"><label className="cr-label">Observação (opcional)</label>
+        <input className="cr-input" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></div>
+      <button className="cr-btn primary" disabled={saving || !form.date || form.date > todayStr() || !(Number(form.amount) > 0)}
+        style={{ width: "100%", justifyContent: "center" }} onClick={save}>Registrar despesa real</button>
+    </Modal>
   );
 }
 
 function ShoppingModal({ item, defaultKind, onSave, onClose }) {
   const [form, setForm] = useState(item
     ? { ...item, kind: inferShoppingKind(item), status: inferShoppingKind(item) === "rotina" ? productStatus(item) : item.status }
-    : { name: "", category: "", store: "", price: "", priority: "media", link: "", kind: defaultKind || "desejo", status: (defaultKind === "rotina" ? "ainda tem" : "desejado"), desiredDate: "", notes: "" });
-  const autoStatus = useAutoSave(form, onSave, (form) => ({ ...form, price: Number(form.price) || 0 }));
+    : { name: "", category: "", store: "", price: "", priority: "media", link: "", kind: defaultKind || "desejo", status: (defaultKind === "rotina" ? "ainda tem" : "desejado"), desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
+  const autoStatus = useAutoSave(form, onSave, (form) => ({
+    ...form,
+    price: Number(form.price) || 0,
+    productDurationDays: Number(form.productDurationDays) || 0,
+  }));
   const isRoutine = form.kind === "rotina";
   const changeKind = (k) => setForm({ ...form, kind: k, status: k === "rotina" ? "ainda tem" : "desejado" });
   return (
@@ -6354,6 +6512,18 @@ function ShoppingModal({ item, defaultKind, onSave, onClose }) {
         <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://…" /></div>
       <div className="cr-field"><label className="cr-label">Status</label>
         <ManagedSelect listKey={isRoutine ? "productStatus" : "wishStatus"} value={form.status} onChange={(v) => setForm({ ...form, status: v })} /></div>
+      <div className="cr-field"><label className="cr-label">{isRoutine ? "Frequência de reposição" : "Frequência de compra"}</label>
+        <select className="cr-select" value={form.purchaseFrequency || "pontual"}
+          onChange={(event) => setForm({ ...form, purchaseFrequency: event.target.value })}>
+          <option value="mensal">Mensal</option><option value="trimestral">Trimestral</option>
+          <option value="semestral">Semestral</option><option value="anual">Anual</option><option value="pontual">Pontual</option>
+        </select></div>
+      {isRoutine && <div className="cr-field"><label className="cr-label">Duração do produto (dias, opcional)</label>
+        <input type="number" min="1" className="cr-input" value={form.productDurationDays || ""}
+          onChange={(event) => setForm({ ...form, productDurationDays: Number(event.target.value) || "" })} /></div>}
+      <div className="cr-field"><label className="cr-label">Data da compra / reposição prevista</label>
+        <input type="date" className="cr-input" value={form.nextPurchaseDate || form.desiredDate || ""}
+          onChange={(event) => setForm({ ...form, nextPurchaseDate: event.target.value, desiredDate: event.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Observações (marca, tom, como uso…)</label>
         <textarea className="cr-textarea" value={form.notes || ""} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
@@ -6368,15 +6538,32 @@ function ShoppingModal({ item, defaultKind, onSave, onClose }) {
 function HobbiesView({ hobbies, setHobbies }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
+  const [recording, setRecording] = useState(null);
   const [filterCategory, setFilterCategory] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
   const save = (data) => { setHobbies(upsertById(hobbies, data)); };
-  const remove = (id) => setHobbies(hobbies.filter((x) => x.id !== id));
+  const remove = (id) => setHobbies(hobbies.flatMap((item) => {
+    if (item.id !== id) return [item];
+    if ((item.expenseHistory || []).length > 0) return [{ ...item, archived: true }];
+    return [];
+  }));
+  const registerExpense = (hobby, entry) => {
+    const expenseHistory = Array.isArray(hobby.expenseHistory) ? hobby.expenseHistory : [];
+    if (expenseHistory.some((saved) => saved.id === entry.id)) return;
+    setHobbies(upsertById(hobbies, {
+      ...hobby,
+      lastExpenseDate: entry.date,
+      nextExpenseDate: nextFinanceDate(entry.date, hobby.expenseFrequency),
+      expenseHistory: [entry, ...expenseHistory],
+    }));
+    setRecording(null);
+  };
 
+  const visibleHobbies = hobbies.filter((hobby) => !hobby.archived);
   const catList = getList("hobbyCategory");
-  const extraCats = Array.from(new Set(hobbies.map((h) => h.category).filter((c) => c && !catList.some((x) => x.id === c))));
+  const extraCats = Array.from(new Set(visibleHobbies.map((h) => h.category).filter((c) => c && !catList.some((x) => x.id === c))));
   const order = [...catList.map((c) => c.id), ...extraCats];
-  const filtered = filterCategory === "todas" ? hobbies : hobbies.filter((h) => h.category === filterCategory);
+  const filtered = filterCategory === "todas" ? visibleHobbies : visibleHobbies.filter((h) => h.category === filterCategory);
 
   return (
     <div>
@@ -6398,7 +6585,7 @@ function HobbiesView({ hobbies, setHobbies }) {
 
       {viewAll || filterCategory !== "todas" ? (
         <div className="cr-grid cr-grid-3">
-          {filtered.map((h) => <HobbyCard key={h.id} h={h} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} />)}
+          {filtered.map((h) => <HobbyCard key={h.id} h={h} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} onExpense={() => setRecording(h)} />)}
         </div>
       ) : (
         [...order, ""].map((cat) => {
@@ -6408,7 +6595,7 @@ function HobbiesView({ hobbies, setHobbies }) {
             <div key={cat || "sem"} style={{ marginBottom: 36 }}>
               <SectionTitle title={cat ? listName("hobbyCategory", cat) : "Sem categoria"} count={`${items.length} ${items.length === 1 ? "hobby" : "hobbies"}`} />
               <div className="cr-grid cr-grid-3">
-                {items.map((h) => <HobbyCard key={h.id} h={h} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} />)}
+                {items.map((h) => <HobbyCard key={h.id} h={h} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} onExpense={() => setRecording(h)} />)}
               </div>
             </div>
           );
@@ -6416,11 +6603,13 @@ function HobbiesView({ hobbies, setHobbies }) {
       )}
 
       {editing && <HobbyModal item={editing === "new" ? null : editing} onSave={save} onClose={() => setEditing(null)} />}
+      {recording && <SourceExpenseModal item={recording} title={`Registrar despesa: ${recording.name}`} amount={recording.cost}
+        onSave={(entry) => registerExpense(recording, entry)} onClose={() => setRecording(null)} />}
     </div>
   );
 }
 
-function HobbyCard({ h, onEdit, onRemove }) {
+function HobbyCard({ h, onEdit, onRemove, onExpense }) {
   return (
     <div className="cr-card">
       {h.image ? (
@@ -6459,6 +6648,16 @@ function HobbyCard({ h, onEdit, onRemove }) {
         <span className="cr-sub" style={{ margin: 0 }}>{h.timeSpent ? `${h.timeSpent}h dedicadas` : ""}{h.cost ? ` · ${fmtBRL(h.cost)}` : ""}</span>
         {h.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(h.link)}><Link2 size={12} /> Abrir link</button>}
       </div>
+      {h.expenseFrequency && h.nextExpenseDate && (
+        <p className="cr-sub" style={{ margin: "4px 0" }}>Próxima despesa prevista: {fmtDateShort(h.nextExpenseDate)} · {h.expenseFrequency}</p>
+      )}
+      {h.expenseType && <p className="cr-sub" style={{ margin: "4px 0" }}>Tipo de despesa: {h.expenseType}</p>}
+      {(h.expenseHistory || []).length > 0 && (
+        <p className="cr-sub" style={{ margin: "4px 0" }}>Despesas reais registradas: {(h.expenseHistory || []).length}</p>
+      )}
+      <button className="cr-btn" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={onExpense}>
+        Registrar despesa real
+      </button>
     </div>
   );
 }
@@ -6467,8 +6666,14 @@ function HobbyModal({ item, onSave, onClose }) {
   const [form, setForm] = useState(item || {
     name: "", category: "", image: "", description: "", goal: "", frequency: "", level: "",
     status: "quero experimentar", progress: 0, timeSpent: "", materials: "", cost: "", link: "", notes: "",
+    priority: "media", expenseType: "atividade", expenseFrequency: "pontual", nextExpenseDate: "", expenseHistory: [],
   });
-  const autoStatus = useAutoSave(form, onSave, (form) => ({ ...form, timeSpent: Number(form.timeSpent) || 0, cost: Number(form.cost) || 0 }));
+  const autoStatus = useAutoSave(form, onSave, (form) => ({
+    ...form,
+    timeSpent: Number(form.timeSpent) || 0,
+    cost: Number(form.cost) || 0,
+    expenseHistory: Array.isArray(form.expenseHistory) ? form.expenseHistory : [],
+  }));
   return (
     <Modal title={item ? "Editar hobby" : "Novo hobby"} onClose={onClose}>
       <div className="cr-field"><label className="cr-label">Nome</label>
@@ -6495,9 +6700,29 @@ function HobbyModal({ item, onSave, onClose }) {
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Tempo dedicado (h)</label>
           <input type="number" className="cr-input" value={form.timeSpent} onChange={(e) => setForm({ ...form, timeSpent: e.target.value })} /></div>
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Custo (R$)</label>
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor estimado por despesa (R$)</label>
           <input type="number" className="cr-input" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} /></div>
       </div>
+      <div className="cr-row">
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Prioridade</label>
+          <ManagedSelect listKey="priority" value={form.priority || "media"} onChange={(value) => setForm({ ...form, priority: value })} /></div>
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Tipo de despesa</label>
+          <select className="cr-select" value={form.expenseType || "atividade"} onChange={(event) => setForm({ ...form, expenseType: event.target.value })}>
+            <option value="atividade">Atividade</option><option value="material">Material</option>
+            <option value="equipamento">Equipamento</option><option value="curso">Curso</option>
+            <option value="assinatura">Assinatura</option><option value="outro">Outro</option>
+          </select></div>
+      </div>
+      <div className="cr-row">
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Frequência da despesa</label>
+          <select className="cr-select" value={form.expenseFrequency || "pontual"} onChange={(event) => setForm({ ...form, expenseFrequency: event.target.value })}>
+            <option value="mensal">Mensal</option><option value="trimestral">Trimestral</option>
+            <option value="semestral">Semestral</option><option value="anual">Anual</option><option value="pontual">Pontual</option>
+          </select></div>
+      </div>
+      <div className="cr-field"><label className="cr-label">Próxima despesa prevista</label>
+        <input type="date" className="cr-input" value={form.nextExpenseDate || ""}
+          onChange={(event) => setForm({ ...form, nextExpenseDate: event.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Materiais necessários</label>
         <input className="cr-input" value={form.materials} onChange={(e) => setForm({ ...form, materials: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Link (tutorial, comunidade, aula…)</label>
@@ -7263,6 +7488,10 @@ export default function App({ onSignOut }) {
   const setPages = useCallback((v) => { setPagesState(v); return storageSet(KEYS.pages, v); }, []);
   const setPlaces = useCallback((v) => { setPlacesState(v); return storageSet(KEYS.places, v); }, []);
   const setInvestments = useCallback((v) => { setInvestmentsState(v); return storageSet(KEYS.investments, v); }, []);
+  const integratedFinance = useMemo(
+    () => buildIntegratedFinance({ finance, shopping, beauty, hobbies, today: todayStr() }),
+    [finance, shopping, beauty, hobbies],
+  );
 
   const restoreBackup = async (backup) => {
     if (!backup || typeof backup !== "object" || Array.isArray(backup)) {
@@ -7495,14 +7724,14 @@ export default function App({ onSignOut }) {
         </div>
       )}
       <div className="cr-main">
-        {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={finance} notes={notes} areas={areas} settings={settings} personaldev={personaldev} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab} />}
+        {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={integratedFinance} notes={notes} areas={areas} settings={settings} personaldev={personaldev} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab} />}
         {tab === "search" && <GlobalSearchView query={searchQuery} setQuery={setSearchQuery} all={searchData} goTo={setTab} />}
         {tab === "tasks" && <PlanningHub tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="tarefas" gcal={gcal} setGcal={setGcal} />}
         {tab === "routines" && <PlanningHub key="routines" tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="rotinas" gcal={gcal} setGcal={setGcal} />}
         {currentPage && <CustomPageView key={currentPage.id} page={currentPage} setPage={(updated) => setPages(pages.map((pg) => pg.id === updated.id ? updated : pg))} />}
         {tab === "goals" && <GoalsView goals={goals} setGoals={setGoals} areas={areas} />}
         {tab === "habits" && <HabitsView habits={habits} setHabits={setHabits} areas={areas} />}
-        {tab === "finance" && <FinanceView finance={finance} setFinance={setFinance} accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} investments={investments} setInvestments={setInvestments} />}
+        {tab === "finance" && <FinanceView finance={finance} setFinance={setFinance} shopping={shopping} setShopping={setShopping} beauty={beauty} setBeauty={setBeauty} hobbies={hobbies} setHobbies={setHobbies} accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} investments={investments} setInvestments={setInvestments} goTo={setTab} />}
         {tab === "study" && <StudyView study={study} setStudy={setStudy} studyAreas={studyAreas} setStudyAreas={setStudyAreas} />}
         {tab === "career" && <CareerView career={career} setCareer={setCareer} />}
         {tab === "beauty" && <BeautyView beauty={beauty} setBeauty={setBeauty} places={places} setPlaces={setPlaces} settings={settings} setSettings={setSettings} />}
