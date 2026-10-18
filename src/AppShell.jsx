@@ -1,6 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import App from "../App.jsx";
-import { notify } from "./components/ToastHost.jsx";
 import { clearUserDataCache } from "./lib/userData.js";
 import { getSupabase, supabaseConfigError } from "./lib/supabase.js";
 
@@ -9,7 +8,6 @@ export default function AppShell() {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState("");
   const [storageError, setStorageError] = useState("");
-  const savedGoogleRefreshToken = useRef("");
 
   const supabase = supabaseConfigError ? null : getSupabase();
 
@@ -52,44 +50,12 @@ export default function AppShell() {
     return () => window.removeEventListener("central:storage-error", showStorageError);
   }, []);
 
-  useEffect(() => {
-    if (!session?.provider_refresh_token || !supabase
-      || savedGoogleRefreshToken.current === session.provider_refresh_token) return undefined;
-    let active = true;
-    supabase.functions.invoke("google-calendar", {
-      body: { action: "save-refresh-token", refreshToken: session.provider_refresh_token },
-    }).then(({ data, error }) => {
-      if (!active) return;
-      if (data?.saved === true) {
-        savedGoogleRefreshToken.current = session.provider_refresh_token;
-        notify("Autorização da Agenda Google salva.");
-        return;
-      }
-      if (!error) {
-        console.error("A função não confirmou o salvamento da autorização da Agenda Google.", data);
-        setStorageError("A Edge Function não confirmou o salvamento da autorização da Agenda Google. Verifique se a função atualizada foi publicada.");
-        return;
-      }
-      console.error("Não foi possível salvar a autorização da Agenda Google.", error.message);
-      setStorageError("Não foi possível guardar a autorização da Agenda Google. Confira se a atualização da função e da migração foi publicada.");
-    }).catch((error) => {
-      if (!active) return;
-      console.error("Não foi possível salvar a autorização da Agenda Google.", error);
-      setStorageError("Não foi possível guardar a autorização da Agenda Google. Confira sua conexão e tente novamente.");
-    });
-    return () => { active = false; };
-  }, [session, supabase]);
-
   const signInWithGoogle = useCallback(async () => {
     setAuthError("");
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: {
-          redirectTo: window.location.origin,
-          scopes: "https://www.googleapis.com/auth/calendar.readonly",
-          queryParams: { access_type: "offline", prompt: "consent" },
-        },
+        options: { redirectTo: window.location.origin },
       });
       if (error) throw error;
     } catch (error) {

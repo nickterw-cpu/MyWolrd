@@ -1,6 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders as supabaseCorsHeaders } from "npm:@supabase/supabase-js@2/cors";
 
+const MAX_LINKS_PER_USER = 30;
+const MAX_ICS_CHARS = 5_000_000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const corsHeaders = {
   ...supabaseCorsHeaders,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -11,34 +15,21 @@ const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringif
   headers: { ...corsHeaders, "Content-Type": "application/json" },
 });
 
-function calendarEvent(item: Record<string, unknown>) {
-  const start = item.start as Record<string, string> | undefined;
-  const end = item.end as Record<string, string> | undefined;
-  if (!start || !end || (!start.date && !start.dateTime) || (!end.date && !end.dateTime)) return null;
-  const allDay = Boolean(start.date);
-  const startValue = allDay ? start.date : start.dateTime.slice(0, 16);
-  const endValue = allDay ? end.date : end.dateTime.slice(0, 16);
-  const description = typeof item.description === "string" ? item.description : "";
-  const meet = typeof item.hangoutLink === "string"
-    ? item.hangoutLink
-    : description.match(/https:\/\/meet\.google\.com\/[a-z0-9-]+/i)?.[0] || "";
-  return {
-    id: String(item.id || crypto.randomUUID()),
-    t: typeof item.summary === "string" ? item.summary : "(sem título)",
-    s: startValue,
-    e: endValue,
-    ad: allDay,
-    loc: typeof item.location === "string" ? item.location : "",
-    meet,
-    url: typeof item.htmlLink === "string" ? item.htmlLink : "",
-  };
+class HttpError extends Error {
+  status: number;
+  extra: Record<string, unknown>;
+  constructor(status: number, message: string, extra: Record<string, unknown> = {}) {
+    super(message);
+    this.status = status;
+    this.extra = extra;
+  }
 }
 
 function validateIcsUrl(value: unknown): URL | null {
   if (typeof value !== "string" || value.length > 2048) return null;
   let url: URL;
   try {
-    url = new URL(value);
+    url = new URL(value.trim());
   } catch {
     return null;
   }
@@ -66,6 +57,25 @@ function getKeyFromEnvironment(value: string | undefined, name: string): string 
   return typeof key === "string" && key.length > 0 ? key : null;
 }
 
+async function downloadIcs(url: URL): Promise<string> {
+  let response: Response;
+  try {
+    response = await fetch(url, { redirect: "error" });
+  } catch (error) {
+    console.error("Falha ao buscar a agenda .ics do Google.", error);
+    throw new HttpError(502, "Não foi possível buscar o link .ics. Confira o endereço e tente novamente.");
+  }
+  if (!response.ok) {
+    throw new HttpError(502, `O Google não conseguiu fornecer o arquivo .ics (HTTP ${response.status}).`);
+  }
+  const text = await response.text();
+  if (text.length > MAX_ICS_CHARS) throw new HttpError(413, "O arquivo .ics é grande demais para importar.");
+  if (!text.includes("BEGIN:VCALENDAR")) {
+    throw new HttpError(422, "O endereço não retornou uma agenda válida. Copie o \"Endereço secreto no formato iCal\".");
+  }
+  return text;
+}
+
 async function handleRequest(request: Request): Promise<Response> {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") return jsonResponse({ error: "Método não permitido." }, 405);
@@ -74,7 +84,7 @@ async function handleRequest(request: Request): Promise<Response> {
   const accessToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!accessToken) return jsonResponse({ error: "Entre novamente para acessar a agenda." }, 401);
 
-  let body: { action?: unknown; icsUrl?: unknown; refreshToken?: unknown };
+  let body: { action?: unknown; icsUrl?: unknown; linkId?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -90,8 +100,6 @@ async function handleRequest(request: Request): Promise<Response> {
     || getKeyFromEnvironment(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS"), "SUPABASE_PUBLISHABLE_KEYS");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
     || getKeyFromEnvironment(Deno.env.get("SUPABASE_SECRET_KEYS"), "SUPABASE_SECRET_KEYS");
-  const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
-  const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
   if (!supabaseUrl || !anonKey || !serviceRoleKey) {
     console.error("As credenciais de runtime do Supabase não estão configuradas.");
     return jsonResponse({ error: "A função de agenda não está configurada corretamente." }, 500);
@@ -103,126 +111,96 @@ async function handleRequest(request: Request): Promise<Response> {
   const { data: { user }, error: authError } = await authClient.auth.getUser(accessToken);
   if (authError || !user) return jsonResponse({ error: "Sua sessão expirou. Entre novamente." }, 401);
 
-  if (body.icsUrl !== undefined) {
-    const icsUrl = validateIcsUrl(body.icsUrl);
-    if (!icsUrl) return jsonResponse({ error: "Informe um link .ics privado válido do Google Agenda." }, 400);
-    try {
-      const response = await fetch(icsUrl, { redirect: "error" });
-      if (!response.ok) {
-        return jsonResponse({ error: `O Google não conseguiu fornecer o arquivo .ics (HTTP ${response.status}).` }, 502);
-      }
-      const text = await response.text();
-      if (text.length > 5_000_000) return jsonResponse({ error: "O arquivo .ics é grande demais para importar." }, 413);
-      return jsonResponse({ ics: text });
-    } catch (error) {
-      console.error("Falha ao buscar a agenda .ics do Google.", error);
-      return jsonResponse({ error: "Não foi possível buscar o link .ics. Confira o endereço e tente novamente." }, 502);
-    }
-  }
-
-  if (!clientId || !clientSecret) {
-    console.error("Os secrets OAuth do Google não estão configurados na Edge Function.");
-    return jsonResponse({ error: "A conexão Google ainda não está configurada no servidor." }, 500);
-  }
-
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  if (body.action === "save-refresh-token") {
-    if (
-      typeof body.refreshToken !== "string"
-      || body.refreshToken.length < 20
-      || body.refreshToken.length > 4096
-    ) {
-      return jsonResponse({ error: "O Google não retornou um refresh token válido. Reconecte sua conta." }, 400);
+  try {
+    // Salva o link secreto no Supabase (se já existir para este usuário, reaproveita o registro).
+    if (body.action === "add-link") {
+      const icsUrl = validateIcsUrl(body.icsUrl);
+      if (!icsUrl) return jsonResponse({ error: "Informe um link .ics secreto válido do Google Agenda." }, 400);
+      const href = icsUrl.toString();
+      const ics = await downloadIcs(icsUrl);
+
+      const { data: existing, error: findError } = await admin
+        .from("calendar_links")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("ics_url", href)
+        .maybeSingle();
+      if (findError) {
+        console.error("Não foi possível consultar os links de agenda.", findError);
+        return jsonResponse({ error: "Não foi possível salvar o link da agenda." }, 500);
+      }
+      if (existing) return jsonResponse({ id: existing.id, ics, existing: true });
+
+      const { count, error: countError } = await admin
+        .from("calendar_links")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      if (countError) {
+        console.error("Não foi possível contar os links de agenda.", countError);
+        return jsonResponse({ error: "Não foi possível salvar o link da agenda." }, 500);
+      }
+      if ((count ?? 0) >= MAX_LINKS_PER_USER) {
+        return jsonResponse({ error: `O limite é de ${MAX_LINKS_PER_USER} agendas. Remova alguma antes de adicionar mais.` }, 409);
+      }
+
+      const { data: inserted, error: insertError } = await admin
+        .from("calendar_links")
+        .insert({ user_id: user.id, ics_url: href })
+        .select("id")
+        .single();
+      if (insertError || !inserted) {
+        console.error("Não foi possível guardar o link da agenda.", insertError);
+        return jsonResponse({ error: "Não foi possível salvar o link da agenda." }, 500);
+      }
+      return jsonResponse({ id: inserted.id, ics, existing: false });
     }
-    const { error } = await admin.from("google_tokens").upsert({
-      user_id: user.id,
-      refresh_token: body.refreshToken,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "user_id" });
-    if (error) {
-      console.error("Não foi possível guardar a autorização Google do usuário.", error);
-      return jsonResponse({ error: "Não foi possível guardar a autorização Google. Tente reconectar sua conta." }, 500);
+
+    // Busca de novo o conteúdo de um link já salvo (o navegador só conhece o id).
+    if (body.action === "fetch-link") {
+      if (typeof body.linkId !== "string" || !UUID_PATTERN.test(body.linkId)) {
+        return jsonResponse({ error: "A solicitação está inválida." }, 400);
+      }
+      const { data: row, error } = await admin
+        .from("calendar_links")
+        .select("ics_url")
+        .eq("id", body.linkId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (error) {
+        console.error("Não foi possível carregar o link da agenda.", error);
+        return jsonResponse({ error: "Não foi possível acessar o link da agenda." }, 500);
+      }
+      if (!row) return jsonResponse({ error: "Este link não está mais salvo no servidor.", missing: true }, 404);
+      const icsUrl = validateIcsUrl(row.ics_url);
+      if (!icsUrl) return jsonResponse({ error: "O link salvo é inválido. Remova a agenda e adicione de novo." }, 422);
+      return jsonResponse({ ics: await downloadIcs(icsUrl) });
     }
-    return jsonResponse({ saved: true });
+
+    if (body.action === "remove-link") {
+      if (typeof body.linkId !== "string" || !UUID_PATTERN.test(body.linkId)) {
+        return jsonResponse({ error: "A solicitação está inválida." }, 400);
+      }
+      const { error } = await admin
+        .from("calendar_links")
+        .delete()
+        .eq("id", body.linkId)
+        .eq("user_id", user.id);
+      if (error) {
+        console.error("Não foi possível remover o link da agenda.", error);
+        return jsonResponse({ error: "Não foi possível remover o link da agenda." }, 500);
+      }
+      return jsonResponse({ removed: true });
+    }
+
+    return jsonResponse({ error: "Ação desconhecida." }, 400);
+  } catch (error) {
+    if (error instanceof HttpError) return jsonResponse({ error: error.message, ...error.extra }, error.status);
+    throw error;
   }
-
-  const { data: tokenRow, error: tokenError } = await admin
-    .from("google_tokens")
-    .select("refresh_token")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (tokenError) {
-    console.error("Não foi possível carregar a autorização Google do usuário.", tokenError);
-    return jsonResponse({ error: "Não foi possível acessar a autorização da agenda." }, 500);
-  }
-  if (!tokenRow?.refresh_token) {
-    return jsonResponse({ error: "Reconecte sua conta Google para autorizar o acesso à agenda.", reconnect: true }, 409);
-  }
-
-  const refreshResponse = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: tokenRow.refresh_token,
-      grant_type: "refresh_token",
-    }),
-  });
-  const refreshResult = await refreshResponse.json();
-  if (!refreshResponse.ok || typeof refreshResult.access_token !== "string") {
-    if (refreshResult.error === "invalid_grant") {
-      return jsonResponse({ error: "A autorização Google expirou ou foi revogada. Reconecte sua conta.", reconnect: true }, 401);
-    }
-    console.error("O Google recusou a renovação da autorização.", { status: refreshResponse.status, error: refreshResult.error });
-    return jsonResponse({ error: "Não foi possível renovar a autorização Google. Tente novamente." }, 502);
-  }
-
-  const now = new Date();
-  const timeMin = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 30)).toISOString();
-  const timeMax = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 365)).toISOString();
-  const events: ReturnType<typeof calendarEvent>[] = [];
-  let pageToken: string | undefined;
-  const seenPageTokens = new Set<string>();
-  do {
-    const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
-    url.searchParams.set("singleEvents", "true");
-    url.searchParams.set("orderBy", "startTime");
-    url.searchParams.set("maxResults", "2500");
-    url.searchParams.set("timeMin", timeMin);
-    url.searchParams.set("timeMax", timeMax);
-    if (pageToken) url.searchParams.set("pageToken", pageToken);
-
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${refreshResult.access_token}` },
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      console.error("A Google Calendar API recusou a solicitação.", { status: response.status });
-      return jsonResponse({
-        error: response.status === 401
-          ? "A autorização Google expirou. Reconecte sua conta."
-          : "Não foi possível carregar os eventos da agenda Google.",
-        reconnect: response.status === 401,
-      }, response.status === 401 ? 401 : 502);
-    }
-    for (const item of result.items || []) {
-      if (item.status === "cancelled") continue;
-      const event = calendarEvent(item);
-      if (event) events.push(event);
-    }
-    pageToken = result.nextPageToken;
-    if (pageToken && seenPageTokens.has(pageToken)) {
-      console.error("A API Google Calendar retornou um cursor de paginação repetido.");
-      return jsonResponse({ error: "A paginação da agenda retornou uma resposta inválida." }, 502);
-    }
-    if (pageToken) seenPageTokens.add(pageToken);
-  } while (pageToken);
-
-  return jsonResponse({ events, updatedAt: new Date().toISOString() });
 }
 
 Deno.serve(async (request) => {
@@ -230,6 +208,6 @@ Deno.serve(async (request) => {
     return await handleRequest(request);
   } catch (error) {
     console.error("Erro inesperado na Edge Function google-calendar.", error);
-    return jsonResponse({ error: "Ocorreu um erro interno ao acessar a agenda Google." }, 500);
+    return jsonResponse({ error: "Ocorreu um erro interno ao acessar a agenda." }, 500);
   }
 });

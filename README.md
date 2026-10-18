@@ -142,23 +142,38 @@ Aplique o arquivo `supabase/migrations/20261010220000_create_central_user_data.s
 
 O provedor Google retorna primeiro ao Supabase; a URL de redirecionamento do Supabase é diferente da URL de callback do provedor no Google Cloud.
 
-### Google Agenda ao vivo
+### Google Agenda (links secretos .ics)
 
-A conexão ao vivo usa o escopo somente leitura `https://www.googleapis.com/auth/calendar.readonly`. Aplique as migrações `supabase/migrations/20261011000000_create_google_tokens.sql` e `supabase/migrations/20261011010000_secure_google_tokens_writes.sql`, depois publique a Edge Function atualizada a partir da raiz do repositório:
+A Central lê o Google Agenda **somente por links secretos .ics**. Não há OAuth da agenda: o login com Google pede apenas os escopos básicos (e-mail e perfil), então não aparece a tela de "app não verificado" por causa de dados da agenda.
 
-```sh
-supabase functions deploy google-calendar
-```
+Configuração (uma vez):
 
-O `supabase/config.toml` desativa a validação JWT automática do gateway **somente para essa função**, para que o preflight CORS `OPTIONS` do navegador possa chegar ao handler. A função valida o token Bearer com `auth.getUser()` antes de executar qualquer operação; não remova essa validação.
+1. Aplique a migração `supabase/migrations/20261018000000_create_calendar_links.sql`. Ela cria `public.calendar_links`, que guarda os links secretos. A tabela tem RLS ativa e **nenhum acesso para `anon` ou `authenticated`**: só a Edge Function (papel `service_role`) lê e grava.
+2. Opcional: aplique `supabase/migrations/20261018000100_drop_google_tokens.sql`, que remove a tabela `google_tokens` da antiga conexão OAuth.
+3. Publique a Edge Function a partir da raiz do repositório:
 
-No Supabase, configure `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` em **Edge Functions → Secrets**. São as credenciais do mesmo cliente OAuth configurado em **Authentication → Sign In / Providers → Google**. Nunca inclua o Client Secret em `.env.local`, no código frontend ou em variáveis `VITE_*`. O navegador envia o refresh token à Edge Function autenticada, que o grava com o papel `service_role`; a tabela `google_tokens` não concede leitura nem escrita direta ao papel `authenticated`.
+   ```sh
+   supabase functions deploy google-calendar
+   ```
 
-Ao entrar ou reconectar pelo botão da agenda, o Google pede a permissão de leitura e o aplicativo guarda o refresh token. A Edge Function troca esse token por um access token, consulta a agenda principal em uma janela de 30 dias anteriores a 365 dias futuros e percorre todas as páginas. Os eventos em cache permanecem na Central e podem ser consultados offline, mas a atualização exige conexão. Se o Google revogar ou expirar a autorização, use **Reconectar Google** na tela da agenda.
+   Os secrets `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` **não são mais usados pela função** e podem ser removidos de **Edge Functions → Secrets**. O login Google continua usando o cliente OAuth configurado em **Authentication → Providers → Google**.
 
-Como alternativa, **Assinar por link .ics** busca o arquivo privado do Google pela Edge Function, contornando o CORS do navegador. O link da agenda é secreto: fica guardado nos dados da agenda e incluído nos backups. A importação manual de arquivo `.ics` continua disponível.
+O `supabase/config.toml` desativa a validação JWT automática do gateway **somente para essa função**, para que o preflight CORS `OPTIONS` do navegador chegue ao handler. A função valida o token Bearer com `auth.getUser()` antes de qualquer operação; não remova essa validação.
 
-Para configurar o Google Cloud: ative a Google Calendar API, configure a tela de consentimento OAuth com `calendar.readonly`, cadastre o callback do Supabase nas URIs de redirecionamento autorizadas e configure as URLs de retorno da aplicação no Supabase. Em modo de teste, o Google pode expirar refresh tokens depois de sete dias; para uso contínuo, publique o consentimento conforme os requisitos do Google.
+Uso: em **Rotinas → Google Agenda → Gerenciar agendas**, cole os links secretos, um por linha. No Google Agenda (no computador): Configurações → escolha a agenda em "Configurações dos meus calendários" → **Integrar agenda** → copie o **Endereço secreto no formato iCal**.
+
+Como funciona:
+
+- A Edge Function (`add-link`) valida o endereço (somente `https://calendar.google.com/calendar/ical/.../basic.ics`), baixa o arquivo para confirmar que é uma agenda válida e salva o link em `calendar_links`. Links repetidos reaproveitam o mesmo registro. Há um limite de 30 agendas por conta.
+- O navegador guarda só o `id` do registro, o nome, a cor e a cópia dos eventos. **O link nunca volta para o navegador e não entra nos backups.** Se você restaurar um backup em outra conta, as agendas aparecerão com erro: remova-as e cole os links de novo.
+- Ao abrir o app, todas as agendas ativas são atualizadas em paralelo (`fetch-link`); a falha de uma não afeta as outras. Os eventos em cache permanecem consultáveis offline.
+- Cada agenda tem cor própria e pode ser renomeada, escondida, atualizada ou removida. Remover apaga o link do servidor (`remove-link`) e não altera nada no Google Agenda.
+- A tela junta os eventos das agendas ativas, com filtro por agenda. Eventos recorrentes são expandidos automaticamente.
+- Dados de versões anteriores (um link único guardado dentro dos dados da agenda) são migrados para o servidor na primeira atualização. Agendas que vieram de conexão OAuth ou de arquivo .ics enviado deixam de existir; adicione-as por link.
+
+Trate cada link como uma senha: quem o tiver lê aquela agenda. Se um link vazar, use **Redefinir** no mesmo lugar do Google Agenda onde você o copiou e cole o novo link.
+
+Para o login Google: no Google Cloud, em **Google Auth Platform → Data Access**, deixe apenas os escopos `openid`, `email` e `profile` (remova `calendar.readonly`, se estiver lá) e, em **Audience**, publique o app em produção para que qualquer conta consiga entrar. Quem já tinha autorizado a agenda pode revogar o acesso em https://myaccount.google.com/permissions.
 
 ## Publicar na Vercel
 
@@ -183,8 +198,8 @@ O arquivo `vercel.json` encaminha as rotas da aplicação para `index.html`, per
 | `src/components/` | Avisos de atualização, instalação e notificações |
 | `src/styles.css` | Estilos da aplicação web |
 | `public/` | Ícones da aplicação instalável |
-| `supabase/migrations/` | Esquema da tabela e políticas RLS |
-| `supabase/functions/google-calendar/` | Acesso seguro à Google Calendar API e proxy .ics |
+| `supabase/migrations/` | Tabelas e políticas RLS (dados da Central e links de agenda) |
+| `supabase/functions/google-calendar/` | Salva links secretos .ics e busca as agendas no servidor |
 | `central.html` | Versão independente, com dados locais no navegador |
 | `vercel.json` | Reescrita das rotas SPA na Vercel |
 

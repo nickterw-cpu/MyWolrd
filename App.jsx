@@ -707,7 +707,7 @@ const DEFAULT_INVESTMENT_CATEGORIES = [
 ];
 
 // Número da versão que aparece no rodapé do menu (para saber se o arquivo aberto é o mais recente)
-const APP_BUILD = "versão 9";
+const APP_BUILD = "versão 10";
 
 const DEFAULT_SETTINGS = {
   name: "",
@@ -3493,7 +3493,6 @@ function stepLabel(step) {
 /* ---------------------------------------------------------------------- */
 
 const GCAL_BLUE = "#3F6C9E";
-const GCAL_SNAPSHOT = { updatedAt: "", events: [] };
 
 
 function gcalDayOf(s) { return (s || "").slice(0, 10); }
@@ -3625,7 +3624,7 @@ function parseICS(text) {
   return events.sort((a, b) => a.s.localeCompare(b.s));
 }
 
-async function callGoogleCalendarFunction(payload = {}) {
+async function callCalendarFunction(payload) {
   const { data, error } = await getSupabase().functions.invoke("google-calendar", { body: payload });
   if (error) {
     let responseBody = null;
@@ -3633,49 +3632,129 @@ async function callGoogleCalendarFunction(payload = {}) {
       try { responseBody = await error.context.clone().json(); } catch { responseBody = null; }
     }
     const failure = new Error(responseBody?.error || error.message || "Não foi possível acessar sua agenda Google.");
-    failure.reconnect = responseBody?.reconnect === true;
+    failure.missing = responseBody?.missing === true;
     throw failure;
   }
   return data;
 }
 
-async function fetchGoogleCalendarLive() {
-  const data = await callGoogleCalendarFunction();
-  if (!Array.isArray(data?.events)) throw new Error("A resposta da agenda Google está inválida.");
-  return { events: data.events, updatedAt: data.updatedAt || new Date().toISOString() };
-}
-
-async function fetchSubscribedIcs(icsUrl) {
-  const data = await callGoogleCalendarFunction({ icsUrl });
-  if (typeof data?.ics !== "string") throw new Error("A resposta do link .ics está inválida.");
-  const events = parseICS(data.ics);
-  if (data.ics.includes("BEGIN:VEVENT") && events.length === 0) {
+function parseCalendarIcs(ics) {
+  const events = parseICS(ics);
+  if (ics.includes("BEGIN:VEVENT") && events.length === 0) {
     throw new Error("Não foi possível interpretar os eventos do link .ics.");
   }
-  return { events, updatedAt: new Date().toISOString() };
+  const name = ics.match(/^X-WR-CALNAME:(.+)$/m)?.[1]?.trim() || "";
+  return { events, name, updatedAt: new Date().toISOString() };
 }
 
-async function reconnectGoogleCalendar() {
-  const { error } = await getSupabase().auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: window.location.href,
-      scopes: "https://www.googleapis.com/auth/calendar.readonly",
-      queryParams: { access_type: "offline", prompt: "consent" },
-    },
-  });
-  if (error) throw error;
+// Salva o link secreto no Supabase (tabela calendar_links, só acessível pela Edge Function)
+// e devolve o id do registro e os eventos. O navegador não guarda o link depois disso.
+async function saveCalendarLink(icsUrl) {
+  const data = await callCalendarFunction({ action: "add-link", icsUrl });
+  if (typeof data?.ics !== "string" || typeof data?.id !== "string") {
+    throw new Error("A resposta ao salvar o link da agenda está inválida.");
+  }
+  return { linkId: data.id, existing: data.existing === true, ...parseCalendarIcs(data.ics) };
 }
 
-function gcalSourceLabel(g) {
-  if (g.source === "google") return "conexão ao vivo com o Google";
-  if (g.source === "ics-link") return "assinatura do Google Agenda por link .ics";
-  if (g.source === "ics") return "arquivo .ics que você enviou";
-  return "nenhuma agenda conectada ainda";
+async function fetchCalendarLink(linkId) {
+  const data = await callCalendarFunction({ action: "fetch-link", linkId });
+  if (typeof data?.ics !== "string") throw new Error("A resposta do link .ics está inválida.");
+  return parseCalendarIcs(data.ics);
+}
+
+async function removeCalendarLink(linkId) {
+  await callCalendarFunction({ action: "remove-link", linkId });
+}
+
+const GCAL_COLORS = ["#3F6C9E", "#7A1712", "#3E9A5A", "#B4781F", "#6E4FA3", "#1F8A8A", "#C2477A", "#5C6B73"];
+const GCAL_MAX_CALENDARS = 30;
+const EMPTY_GCAL = { calendars: [], updatedAt: "" };
+
+function makeCalendar(partial, index) {
+  return {
+    id: uid(),
+    name: "Agenda",
+    color: GCAL_COLORS[index % GCAL_COLORS.length],
+    linkId: "",
+    enabled: true,
+    events: [],
+    updatedAt: "",
+    lastError: "",
+    ...partial,
+  };
+}
+
+// Só existe o fluxo de link secreto. Converte formatos antigos e descarta o que veio de
+// conexão OAuth ou arquivo .ics. Agendas com `icsUrl` (link guardado dentro dos dados) são
+// migradas para o servidor na próxima atualização.
+function normalizeGcal(saved) {
+  if (saved && Array.isArray(saved.calendars)) {
+    const calendars = saved.calendars
+      .filter((c) => c && c.kind !== "google" && c.kind !== "file" && (c.linkId || c.icsUrl))
+      .map((c, i) => {
+        const { kind: _kind, reconnect: _reconnect, ...rest } = c;
+        return makeCalendar(rest, i);
+      });
+    return { ...saved, calendars };
+  }
+  if (saved && saved.source === "ics-link" && saved.icsUrl) {
+    return {
+      calendars: [makeCalendar({
+        name: "Agenda principal", icsUrl: saved.icsUrl, events: saved.events || [],
+        updatedAt: saved.updatedAt || "", lastError: saved.lastError || "",
+      }, 0)],
+      updatedAt: saved.updatedAt || "",
+    };
+  }
+  return { ...EMPTY_GCAL, calendars: [] };
+}
+
+function canRefreshCalendar(cal) {
+  return !!cal.icsUrl || (!!cal.enabled && !!cal.linkId);
+}
+
+async function refreshCalendar(cal) {
+  try {
+    if (cal.linkId) {
+      const result = await fetchCalendarLink(cal.linkId);
+      return { ...cal, name: cal.name || result.name || "Agenda", events: result.events, updatedAt: result.updatedAt, lastError: "" };
+    }
+    if (cal.icsUrl) {
+      const { icsUrl, ...rest } = cal;
+      const result = await saveCalendarLink(icsUrl);
+      return { ...rest, linkId: result.linkId, name: cal.name || result.name || "Agenda", events: result.events, updatedAt: result.updatedAt, lastError: "" };
+    }
+    return cal;
+  } catch (error) {
+    return {
+      ...cal,
+      lastError: error?.missing
+        ? "Este link não está mais salvo no servidor. Remova a agenda e adicione o link de novo."
+        : error instanceof Error ? error.message : "Não foi possível atualizar esta agenda.",
+    };
+  }
+}
+
+function latestStamp(calendars, fallback = "") {
+  const stamps = calendars.map((c) => c.updatedAt).filter(Boolean).sort();
+  return stamps.length ? stamps[stamps.length - 1] : fallback;
+}
+
+// Atualiza todas em paralelo; a falha de uma não impede as outras.
+async function refreshAllCalendars(gcal) {
+  const calendars = await Promise.all(gcal.calendars.map((c) => (canRefreshCalendar(c) ? refreshCalendar(c) : c)));
+  return { ...gcal, calendars, updatedAt: latestStamp(calendars, gcal.updatedAt || "") };
+}
+
+// Junta os eventos das agendas ativas, marcando cada um com a agenda de origem.
+function gcalMergedEvents(gcal) {
+  return (gcal.calendars || []).filter((c) => c.enabled).flatMap((c) =>
+    (c.events || []).map((e) => ({ ...e, id: `${c.id}:${e.id}`, calId: c.id, calName: c.name, color: c.color })));
 }
 
 function GoogleAgendaView({ gcal, setGcal }) {
-  const [mode, setMode] = useState(() => ["google", "ics-link"].includes(gcal.source) ? "lista" : "mes");
+  const [mode, setMode] = useState(() => (gcal.calendars || []).length > 0 ? "lista" : "mes");
   const [offset, setOffset] = useState(0);
   const [showBreaks, setShowBreaks] = useState(false);
   const [query, setQuery] = useState("");
@@ -3684,12 +3763,13 @@ function GoogleAgendaView({ gcal, setGcal }) {
   const [dayOpen, setDayOpen] = useState(null);
   const today = todayStr();
 
-  const all = (gcal.events || []).filter((e) => (showBreaks || e.t.trim().toLowerCase() !== "pausa")
+  const merged = gcalMergedEvents(gcal);
+  const all = merged.filter((e) => (showBreaks || e.t.trim().toLowerCase() !== "pausa")
     && (!query || e.t.toLowerCase().includes(query.toLowerCase())));
 
   const evChip = (e) => (
     <div key={e.id} onClick={(ev) => { ev.stopPropagation(); setDetail(e); }} title={e.t}
-      style={{ cursor: "pointer", fontSize: 11.5, padding: "2px 6px", borderRadius: 6, marginBottom: 3, background: "#DCE7F3", color: "#27476B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      style={{ cursor: "pointer", fontSize: 11.5, padding: "2px 6px", borderRadius: 6, marginBottom: 3, background: `${e.color}22`, borderLeft: `3px solid ${e.color}`, color: "#211D1A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
       {!e.ad && <strong>{gcalTimeOf(e.s)} </strong>}{e.t}
     </div>
   );
@@ -3755,7 +3835,7 @@ function GoogleAgendaView({ gcal, setGcal }) {
         {months.length === 0 && <p className="cr-empty">
           {all.length
             ? `A agenda foi carregada com ${all.length} evento(s), mas não há eventos futuros no período consultado.`
-            : "Nenhum evento futuro por enquanto. Use \"Atualizar / conectar\" para trazer sua agenda."}
+            : "Nenhum evento futuro por enquanto. Use \"Gerenciar agendas\" para adicionar seus links."}
         </p>}
         {months.map((m) => (
           <div key={m.ym}>
@@ -3763,8 +3843,8 @@ function GoogleAgendaView({ gcal, setGcal }) {
             <div className="cr-card">
               {m.items.map((e) => (
                 <div className="cr-list-row" key={e.id} style={{ cursor: "pointer" }} onClick={() => setDetail(e)}>
-                  <span className="cr-chip" style={{ background: "#DCE7F3", color: "#27476B", minWidth: 84, justifyContent: "center" }}>{fmtCalendarDate(gcalDayOf(e.s))}</span>
-                  <span style={{ flex: 1 }}>{e.t}</span>
+                  <span className="cr-chip" style={{ background: `${e.color}22`, borderLeft: `3px solid ${e.color}`, color: "#211D1A", minWidth: 84, justifyContent: "center" }}>{fmtCalendarDate(gcalDayOf(e.s))}</span>
+                  <span style={{ flex: 1 }}>{e.t}{gcal.calendars.length > 1 && <span className="cr-sub" style={{ margin: "0 0 0 8px", fontSize: 11.5, color: e.color }}>{e.calName}</span>}</span>
                   <span className="cr-sub" style={{ margin: 0 }}>{e.ad ? "dia inteiro" : gcalTimeOf(e.s) + (gcalTimeOf(e.e) ? " a " + gcalTimeOf(e.e) : "")}</span>
                   {e.meet && <button className="cr-btn primary" style={{ padding: "3px 10px" }} onClick={(ev) => { ev.stopPropagation(); openExternalLink(e.meet); }}>Meet</button>}
                 </div>
@@ -3777,6 +3857,7 @@ function GoogleAgendaView({ gcal, setGcal }) {
   }
 
   const updated = gcal.updatedAt ? new Date(gcal.updatedAt) : null;
+  const toggleCalendar = (id) => setGcal({ ...gcal, calendars: gcal.calendars.map((c) => (c.id === id ? { ...c, enabled: !c.enabled } : c)) });
   const dayEvents = dayOpen ? gcalOnDay(all, dayOpen) : [];
 
   return (
@@ -3786,19 +3867,32 @@ function GoogleAgendaView({ gcal, setGcal }) {
           <div>
             <p className="cr-serif" style={{ margin: 0, fontSize: 17, color: TITLE_INK, fontWeight: 700 }}><span style={{ color: TITLE_WINE }}>GOOGLE AGENDA:</span> o que realmente está agendado</p>
             <p className="cr-sub" style={{ margin: "2px 0 0" }}>
-              {(gcal.events || []).length === 0 && !updated
-                ? "Nenhuma agenda conectada ainda. Quando você enviar o arquivo .ics ou conectar sua conta, os eventos reais aparecem aqui. Esta visão não mistura com as Rotinas."
-                : `Fonte: ${gcalSourceLabel(gcal)}${updated ? `, atualizada em ${updated.toLocaleDateString("pt-BR")} às ${updated.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}. Esta visão não mistura com as Rotinas.`}
+              {gcal.calendars.length === 0
+                ? "Nenhuma agenda conectada ainda. Em \"Gerenciar agendas\", cole os links secretos .ics das suas agendas para ver todas aqui. Esta visão não mistura com as Rotinas."
+                : `${gcal.calendars.filter((c) => c.enabled).length} de ${gcal.calendars.length} agenda(s) ativa(s), ${merged.length} evento(s)${updated ? `, atualizado em ${updated.toLocaleDateString("pt-BR")} às ${updated.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}. Esta visão não mistura com as Rotinas.`}
             </p>
-            {gcal.lastError && <p className="cr-sub" role="alert" style={{ color: "#7A1712", margin: "8px 0 0" }}>{gcal.lastError} Abra "Atualizar / conectar" para tentar de novo.</p>}
+            {gcal.calendars.filter((c) => c.lastError).map((c) => (
+              <p key={c.id} className="cr-sub" role="alert" style={{ color: "#7A1712", margin: "8px 0 0" }}>{c.name}: {c.lastError} Abra "Gerenciar agendas" para tentar de novo.</p>
+            ))}
           </div>
           <div className="cr-row">
-            <button className="cr-btn primary" onClick={() => setConnect(true)}>Atualizar / conectar</button>
+            <button className="cr-btn primary" onClick={() => setConnect(true)}>Gerenciar agendas</button>
             <button className="cr-btn" onClick={() => openExternalLink("https://calendar.google.com")}>Abrir Google Agenda</button>
           </div>
         </div>
       </div>
 
+      {gcal.calendars.length > 1 && (
+        <div className="cr-row" style={{ margin: "12px 0 0", flexWrap: "wrap", gap: 6 }} aria-label="Filtrar por agenda">
+          {gcal.calendars.map((c) => (
+            <button key={c.id} type="button" className="cr-chip" aria-pressed={c.enabled} onClick={() => toggleCalendar(c.id)}
+              title={c.enabled ? "Clique para esconder esta agenda" : "Clique para mostrar esta agenda"}
+              style={{ cursor: "pointer", border: `1px solid ${c.color}`, background: c.enabled ? `${c.color}22` : "transparent", color: "#211D1A", opacity: c.enabled ? 1 : 0.55, textDecoration: c.enabled ? "none" : "line-through" }}>
+              <span style={{ color: c.color }}>●</span>&nbsp;{c.name}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="cr-row" style={{ margin: "14px 0", alignItems: "center", flexWrap: "wrap" }}>
         <button className={`cr-tabbtn ${mode === "mes" ? "active" : ""}`} onClick={() => { setMode("mes"); setOffset(0); }}>Mês</button>
         <button className={`cr-tabbtn ${mode === "semana" ? "active" : ""}`} onClick={() => { setMode("semana"); setOffset(0); }}>Semana</button>
@@ -3824,8 +3918,8 @@ function GoogleAgendaView({ gcal, setGcal }) {
           {dayEvents.length === 0 && <p className="cr-empty">Nada agendado neste dia.</p>}
           {dayEvents.map((e) => (
             <div className="cr-list-row" key={e.id} style={{ cursor: "pointer" }} onClick={() => { setDayOpen(null); setDetail(e); }}>
-              <span className="cr-chip" style={{ background: "#DCE7F3", color: "#27476B" }}>{e.ad ? "dia todo" : gcalTimeOf(e.s)}</span>
-              <span style={{ flex: 1 }}>{e.t}</span>
+              <span className="cr-chip" style={{ background: `${e.color}22`, borderLeft: `3px solid ${e.color}`, color: "#211D1A" }}>{e.ad ? "dia todo" : gcalTimeOf(e.s)}</span>
+              <span style={{ flex: 1 }}>{e.t}{gcal.calendars.length > 1 && <span className="cr-sub" style={{ margin: "0 0 0 8px", fontSize: 11.5, color: e.color }}>{e.calName}</span>}</span>
             </div>
           ))}
         </Modal>
@@ -3833,6 +3927,7 @@ function GoogleAgendaView({ gcal, setGcal }) {
       {detail && (
         <Modal title={detail.t} onClose={() => setDetail(null)}>
           <p style={{ fontSize: 15 }}><strong>Quando:</strong> {fmtCalendarDate(gcalDayOf(detail.s))}{detail.ad ? " (dia inteiro)" : ` das ${gcalTimeOf(detail.s)} às ${gcalTimeOf(detail.e)}`}</p>
+          {detail.calName && <p style={{ fontSize: 15 }}><strong>Agenda:</strong> <span style={{ color: detail.color }}>●</span> {detail.calName}</p>}
           {detail.loc && <p style={{ fontSize: 15 }}><strong>Local:</strong> {detail.loc}</p>}
           <div className="cr-row" style={{ gap: 8 }}>
             {detail.meet && <button className="cr-btn primary" onClick={() => openExternalLink(detail.meet)}><Link2 size={14} /> Entrar na reunião (Meet)</button>}
@@ -3841,115 +3936,162 @@ function GoogleAgendaView({ gcal, setGcal }) {
           <p className="cr-sub" style={{ marginTop: 16 }}>Este evento vem do Google Agenda. Para editar ou excluir, use o próprio Google Agenda e depois atualize aqui.</p>
         </Modal>
       )}
-      {connect && <GoogleConnectModal gcal={gcal} setGcal={setGcal}
-        onCalendarUpdated={() => { setMode("lista"); setOffset(0); setConnect(false); }}
-        onClose={() => setConnect(false)} />}
+      {connect && <GoogleConnectModal gcal={gcal} setGcal={setGcal} onClose={() => setConnect(false)} />}
     </div>
   );
 }
 
-function GoogleConnectModal({ gcal, setGcal, onCalendarUpdated, onClose }) {
+function CalendarRow({ cal, busy, onPatch, onRefresh, onRemove }) {
+  const [name, setName] = useState(cal.name);
+  useEffect(() => { setName(cal.name); }, [cal.name]);
+  const commitName = () => {
+    const next = name.trim();
+    if (!next) { setName(cal.name); return; }
+    if (next !== cal.name) onPatch({ name: next });
+  };
+  return (
+    <div className="cr-card" style={{ marginBottom: 10, borderLeft: `5px solid ${cal.color}`, opacity: cal.enabled ? 1 : 0.7 }}>
+      <div className="cr-row" style={{ flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+        <input className="cr-input" style={{ flex: "1 1 180px", minWidth: 140 }} value={name} aria-label="Nome da agenda"
+          onChange={(e) => setName(e.target.value)} onBlur={commitName} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+        <label className="cr-chip" style={{ cursor: "pointer" }}>
+          <input type="checkbox" checked={cal.enabled} onChange={() => onPatch({ enabled: !cal.enabled })} style={{ marginRight: 4 }} /> mostrar
+        </label>
+      </div>
+      <div className="cr-row" style={{ gap: 6, margin: "8px 0", flexWrap: "wrap" }} aria-label="Cor da agenda">
+        {GCAL_COLORS.map((color) => (
+          <button key={color} type="button" onClick={() => onPatch({ color })} aria-label={`Cor ${color}`} aria-pressed={cal.color === color}
+            style={{ width: 24, height: 24, borderRadius: 12, background: color, cursor: "pointer", border: cal.color === color ? "3px solid #211D1A" : "2px solid transparent", padding: 0 }} />
+        ))}
+      </div>
+      <p className="cr-sub" style={{ margin: "0 0 8px", fontSize: 12 }}>
+        {(cal.events || []).length} evento(s)
+        {cal.updatedAt ? `, atualizada em ${new Date(cal.updatedAt).toLocaleDateString("pt-BR")}` : ""}
+        {cal.linkId ? ", link salvo no servidor" : ", link ainda não migrado para o servidor"}
+      </p>
+      {cal.lastError && <p className="cr-sub" role="alert" style={{ color: "#7A1712", margin: "0 0 8px", fontSize: 12.5 }}>{cal.lastError}</p>}
+      <div className="cr-row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <button className="cr-btn" disabled={busy} onClick={onRefresh}>Atualizar</button>
+        <button className="cr-btn ghost danger" disabled={busy} onClick={onRemove}><Trash2 size={13} /> Remover</button>
+      </div>
+    </div>
+  );
+}
+
+function GoogleConnectModal({ gcal, setGcal, onClose }) {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  const [reconnectRequired, setReconnectRequired] = useState(false);
-  const [icsUrl, setIcsUrl] = useState(gcal.icsUrl || "");
+  const [bulk, setBulk] = useState("");
+  const [removing, setRemoving] = useState(null);
+  const calendars = gcal.calendars || [];
 
-  const onFile = (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const events = parseICS(String(reader.result));
-        if (!events.length) { setMsg("Não encontrei eventos nesse arquivo. Confira se é o .ics do seu calendário."); return; }
-        setGcal({ ...gcal, source: "ics", icsUrl: "", updatedAt: new Date().toISOString(), events, lastError: "" });
-        setMsg(`Pronto: ${events.length} eventos carregados do arquivo.`);
-      } catch (err) { setMsg(err instanceof Error ? `Não consegui ler esse arquivo: ${err.message}` : "Não consegui ler esse arquivo."); }
-    };
-    reader.onerror = () => setMsg("Não consegui abrir o arquivo.");
-    reader.readAsText(f);
+  const persist = async (next, okMessage) => {
+    const saved = await setGcal({ ...next, updatedAt: latestStamp(next.calendars, next.updatedAt) });
+    if (saved === false) { setMsg("A alteração foi feita na tela, mas não foi possível salvar. Confira sua conexão e tente novamente."); return false; }
+    if (okMessage) setMsg(okMessage);
+    return true;
   };
-  const live = async () => {
-    setBusy(true); setMsg("");
-    setReconnectRequired(false);
-    try {
-      const { events, updatedAt } = await fetchGoogleCalendarLive();
-      const saved = await setGcal({ ...gcal, source: "google", icsUrl: "", updatedAt, events, lastError: "" });
-      if (saved === false) {
-        setMsg("A agenda foi carregada, mas não foi possível salvar a atualização. Confira sua conexão e tente novamente.");
-        return;
-      }
-      onCalendarUpdated();
-      notify(`Agenda atualizada: ${events.length} evento(s) da sua conta Google.`);
-    } catch (err) {
-      setMsg(err instanceof Error ? err.message : "Não consegui conectar à agenda Google.");
-      setReconnectRequired(err?.reconnect === true);
-    } finally {
-      setBusy(false);
+  const patchCalendar = (id, changes) => persist({ ...gcal, calendars: calendars.map((c) => (c.id === id ? { ...c, ...changes } : c)) });
+
+  const addLinks = async () => {
+    const links = Array.from(new Set(bulk.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean)));
+    if (!links.length) { setMsg("Cole ao menos um link secreto .ics (um por linha)."); return; }
+    if (calendars.length + links.length > GCAL_MAX_CALENDARS) {
+      setMsg(`O limite é de ${GCAL_MAX_CALENDARS} agendas. Remova alguma antes de adicionar mais.`); return;
     }
-  };
-  const subscribe = async () => {
-    if (!icsUrl.trim()) { setMsg("Cole o link secreto .ics da sua agenda Google."); return; }
-    setBusy(true); setMsg(""); setReconnectRequired(false);
-    try {
-      const { events, updatedAt } = await fetchSubscribedIcs(icsUrl.trim());
-      const saved = await setGcal({ ...gcal, source: "ics-link", icsUrl: icsUrl.trim(), updatedAt, events, lastError: "" });
-      if (saved === false) {
-        setMsg("A agenda foi carregada, mas não foi possível salvar a atualização. Confira sua conexão e tente novamente.");
-        return;
-      }
-      onCalendarUpdated();
-      notify(`Assinatura atualizada: ${events.length} evento(s) carregado(s).`);
-    } catch (err) {
-      setMsg(err instanceof Error ? err.message : "Não consegui carregar esse link .ics.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  const reconnect = async () => {
     setBusy(true); setMsg("");
     try {
-      await reconnectGoogleCalendar();
-    } catch (err) {
-      setMsg(err instanceof Error ? err.message : "Não consegui iniciar a reconexão com o Google.");
-      setBusy(false);
-    }
+      const results = await Promise.all(links.map(async (url) => {
+        try { return { ok: true, url, data: await saveCalendarLink(url) }; }
+        catch (err) { return { ok: false, url, message: err instanceof Error ? err.message : "Falha ao salvar o link." }; }
+      }));
+      const knownIds = new Set(calendars.map((c) => c.linkId).filter(Boolean));
+      const okResults = results.filter((r) => r.ok);
+      const duplicated = okResults.filter((r) => knownIds.has(r.data.linkId)).length;
+      const added = okResults.filter((r) => !knownIds.has(r.data.linkId)).map((r, i) => makeCalendar({
+        name: r.data.name || `Agenda ${calendars.length + i + 1}`, linkId: r.data.linkId,
+        events: r.data.events, updatedAt: r.data.updatedAt,
+      }, calendars.length + i));
+      const failed = results.filter((r) => !r.ok);
+      if (added.length && !(await persist({ ...gcal, calendars: [...calendars, ...added] }))) return;
+      setBulk(failed.map((f) => f.url).join("\n"));
+      const parts = [];
+      if (added.length) parts.push(`${added.length} agenda(s) adicionada(s)`);
+      if (duplicated) parts.push(`${duplicated} já estava(m) na lista`);
+      if (failed.length) parts.push(`${failed.length} falhou(aram): ${failed.map((f) => `…${f.url.slice(-10)} (${f.message})`).join("; ")}`);
+      setMsg(parts.join(". ") + ".");
+    } finally { setBusy(false); }
   };
-  const restore = () => { setGcal({ source: "empty", updatedAt: "", events: [] }); setIcsUrl(""); setMsg("Agenda esvaziada. Envie outro arquivo .ics ou conecte outra conta."); };
+
+  const refreshAll = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const next = await refreshAllCalendars(gcal);
+      const failed = next.calendars.filter((c) => c.lastError).length;
+      await persist(next, failed ? `Atualizado, mas ${failed} agenda(s) com erro. Veja os detalhes em cada uma.` : "Todas as agendas foram atualizadas.");
+    } finally { setBusy(false); }
+  };
+
+  const refreshOne = async (cal) => {
+    setBusy(true); setMsg("");
+    try {
+      const updated = await refreshCalendar(cal);
+      await persist({ ...gcal, calendars: calendars.map((c) => (c.id === cal.id ? updated : c)) },
+        updated.lastError ? "" : `${updated.name} atualizada.`);
+    } finally { setBusy(false); }
+  };
+
+  const removeCalendar = async (target) => {
+    setBusy(true); setMsg("");
+    try {
+      if (target.linkId) {
+        try { await removeCalendarLink(target.linkId); }
+        catch (err) {
+          if (!err?.missing) { setMsg(`Não foi possível remover o link do servidor: ${err instanceof Error ? err.message : "tente de novo."}`); return; }
+        }
+      }
+      await persist({ ...gcal, calendars: calendars.filter((c) => c.id !== target.id) }, "Agenda removida.");
+    } finally { setBusy(false); }
+  };
 
   return (
-    <Modal title="Atualizar ou conectar o Google Agenda" onClose={onClose}>
+    <Modal title="Agendas do Google" onClose={onClose}>
       {msg && <div className="cr-card" role="status" style={{ borderColor: GCAL_BLUE, marginBottom: 14 }}><strong>{msg}</strong></div>}
 
-      <h3 className="cr-serif" style={{ fontSize: 17 }}>1. Enviar o arquivo da sua agenda (.ics), funciona em qualquer lugar</h3>
-      <ol className="cr-sub" style={{ lineHeight: 1.7 }}>
-        <li>No computador, abra o Google Agenda e vá em Configurações (engrenagem) → <strong>Importar e exportar</strong> → <strong>Exportar</strong>.</li>
-        <li>O Google baixa um .zip. Abra e pegue o arquivo .ics do seu calendário principal.</li>
-        <li>Envie aqui embaixo. Eventos que se repetem (semanais, mensais) são expandidos automaticamente.</li>
-      </ol>
-      <input type="file" accept=".ics,text/calendar" className="cr-input" onChange={onFile} />
+      <h3 className="cr-serif" style={{ fontSize: 17 }}>Suas agendas ({calendars.length})</h3>
+      {calendars.length === 0 && <p className="cr-sub">Nenhuma agenda ainda. Cole os links abaixo.</p>}
+      {calendars.map((cal) => (
+        <CalendarRow key={cal.id} cal={cal} busy={busy}
+          onPatch={(changes) => patchCalendar(cal.id, changes)}
+          onRefresh={() => refreshOne(cal)}
+          onRemove={() => setRemoving(cal)} />
+      ))}
+      {calendars.length > 0 && (
+        <button className="cr-btn primary" disabled={busy} onClick={refreshAll}>{busy ? "Atualizando…" : "Atualizar todas"}</button>
+      )}
 
-      <h3 className="cr-serif" style={{ fontSize: 17, marginTop: 26 }}>2. Conexão ao vivo com o Google</h3>
+      <h3 className="cr-serif" style={{ fontSize: 17, marginTop: 26 }}>Adicionar agendas por link secreto</h3>
       <p className="cr-sub">
-        Atualize sua agenda com a conta Google conectada à Central. O acesso é somente leitura e não exige colar credenciais nesta tela.
+        No Google Agenda (no computador): Configurações → clique na agenda em "Configurações dos meus calendários" → <strong>Integrar agenda</strong> → copie o <strong>Endereço secreto no formato iCal</strong>.
+        Cole um link por linha; o nome de cada agenda é preenchido automaticamente. Os links são salvos no seu Supabase, em uma tabela que o navegador não consegue ler, e não entram nos backups.
       </p>
-      <div className="cr-row" style={{ flexWrap: "wrap" }}>
-        <button className="cr-btn primary" disabled={busy} onClick={live}>{busy ? "Conectando…" : "Conectar / atualizar agenda"}</button>
-        {reconnectRequired && <button className="cr-btn" disabled={busy} onClick={reconnect}>Reconectar Google</button>}
+      <textarea className="cr-input" rows={5} style={{ width: "100%", boxSizing: "border-box" }} value={bulk}
+        placeholder={"https://calendar.google.com/calendar/ical/…/basic.ics\nhttps://calendar.google.com/calendar/ical/…/basic.ics"}
+        onChange={(e) => setBulk(e.target.value)} />
+      <div className="cr-row" style={{ marginTop: 8 }}>
+        <button className="cr-btn primary" disabled={busy} onClick={addLinks}>{busy ? "Salvando…" : "Salvar e adicionar"}</button>
       </div>
-
-      <h3 className="cr-serif" style={{ fontSize: 17, marginTop: 26 }}>3. Assinar por link .ics (opcional)</h3>
-      <p className="cr-sub">Cole o link secreto .ics do Google Agenda. Ele será guardado junto com os dados da agenda para atualizar a cópia de eventos quando você abrir o app. Trate esse link como uma senha.</p>
-      <div className="cr-row" style={{ flexWrap: "wrap" }}>
-        <input type="url" className="cr-input" placeholder="https://calendar.google.com/calendar/ical/…" value={icsUrl} onChange={(e) => setIcsUrl(e.target.value)} />
-        <button className="cr-btn primary" disabled={busy} onClick={subscribe}>{busy ? "Buscando…" : "Assinar / atualizar .ics"}</button>
-      </div>
-
-      <button className="cr-btn" onClick={restore}>Esvaziar esta agenda (para conectar outra conta)</button>
 
       <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 20 }}>
         <button className="cr-btn primary" onClick={onClose}>Concluir</button>
       </div>
+
+      {removing && (
+        <ConfirmModal title="Remover agenda" confirmLabel="Remover"
+          message={`Remover "${removing.name}" da Central? O link será apagado do servidor. Isso não apaga nada no Google Agenda.`}
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => { const target = removing; setRemoving(null); removeCalendar(target); }} />
+      )}
     </Modal>
   );
 }
@@ -6590,7 +6732,7 @@ export default function App({ onSignOut }) {
   const [places, setPlacesState] = useState([]);
   const [investments, setInvestmentsState] = useState([]);
   const [studyAreas, setStudyAreasState] = useState([]);
-  const [gcal, setGcalState] = useState({ source: "snapshot", updatedAt: "", events: [] });
+  const [gcal, setGcalState] = useState({ calendars: [], updatedAt: "" });
   const [manager, setManager] = useState(null);
   const [navEdit, setNavEdit] = useState(false);
   const [pageModal, setPageModal] = useState(null);
@@ -6771,9 +6913,8 @@ export default function App({ onSignOut }) {
           return { ...task, status: status.id };
         });
         if (changed) bg(storageSet(KEYS.tasks, finalTasks)); }
-      // Google Agenda: usa o que você enviou/conectou; a cópia do Claude só é trocada por uma mais nova
-      { const usable = gcalSaved && (gcalSaved.source === "ics" || gcalSaved.source === "ics-link" || gcalSaved.source === "google");
-        setGcalState(usable ? gcalSaved : { source: "empty", updatedAt: "", events: [], clientId: (gcalSaved && gcalSaved.clientId) || "" }); }
+      // Google Agenda: converte o formato antigo (uma agenda) para a lista de agendas
+      setGcalState(normalizeGcal(gcalSaved));
       setStudyAreasState(finalStudyAreas);
       setPagesState(pgs || []); setPlacesState(plc || []); setInvestmentsState(inv || []);
       setTasksState(finalTasks); setGoalsState(finalGoals); setHabitsState(finalHabits); setFinanceState(finalFinance);
@@ -6844,19 +6985,17 @@ export default function App({ onSignOut }) {
   const setGcal = useCallback((v) => { setGcalState(v); return storageSet(KEYS.gcal, v); }, []);
   const automaticCalendarRefresh = useRef(false);
   useEffect(() => {
-    if (!loaded || automaticCalendarRefresh.current || !["google", "ics-link"].includes(gcal.source)) return;
+    if (!loaded || automaticCalendarRefresh.current || !gcal.calendars.some(canRefreshCalendar)) return;
     automaticCalendarRefresh.current = true;
     const refresh = async () => {
       try {
-        const result = gcal.source === "google"
-          ? await fetchGoogleCalendarLive()
-          : await fetchSubscribedIcs(gcal.icsUrl);
-        const saved = await setGcal({ ...gcal, ...result, lastError: "" });
-        if (saved === false) throw new Error("A agenda foi atualizada, mas não foi possível salvar a cópia. Confira a conexão.");
+        const next = await refreshAllCalendars(gcal);
+        const saved = await setGcal(next);
+        if (saved === false) throw new Error("As agendas foram atualizadas, mas não foi possível salvar a cópia. Confira a conexão.");
+        const failed = next.calendars.filter((c) => c.lastError).length;
+        if (failed) notify(`${failed} agenda(s) não atualizaram. Abra "Gerenciar agendas" para ver o motivo.`);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Não foi possível atualizar a agenda.";
-        setGcal({ ...gcal, lastError: message });
-        notify(message);
+        notify(error instanceof Error ? error.message : "Não foi possível atualizar as agendas.");
       }
     };
     void refresh();
@@ -6896,7 +7035,7 @@ export default function App({ onSignOut }) {
     if (backup.places) writes.push(setPlaces(backup.places));
     if (backup.investments) writes.push(setInvestments(backup.investments));
     if (backup.studyAreas) writes.push(setStudyAreas(backup.studyAreas));
-    if (backup.gcal) writes.push(setGcal(backup.gcal));
+    if (backup.gcal) writes.push(setGcal(normalizeGcal(backup.gcal)));
     if (writes.length === 0) {
       throw new Error("O arquivo não contém dados reconhecidos da Central.");
     }
