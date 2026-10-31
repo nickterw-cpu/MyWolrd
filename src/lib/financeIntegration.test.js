@@ -27,6 +27,19 @@ describe("buildIntegratedFinance", () => {
       sourceRef: { type: "shopping", sourceId: "wish-1", eventId: "buy-1" },
       amount: 120, status: "pago", category: "Casa",
     });
+
+  });
+
+  it("does not create a financial amount for a Wishlist purchase without a price", () => {
+    const result = buildIntegratedFinance({
+      today,
+      shopping: [{
+        id: "wish-no-price", name: "Presente", kind: "desejo", status: "comprado", price: 0,
+        purchaseHistory: [{ id: "gift-purchase", date: "2026-10-17", amount: null }],
+      }],
+    });
+
+    expect(result).toEqual([]);
   });
 
   it("updates recurring Wishlist forecasts when the next purchase date changes", () => {
@@ -68,6 +81,47 @@ describe("buildIntegratedFinance", () => {
     expect(result).toHaveLength(2);
     expect(result.map((entry) => entry.status)).toEqual(["pago", "pago"]);
     expect(result.map((entry) => entry.expenseClass)).toEqual(["procedure", "hobby"]);
+  });
+
+  it("integrates separate scheduled receipts without counting a registered installment twice", () => {
+    const plan = {
+      netSalary: 1500,
+      receipts: [
+        { id: "salary-part-1", date: "2026-10-05", amount: 1000, frequency: "mensal" },
+        { id: "salary-part-2", date: "2026-10-20", amount: 500, frequency: "mensal" },
+      ],
+      allocations: [],
+    };
+    const transactions = [{
+      id: "income:salary-part-1:2026-10", type: "entrada", date: "2026-10-05",
+      amount: 1000, status: "pago",
+      sourceRef: { type: "receiptSchedule", sourceId: "salary-part-1", eventId: "2026-10" },
+    }];
+
+    const forecast = buildFinanceForecast(transactions, plan, "2026-10", 2);
+
+    expect(forecast.map((entry) => entry.expectedIncome)).toEqual([1500, 1500]);
+  });
+
+  it("creates distinct forecasts for multiple hobby expenses and keeps actual expenses separate", () => {
+    const result = buildIntegratedFinance({
+      today,
+      hobbies: [{
+        id: "cheerleading", name: "Cheerleading",
+        expenses: [
+          { id: "monthly-fee", description: "Mensalidade", amount: 60, date: "2026-10-20", frequency: "mensal" },
+          { id: "uniform", description: "Uniforme", amount: 150, date: "2026-11-02", frequency: "pontual" },
+        ],
+        expenseHistory: [{ id: "paid-entry", date: "2026-10-10", amount: 25, description: "Material" }],
+      }],
+    }).filter((entry) => entry.date.slice(0, 7) <= "2026-11");
+
+    expect(result.map((entry) => [entry.desc, entry.date, entry.amount, entry.sourceKind])).toEqual([
+      ["Material", "2026-10-10", 25, "registro"],
+      ["Cheerleading · Mensalidade (previsto)", "2026-10-20", 60, "previsao"],
+      ["Cheerleading · Mensalidade (previsto)", "2026-11-20", 60, "previsao"],
+      ["Cheerleading · Uniforme (previsto)", "2026-11-02", 150, "previsao"],
+    ]);
   });
 
   it("preserves distinct legacy history entries that do not have IDs", () => {

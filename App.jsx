@@ -13,7 +13,7 @@ import {
   Home, CalendarDays, Target, Repeat, Wallet, NotebookPen, Link2, Settings as SettingsIcon,
   Plus, Trash2, Pencil, X, Check, Search, Download, Upload, Sparkles, Flame, ChevronLeft, ChevronRight,
   GraduationCap, Briefcase, Sparkle, Image as ImageIcon, BookHeart, SearchCheck, Compass,
-  HardDrive, Mail, FileText, BookOpen, ShoppingBag, ShoppingCart, Heart, Bot, Palette, ListChecks
+  HardDrive, Mail, FileText, BookOpen, ShoppingBag, ShoppingCart, Heart, Bot, Palette, ListChecks, Music2, Play
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -307,7 +307,11 @@ const LIST_REGISTRY = {
   financeStatus: { label: "Status dos lançamentos", usedBy: [["finance", "status"]],
     defaults: [{ id: "pago", name: "Pago" }, { id: "pendente", name: "Pendente" }, { id: "agendado", name: "Agendado" }, { id: "cancelado", name: "Cancelado" }] },
   wishStatus: { label: "Status dos desejos da Wishlist", closedFlag: true, flagLabel: "já comprado ou cancelado", usedBy: [["shopping", "status", (it) => inferShoppingKind(it) === "desejo"]],
-    defaults: [{ id: "desejado", name: "Desejado" }, { id: "comprado", name: "Comprado", closed: true }, { id: "cancelado", name: "Cancelado", closed: true }] },
+    defaults: [{ id: "desejado", name: "Desejado" }, { id: "comprado", name: "Comprado", closed: true }, { id: "ganhei", name: "Ganhei", closed: true }, { id: "cancelado", name: "Cancelado", closed: true }] },
+  coursePriority: {
+    label: "Prioridades dos cursos", kind: "strings", settingsKey: "coursePriorities", usedBy: [["study", "priority"]],
+    defaults: ["Importante fazer", "Quero muito fazer", "Pode esperar"].map((name) => ({ id: name, name })),
+  },
   productStatus: { label: "Status dos produtos de rotina", closedFlag: true, flagLabel: "precisa recomprar", usedBy: [["shopping", "status", (it) => inferShoppingKind(it) === "rotina"]],
     defaults: [{ id: "ainda tem", name: "Ainda tem" }, { id: "acabou", name: "Acabou", closed: true }, { id: "quero recomprar", name: "Quero recomprar", closed: true }, { id: "comprado", name: "Comprado" }, { id: "cancelado", name: "Cancelado", closed: true }] },
   workoutStatus: {
@@ -376,8 +380,18 @@ function reconcileLists(settings, collections) {
     const reg = LIST_REGISTRY[key];
     if (!reg.usedBy) return;
     const isStrings = reg.kind === "strings";
-    const current = isStrings ? (Array.isArray(settings[reg.settingsKey]) ? settings[reg.settingsKey].map((n) => ({ id: n, name: n })) : reg.defaults)
+    let current = isStrings ? (Array.isArray(settings[reg.settingsKey]) ? settings[reg.settingsKey].map((n) => ({ id: n, name: n })) : reg.defaults)
       : (Array.isArray(saved[key]) ? saved[key] : reg.defaults);
+    const requiredDefaults = key === "wishStatus"
+      ? reg.defaults.filter((option) => option.id === "ganhei")
+      : key === "coursePriority" ? reg.defaults : [];
+    const missingDefaults = requiredDefaults.filter((option) => !current.some((entry) => entry.id === option.id));
+    if (missingDefaults.length) {
+      changed = true;
+      current = [...current, ...missingDefaults];
+      if (isStrings) next = { ...next, [reg.settingsKey]: current.map((entry) => entry.name) };
+      else saved[key] = current;
+    }
     const known = new Set(current.map((i) => i.id));
     const extra = [];
     reg.usedBy.forEach(([coll, field, pred]) => {
@@ -683,10 +697,10 @@ const DEFAULT_WIDGETS = [
   { id: "stats", label: "Indicadores rápidos", visible: true },
   { id: "focus", label: "Foco de hoje", visible: true },
   { id: "overdue", label: "Atrasadas", visible: true },
-  { id: "weekCalendar", label: "Cronograma semanal (calendário)", visible: true },
+  { id: "weekCalendar", label: "Cronograma semanal (Google Agenda)", visible: true },
+  { id: "musicPlayer", label: "Letra do dia", visible: true },
   { id: "upcoming", label: "Próximos prazos", visible: true },
   { id: "goals", label: "Metas ativas", visible: true },
-  { id: "agenda", label: "Agenda / Google Calendar", visible: true },
   { id: "financeCategory", label: "Gastos por categoria", visible: true },
   { id: "wheelOfLife", label: "Roda da Vida", visible: true },
   { id: "financeChart", label: "Gráfico de Finanças", visible: true },
@@ -697,7 +711,7 @@ const DEFAULT_WIDGETS = [
 // Garante que widgets novos criados em atualizações futuras apareçam também
 // para quem já tinha uma lista de widgets salva antes deles existirem.
 function reconcileWidgets(saved) {
-  const list = saved && saved.length ? saved : DEFAULT_WIDGETS;
+  const list = saved && saved.length ? saved.filter((widget) => widget.id !== "agenda") : DEFAULT_WIDGETS;
   const savedIds = new Set(list.map((w) => w.id));
   const missing = DEFAULT_WIDGETS.filter((w) => !savedIds.has(w.id));
   return missing.length ? [...list, ...missing] : list;
@@ -1162,13 +1176,6 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
     ? Math.round(activeGoals.reduce((s, g) => s + Number(g.progress || 0), 0) / activeGoals.length)
     : 0;
 
-  const thisMonth = today.slice(0, 7);
-  const monthTx = finance.filter((f) => f.date.slice(0, 7) === thisMonth);
-  const financeSummary = summarizeFinanceMonth(finance, settings.financePlan, thisMonth);
-  const income = financeSummary.receivedIncome;
-  const expense = financeSummary.spent;
-  const balance = financeSummary.available;
-
   const upcoming = tasks
     .filter((tk) => !tk.done && tk.dueDate >= today)
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
@@ -1192,7 +1199,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
   };
 
   const widgets = (settings.dashboardWidgets && settings.dashboardWidgets.length ? settings.dashboardWidgets : DEFAULT_WIDGETS)
-    .filter((w) => w.visible);
+    .filter((w) => w.visible && w.id !== "agenda");
 
   const renderWidget = (id) => {
     switch (id) {
@@ -1215,7 +1222,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
       }
       case "stats":
         return (
-          <div className="cr-grid cr-grid-4" key="stats" style={{ margin: "20px 0" }}>
+          <div className="cr-grid cr-grid-3" key="stats" style={{ margin: "20px 0" }}>
             <div className="cr-card">
               <p className="cr-label">Tarefas hoje</p>
               <p className="cr-serif" style={{ fontSize: 26, margin: "2px 0" }}>{doneToday}/{tasksToday.length}</p>
@@ -1232,11 +1239,6 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
               <div className="cr-progress-track" style={{ marginTop: 6 }}>
                 <div className="cr-progress-fill" style={{ width: `${avgProgress}%`, background: progressColor(avgProgress) }} />
               </div>
-            </div>
-            <div className="cr-card">
-              <p className="cr-label">Disponível após compromissos e metas</p>
-              <p className="cr-serif" style={{ fontSize: 22, margin: "2px 0", color: balance >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(balance)}</p>
-              <p className="cr-sub" style={{ margin: 0 }}>{fmtBRL(income)} recebidos · {fmtBRL(expense)} gastos · {fmtBRL(financeSummary.commitments)} comprometidos</p>
             </div>
           </div>
         );
@@ -1313,12 +1315,25 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
             ))}
           </div>
         );
-      case "agenda":
+      case "musicPlayer":
         return (
-          <div className="cr-card" key="agenda" style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 96 }}>
-            <button className="cr-btn primary" style={{ fontSize: 14, padding: "10px 20px" }} onClick={() => openExternalLink("https://calendar.google.com")}>
-              <CalendarDays size={16} /> Abrir Google Calendar
-            </button>
+          <div className="cr-card" key="musicPlayer" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 16, background: "linear-gradient(115deg, #173D32, #285B49)", color: "#fff" }}>
+            <div aria-hidden="true" style={{ width: 58, height: 58, borderRadius: 10, display: "grid", placeItems: "center", flexShrink: 0, background: "linear-gradient(145deg, #E8C584, #C88961)" }}>
+              <Music2 size={26} color="#173D32" />
+            </div>
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <p style={{ margin: "0 0 3px", opacity: 0.75, fontSize: 11, letterSpacing: 1, textTransform: "uppercase" }}>Player · letra do dia</p>
+              <p className="cr-serif" style={{ margin: "0 0 8px", fontSize: 16, color: "#fff" }}>Hoje estou feliz</p>
+              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: "#F5EFE4" }}>
+                “Hoje estou feliz, acordei com o pé direito<br />E eu vou fazer de novo, eu vou fazer muito bem feito”
+              </p>
+              <div aria-hidden="true" style={{ height: 3, borderRadius: 3, marginTop: 12, background: "rgba(255,255,255,.25)" }}>
+                <div style={{ width: "38%", height: "100%", borderRadius: 3, background: "#D5B875" }} />
+              </div>
+            </div>
+            <div aria-hidden="true" style={{ width: 38, height: 38, borderRadius: "50%", display: "grid", placeItems: "center", flexShrink: 0, background: "#D5B875", color: "#173D32" }}>
+              <Play size={18} fill="currentColor" />
+            </div>
           </div>
         );
       case "distribution": {
@@ -1337,36 +1352,59 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
       case "weekCalendar": {
         const weekStart = startOfWeek(todayStr());
         const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+        const startHour = 7;
+        const endHour = 22;
+        const hourHeight = 48;
+        const eventsByDay = days.map((date) => tasks.filter((task) => task.dueDate === date));
         return (
           <div className="cr-card" key="weekCalendar" style={{ marginBottom: 16 }}>
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
-              <h3 className="cr-serif" style={{ margin: "0 0 12px", fontSize: 16 }}>Cronograma semanal</h3>
+              <h3 className="cr-serif" style={{ margin: "0 0 12px", fontSize: 16 }}>Agenda da semana</h3>
               <button className="cr-btn ghost" onClick={() => goTo("tasks")}>ver planejamento</button>
             </div>
             <div className="cr-calendar-scroll">
-            <div className="cr-grid cr-calendar-grid" style={{ gridTemplateColumns: "repeat(7, 1fr)", gap: 8 }}>
-              {days.map((d) => {
-                const dayTasks = tasks.filter((tk) => tk.dueDate === d);
-                const isToday = d === todayStr();
-                return (
-                  <div key={d} style={{
-                    padding: 8, borderRadius: 10, minHeight: 90,
-                    background: isToday ? "#FBF0E4" : "#FBF8F4", border: "1px solid var(--line)",
-                  }}>
-                    <p className="cr-sub" style={{ margin: 0, textTransform: "capitalize", fontSize: 10.5 }}>{fmtWeekday(d)}</p>
-                    <p className="cr-serif" style={{ margin: "2px 0 6px", fontSize: 13 }}>{d.slice(8, 10)}</p>
-                    {dayTasks.slice(0, 3).map((tk) => (
-                      <div key={tk.id} style={{
-                        fontSize: 10.5, padding: "2px 5px", borderRadius: 5, marginBottom: 2,
-                        background: tk.done ? "#EFE8DE" : "#F3EDE4", textDecoration: tk.done ? "line-through" : "none",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>{tk.time ? `${tk.time} ` : ""}{tk.title}</div>
+              <div style={{ minWidth: 840 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "48px repeat(7, minmax(105px, 1fr))", gap: 4 }}>
+                  <div />
+                  {days.map((d) => (
+                    <div key={d} style={{ textAlign: "center", padding: "6px 2px", borderBottom: "1px solid var(--line)", background: d === today ? "#FBF0E4" : undefined }}>
+                      <span className="cr-sub" style={{ display: "block", margin: 0, textTransform: "capitalize", fontSize: 10.5 }}>{fmtWeekday(d)}</span>
+                      <strong className="cr-serif" style={{ fontSize: 13 }}>{d.slice(8, 10)}</strong>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "48px repeat(7, minmax(105px, 1fr))", gap: 4, marginBottom: 6 }}>
+                  <span className="cr-sub" style={{ margin: 0, textAlign: "right", paddingRight: 4, fontSize: 10 }}>dia todo</span>
+                  {eventsByDay.map((dayTasks, index) => (
+                    <div key={days[index]} style={{ minHeight: 8, borderLeft: "1px solid var(--line)" }}>
+                      {dayTasks.filter((task) => !/^\d{2}:\d{2}$/.test(task.time || "")).map((task) => (
+                        <div key={task.id} title={task.title} style={{ margin: "2px 2px 4px", padding: "3px 5px", borderRadius: 5, fontSize: 10, background: task.done ? "#E9E5DD" : "#E8EEE7", textDecoration: task.done ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "48px repeat(7, minmax(105px, 1fr))", gap: 4 }}>
+                  <div style={{ position: "relative", height: (endHour - startHour) * hourHeight }}>
+                    {Array.from({ length: endHour - startHour }, (_, i) => (
+                      <span key={i} className="cr-sub" style={{ position: "absolute", top: i * hourHeight - 7, right: 4, margin: 0, fontSize: 10 }}>{String(startHour + i).padStart(2, "0")}:00</span>
                     ))}
-                    {dayTasks.length > 3 && <p className="cr-sub" style={{ margin: 0, fontSize: 10 }}>+{dayTasks.length - 3}</p>}
                   </div>
-                );
-              })}
-            </div>
+                  {days.map((d) => {
+                    const dayTasks = eventsByDay[days.indexOf(d)];
+                    const timed = dayTasks.filter((tk) => /^\d{2}:\d{2}$/.test(tk.time || ""));
+                    return (
+                      <div key={d} style={{ minHeight: (endHour - startHour) * hourHeight, position: "relative", borderLeft: "1px solid var(--line)", background: d === today ? "#FFFCF7" : undefined, backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 47px, var(--line) 48px)" }}>
+                        {timed.map((tk) => {
+                          const [h, m] = tk.time.split(":").map(Number);
+                          const minutes = h * 60 + m - startHour * 60;
+                          if (minutes < 0 || minutes >= (endHour - startHour) * 60) return null;
+                          return <div key={tk.id} title={`${tk.time} · ${tk.title}`} style={{ position: "absolute", top: minutes / 60 * hourHeight, left: 3, right: 3, minHeight: 28, padding: "3px 5px", borderLeft: "3px solid #6E8A76", borderRadius: 5, background: tk.done ? "#E9E5DD" : "#E8EEE7", textDecoration: tk.done ? "line-through" : "none", fontSize: 10, lineHeight: 1.3, overflow: "hidden", zIndex: 1 }}><strong>{tk.time}</strong> {tk.title}</div>;
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         );
@@ -1822,7 +1860,7 @@ function GoalsView({ goals, setGoals, areas }) {
           ))}
           {finished.length > 0 && (
             <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
-              <SectionTitle title="Concluídas / canceladas" count={`${finished.length}`} />
+              <SectionTitle title="Concluídas" count={`${finished.length}`} />
               <div className="cr-grid cr-grid-2">
                 {finished.map((g) => <GoalCard key={g.id} g={g} areas={areas} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} dimmed />)}
               </div>
@@ -1940,17 +1978,17 @@ function HabitsView({ habits, setHabits, areas }) {
       </div>
 
       <div className="cr-card" style={{ marginTop: 16 }}>
-        <div className="cr-row" style={{ paddingLeft: 172, marginBottom: 8 }}>
+        <div className="cr-row" dir="ltr" style={{ paddingLeft: 172, marginBottom: 8, flexDirection: "row" }}>
           {days.map((d) => <span key={d} className="cr-sub" style={{ width: 30, textAlign: "center", margin: 0 }}>{d.slice(8, 10)}</span>)}
         </div>
         {habits.length === 0 && <p className="cr-empty">Nenhum hábito cadastrado ainda.</p>}
         {habits.map((h) => (
-          <div className="cr-list-row" key={h.id}>
+          <div className="cr-list-row" key={h.id} dir="ltr" style={{ flexDirection: "row" }}>
             <div style={{ width: 150, flexShrink: 0 }}>
               <div style={{ fontSize: 13.5 }}>{h.name}</div>
               <div className="cr-row" style={{ gap: 4 }}><AreaBadge area={h.area} areas={areas} /></div>
             </div>
-            <div className="cr-row" style={{ gap: 0 }}>
+            <div className="cr-row" dir="ltr" style={{ gap: 0, flexDirection: "row" }}>
               {days.map((d) => (
                 <div key={d} onClick={() => toggle(h, d)}
                   className={`cr-checkbox ${h.log[d] ? "checked" : ""}`}
@@ -2008,6 +2046,21 @@ function monthLabel(m) {
   const [y, mo] = m.split("-");
   const names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
   return `${names[Number(mo) - 1]}/${y.slice(2)}`;
+}
+
+function dateInMonth(month, day) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const lastDay = new Date(year, monthNumber, 0).getDate();
+  return `${month}-${String(Math.min(Math.max(1, Number(day) || 1), lastDay)).padStart(2, "0")}`;
+}
+
+function cardInvoiceWindow(card, dueMonth) {
+  const closingDay = Number(card.closingDay) || 1;
+  const dueDay = Number(card.dueDay) || 1;
+  const closeMonth = dueDay <= closingDay ? addMonths(`${dueMonth}-01`, -1).slice(0, 7) : dueMonth;
+  const closeDate = dateInMonth(closeMonth, closingDay);
+  const previousClose = dateInMonth(addMonths(closeDate, -1).slice(0, 7), closingDay);
+  return { closeDate, previousClose, dueDate: dateInMonth(dueMonth, dueDay) };
 }
 
 const CATEGORY_PALETTE = ["#C9A57E", "#D9A79A", "#97A587", "#A99BC0", "#9DB4BE", "#D6A98C", "#B7A6C9", "#E0AFA6"];
@@ -2158,6 +2211,12 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const [filterStatus, setFilterStatus] = useState("todos");
   const [monthOffset, setMonthOffset] = useState(0);
   const [invoiceCard, setInvoiceCard] = useState(cards[0]?.id || "");
+  const [invoicePaymentAmount, setInvoicePaymentAmount] = useState("");
+  const [invoicePaymentDate, setInvoicePaymentDate] = useState(todayStr());
+  useEffect(() => {
+    if (cards.length && !cards.some((card) => card.id === invoiceCard)) setInvoiceCard(cards[0].id);
+    if (!cards.length) setInvoiceCard("");
+  }, [cards, invoiceCard]);
   const finance = useMemo(
     () => buildIntegratedFinance({ finance: manualFinance, shopping, beauty, hobbies, today: todayStr() }),
     [manualFinance, shopping, beauty, hobbies],
@@ -2189,6 +2248,28 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     d.setMonth(d.getMonth() + monthOffset);
     return localDateStr(d).slice(0, 7);
   }, [monthOffset]);
+  const invoiceDetails = useMemo(() => {
+    const card = cards.find((entry) => entry.id === invoiceCard);
+    if (!card) return null;
+    const window = cardInvoiceWindow(card, selectedMonth);
+    const purchases = finance.filter((entry) => entry.cardId === card.id && entry.type === "saida"
+      && entry.status !== "cancelado" && entry.date > window.previousClose && entry.date <= window.closeDate)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const total = purchases.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+    const payments = (Array.isArray(card.payments) ? card.payments : []).filter((payment) => payment.invoiceMonth === selectedMonth);
+    const paid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    return { card, window, purchases, total, payments, paid, remaining: Math.max(0, total - paid) };
+  }, [cards, finance, invoiceCard, selectedMonth]);
+  const registerInvoicePayment = () => {
+    if (!invoiceDetails || !invoicePaymentDate || invoicePaymentDate > todayStr()) return;
+    const amount = Number(invoicePaymentAmount);
+    if (!(amount > 0) || amount > invoiceDetails.remaining) return;
+    const payment = { id: uid(), invoiceMonth: selectedMonth, date: invoicePaymentDate, amount };
+    setCards(cards.map((card) => card.id === invoiceDetails.card.id
+      ? { ...card, payments: [...(Array.isArray(card.payments) ? card.payments : []), payment] }
+      : card));
+    setInvoicePaymentAmount("");
+  };
 
   const monthTx = finance.filter((f) => f.date?.slice(0, 7) === selectedMonth && f.status !== "cancelado");
   const planSummary = useMemo(
@@ -2207,7 +2288,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const income = planSummary.receivedIncome;
   const expense = planSummary.spent;
   const balance = income - expense;
-  const invoiceTotal = monthTx.filter((f) => f.paymentMethod === "Crédito").reduce((s, f) => s + Number(f.amount || 0), 0);
+  const invoiceTotal = invoiceDetails?.total || 0;
   const futureInstallments = finance.filter((f) => f.installmentGroup && f.date.slice(0, 7) > selectedMonth).reduce((s, f) => s + Number(f.amount), 0);
   const installmentGroups = new Map();
   finance.filter((transaction) => transaction.installmentGroup).forEach((transaction) => {
@@ -2407,7 +2488,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       )}
 
       {tab === "planejamento" && (
-        <FinancePlanningPanel finance={finance} month={selectedMonth} settings={settings} setSettings={setSettings} summary={planSummary} />
+        <FinancePlanningPanel finance={finance} manualFinance={manualFinance} setFinance={setFinance} month={selectedMonth} settings={settings} setSettings={setSettings} summary={planSummary} />
       )}
 
       {tab === "fatura" && (
@@ -2421,25 +2502,45 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             <span className="cr-serif" style={{ fontSize: 15 }}>{monthLabel(selectedMonth)}</span>
             <button className="cr-btn ghost" onClick={() => setMonthOffset(monthOffset + 1)}>→</button>
           </div>
-          {!invoiceCard && cards.length === 0 && <p className="cr-empty">Cadastre um cartão em "Contas & Cartões" para ver a fatura.</p>}
-          {invoiceCard && (() => {
-            const cardTx = finance.filter((f) => f.cardId === invoiceCard && f.date.slice(0, 7) === selectedMonth);
-            const total = cardTx.reduce((s, f) => s + Number(f.amount), 0);
+          {cards.length === 0 && <div className="cr-card"><p className="cr-empty">Cadastre um cartão em "Contas & Cartões" para acompanhar compras e faturas.</p><button className="cr-btn" onClick={() => setTab("contas")}>Cadastrar cartão</button></div>}
+          {invoiceDetails && (() => {
+            const { card, window, purchases, total, payments, paid, remaining } = invoiceDetails;
             return (
               <div className="cr-card">
+                <p className="cr-sub" style={{ marginTop: 0 }}>{card.name} · fecha em {fmtDateShort(window.closeDate)} · vence em {fmtDateShort(window.dueDate)} · compras de {fmtDateShort(window.previousClose)} a {fmtDateShort(window.closeDate)}</p>
                 <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
                   <span className="cr-serif" style={{ fontSize: 16 }}>Total da fatura</span>
                   <span className="cr-serif" style={{ fontSize: 18 }}>{fmtBRL(total)}</span>
                 </div>
-                {cardTx.length === 0 && <p className="cr-empty">Nenhuma compra neste cartão em {monthLabel(selectedMonth)}.</p>}
-                {cardTx.map((f) => (
+                <div className="cr-grid cr-grid-2" style={{ marginBottom: 12 }}>
+                  <div><p className="cr-label">Já pago</p><strong>{fmtBRL(paid)}</strong></div>
+                  <div><p className="cr-label">Saldo a pagar</p><strong>{fmtBRL(remaining)}</strong></div>
+                </div>
+                <h3 className="cr-serif" style={{ fontSize: 15 }}>Compras</h3>
+                {purchases.length === 0 && <p className="cr-empty">Nenhuma compra neste ciclo da fatura.</p>}
+                {purchases.map((f) => (
                   <div className="cr-list-row" key={f.id}>
                     <span className="cr-list-title" style={{ flex: 1 }}>{f.desc || f.category}</span>
+                    <span className="cr-chip">{fmtDateShort(f.date)}</span>
                     {f.installmentGroup && <span className="cr-chip">{f.installmentGroup.index}/{f.installmentGroup.total}</span>}
                     <span className="cr-chip" style={{ background: effectiveStatus(f) === "atrasado" ? "#F6DEDA" : undefined }}>{STATUS_LABEL[effectiveStatus(f)]}</span>
                     <span style={{ fontWeight: 600, fontSize: 13.5 }}>{fmtBRL(f.amount)}</span>
                   </div>
                 ))}
+                <h3 className="cr-serif" style={{ fontSize: 15, marginTop: 18 }}>Pagamentos registrados</h3>
+                {payments.map((payment) => (
+                  <div className="cr-list-row" key={payment.id}><span className="cr-list-title" style={{ flex: 1 }}>{fmtDateShort(payment.date)}</span><strong>{fmtBRL(payment.amount)}</strong></div>
+                ))}
+                {payments.length === 0 && <p className="cr-sub">Nenhum pagamento registrado para esta fatura.</p>}
+                {remaining > 0 && (
+                  <div className="cr-row" style={{ marginTop: 12, alignItems: "end", flexWrap: "wrap" }}>
+                    <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor pago (R$)</label>
+                      <input type="number" min="0.01" max={remaining} step="0.01" className="cr-input" value={invoicePaymentAmount} onChange={(event) => setInvoicePaymentAmount(event.target.value)} /></div>
+                    <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Data do pagamento</label>
+                      <input type="date" max={todayStr()} className="cr-input" value={invoicePaymentDate} onChange={(event) => setInvoicePaymentDate(event.target.value)} /></div>
+                    <button className="cr-btn primary" disabled={!(Number(invoicePaymentAmount) > 0) || Number(invoicePaymentAmount) > remaining || invoicePaymentDate > todayStr()} onClick={registerInvoicePayment}>Registrar pagamento</button>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -2477,18 +2578,47 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   );
 }
 
-function FinancePlanningPanel({ finance, month, settings, setSettings, summary }) {
+function FinancePlanningPanel({ finance, manualFinance, setFinance, month, settings, setSettings, summary }) {
   const plan = settings.financePlan || { grossSalary: "", extraIncome: "", deductions: "", netSalary: "", payday: "5", allocations: [] };
   const allocations = Array.isArray(plan.allocations) ? plan.allocations : [];
+  const receipts = Array.isArray(plan.receipts) ? plan.receipts : [];
+  const [receiptDraft, setReceiptDraft] = useState({ description: "", amount: "", date: todayStr(), frequency: "mensal" });
   const grossSalary = Number(plan.grossSalary) || 0;
   const extraIncome = Number(plan.extraIncome) || 0;
   const deductions = Number(plan.deductions) || 0;
   const calculatedNet = Math.max(0, grossSalary + extraIncome - deductions);
   const expectedNet = Number(plan.netSalary) > 0 ? Number(plan.netSalary) : calculatedNet;
+  const scheduledMonthlyIncome = receipts.reduce((sum, receipt) => sum + (receiptDate(receipt) ? Number(receipt.amount) || 0 : 0), 0);
+  const plannedIncome = receipts.length ? scheduledMonthlyIncome : expectedNet;
   const expectedAllocationTotal = allocations.reduce((total, allocation) =>
-    total + allocationValue(allocation, expectedNet), 0);
-  const plannedUnallocated = expectedNet - expectedAllocationTotal;
+    total + allocationValue(allocation, plannedIncome), 0);
+  const plannedUnallocated = plannedIncome - expectedAllocationTotal;
   const setPlan = (next) => setSettings({ ...settings, financePlan: { ...plan, ...next } });
+  const receiptDate = (receipt) => {
+    if (!receipt.date) return "";
+    if (receipt.frequency !== "mensal") return receipt.date.slice(0, 7) === month ? receipt.date : "";
+    if (month < receipt.date.slice(0, 7)) return "";
+    const [year, monthNumber] = month.split("-").map(Number);
+    const lastDay = new Date(year, monthNumber, 0).getDate();
+    return `${month}-${String(Math.min(Number(receipt.date.slice(8, 10)), lastDay)).padStart(2, "0")}`;
+  };
+  const addReceipt = () => {
+    if (!receiptDraft.description.trim() || !(Number(receiptDraft.amount) > 0) || !receiptDraft.date) return;
+    setPlan({ receipts: [...receipts, { ...receiptDraft, id: uid(), description: receiptDraft.description.trim(), amount: Number(receiptDraft.amount) }] });
+    setReceiptDraft({ description: "", amount: "", date: todayStr(), frequency: "mensal" });
+  };
+  const removeReceipt = (id) => setPlan({ receipts: receipts.filter((receipt) => receipt.id !== id) });
+  const registerReceipt = (receipt, date) => {
+    const sourceRef = { type: "receiptSchedule", sourceId: receipt.id, eventId: month };
+    const existing = manualFinance.find((transaction) => transaction.sourceRef?.type === sourceRef.type
+      && transaction.sourceRef.sourceId === sourceRef.sourceId && transaction.sourceRef.eventId === sourceRef.eventId);
+    if (existing || !date || date > todayStr()) return;
+    setFinance(upsertById(manualFinance, {
+      id: `income:${receipt.id}:${month}`,
+      type: "entrada", category: "Recebimentos", desc: receipt.description,
+      amount: Number(receipt.amount), date, status: "pago", sourceRef,
+    }));
+  };
   const updateAllocation = (id, changes) => setPlan({
     allocations: allocations.map((allocation) => allocation.id === id ? { ...allocation, ...changes } : allocation),
   });
@@ -2506,6 +2636,48 @@ function FinancePlanningPanel({ finance, month, settings, setSettings, summary }
       <p className="cr-sub" style={{ margin: "14px 0" }}>
         Planeje sua renda e a distribuição do orçamento de {monthLabel(month)}. A renda prevista é apenas uma referência: dinheiro futuro só entra no cálculo de disponibilidade depois de ser registrado como recebido.
       </p>
+      <div className="cr-card" style={{ marginBottom: 16 }}>
+        <div className="cr-row" style={{ justifyContent: "space-between" }}>
+          <div>
+            <h2 className="cr-serif" style={{ fontSize: 18, margin: 0 }}>Recebimentos previstos</h2>
+            <p className="cr-sub" style={{ margin: "4px 0 0" }}>Cadastre cada parcela, adiantamento ou renda recorrente separadamente. Ao registrar como recebido, o valor passa a contar uma única vez no saldo e no planejamento.</p>
+          </div>
+        </div>
+        {receipts.map((receipt) => {
+          const date = receiptDate(receipt);
+          const eventId = month;
+          const matchingIncome = finance.find((transaction) => transaction.type === "entrada"
+            && transaction.status !== "cancelado"
+            && ((transaction.sourceRef?.type === "receiptSchedule"
+              && transaction.sourceRef.sourceId === receipt.id && transaction.sourceRef.eventId === eventId)
+              || (transaction.date === date && Number(transaction.amount) === Number(receipt.amount))));
+          const registered = !!matchingIncome;
+          const received = matchingIncome && (!matchingIncome.status || matchingIncome.status === "pago");
+          return (
+            <div className="cr-list-row" key={receipt.id}>
+              <div style={{ flex: 1 }}>
+                <strong>{receipt.description}</strong>
+                <div className="cr-sub" style={{ margin: 0 }}>{date ? fmtDateShort(date) : "Não previsto neste mês"} · {receipt.frequency === "mensal" ? "Mensal" : "Pontual"}</div>
+              </div>
+              <strong>{fmtBRL(receipt.amount)}</strong>
+              {date && (registered
+                ? <span className="cr-chip" style={received ? { background: "#E3EBDF", color: "#4F6B49" } : undefined}>{received ? "Recebido" : "Lançamento pendente"}</span>
+                : <button className="cr-btn" disabled={date > todayStr()} onClick={() => registerReceipt(receipt, date)}>Registrar recebimento</button>)}
+              <button className="cr-btn ghost danger" aria-label="Remover recebimento previsto" onClick={() => removeReceipt(receipt.id)}><Trash2 size={13} /></button>
+            </div>
+          );
+        })}
+        <div className="cr-grid cr-grid-4" style={{ marginTop: 10 }}>
+          <div className="cr-field"><label className="cr-label">Descrição</label><input className="cr-input" value={receiptDraft.description} onChange={(event) => setReceiptDraft({ ...receiptDraft, description: event.target.value })} placeholder="Salário, adiantamento…" /></div>
+          <div className="cr-field"><label className="cr-label">Valor recebido (R$)</label><input type="number" min="0.01" step="0.01" className="cr-input" value={receiptDraft.amount} onChange={(event) => setReceiptDraft({ ...receiptDraft, amount: event.target.value })} /></div>
+          <div className="cr-field"><label className="cr-label">Data</label><input type="date" className="cr-input" value={receiptDraft.date} onChange={(event) => setReceiptDraft({ ...receiptDraft, date: event.target.value })} /></div>
+          <div className="cr-field"><label className="cr-label">Frequência</label>
+            <select className="cr-select" value={receiptDraft.frequency} onChange={(event) => setReceiptDraft({ ...receiptDraft, frequency: event.target.value })}>
+              <option value="mensal">Mensal</option><option value="pontual">Pontual</option>
+            </select></div>
+        </div>
+        <button className="cr-btn primary" disabled={!receiptDraft.description.trim() || !(Number(receiptDraft.amount) > 0) || !receiptDraft.date} onClick={addReceipt}><Plus size={13} /> Adicionar recebimento</button>
+      </div>
       <div className="cr-grid cr-grid-3" style={{ marginBottom: 16 }}>
         <div className="cr-card">
           <p className="cr-label">Salário bruto mensal</p>
@@ -2535,7 +2707,7 @@ function FinancePlanningPanel({ finance, month, settings, setSettings, summary }
         </div>
         <div className="cr-card">
           <p className="cr-label">Renda líquida prevista</p>
-          <p className="cr-serif" style={{ fontSize: 20, margin: 0 }}>{fmtBRL(expectedNet)}</p>
+          <p className="cr-serif" style={{ fontSize: 20, margin: 0 }}>{fmtBRL(plannedIncome)}</p>
           <p className="cr-sub" style={{ margin: "6px 0 0" }}>Recebido em {monthLabel(month)}: {fmtBRL(monthIncome)}</p>
         </div>
       </div>
@@ -2587,7 +2759,7 @@ function FinancePlanningPanel({ finance, month, settings, setSettings, summary }
               </label>
               <div className="cr-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
                 <span className="cr-sub" style={{ margin: 0 }}>
-                  Limite planejado: {fmtBRL(allocationValue(allocation, expectedNet))} · recebido: {fmtBRL(allocationValue(allocation, monthIncome))}
+                  Limite planejado: {fmtBRL(allocationValue(allocation, plannedIncome))} · recebido: {fmtBRL(allocationValue(allocation, monthIncome))}
                 </span>
                 <button className="cr-btn ghost danger" onClick={() => removeAllocation(allocation.id)} aria-label="Remover categoria">
                   <Trash2 size={14} />
@@ -2599,7 +2771,7 @@ function FinancePlanningPanel({ finance, month, settings, setSettings, summary }
         {allocations.length > 0 && (
           <div style={{ marginTop: 12 }}>
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
-              <span className="cr-sub" style={{ margin: 0 }}>Distribuído sobre o líquido esperado: {fmtBRL(expectedAllocationTotal)}</span>
+              <span className="cr-sub" style={{ margin: 0 }}>Distribuído sobre a renda prevista: {fmtBRL(expectedAllocationTotal)}</span>
               <strong role={plannedUnallocated < 0 ? "alert" : undefined} style={{ color: plannedUnallocated >= 0 ? "#5C7A56" : "#A1493C" }}>
                 {plannedUnallocated < 0
                   ? `Plano excede o líquido esperado em ${fmtBRL(Math.abs(plannedUnallocated))}`
@@ -2850,9 +3022,10 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
   const autoStatus = useAutoSave(form, onSave, (f) => {
     const gen = !isEdit && ((f.paymentMethod === "Crédito" && Number(f.installmentsCount) > 1) || !!f.recurringEnabled);
     return gen ? null : { ...f, amount: Number(f.amount) || 0 };
-  }, draftId.current, (f) => Number(f.amount) > 0 && !!f.date);
+  }, draftId.current, (f) => Number(f.amount) > 0 && !!f.date
+    && (f.type !== "saida" || f.paymentMethod !== "Crédito" || !!f.cardId));
   const saveTransaction = async () => {
-    if (!(Number(form.amount) > 0) || !form.date || saving) return;
+    if (!(Number(form.amount) > 0) || !form.date || (form.type === "saida" && isCredit && !form.cardId) || saving) return;
     setSaving(true);
     setSaveError("");
     try {
@@ -2930,11 +3103,12 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
 
       {isCredit && (
         <div className="cr-field"><label className="cr-label">Cartão</label>
-          <select className="cr-select" value={form.cardId} onChange={(e) => setForm({ ...form, cardId: e.target.value })}>
+          <select required className="cr-select" value={form.cardId} onChange={(e) => setForm({ ...form, cardId: e.target.value })}>
             <option value="">Selecione…</option>
             {cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select></div>
       )}
+      {isCredit && cards.length === 0 && <p className="cr-sub" role="alert" style={{ color: "#A1493C" }}>Cadastre um cartão em Contas & Cartões para vincular esta compra à fatura.</p>}
       {!isCredit && accounts.length > 0 && (
         <div className="cr-field"><label className="cr-label">Conta</label>
           <select className="cr-select" value={form.accountId} onChange={(e) => setForm({ ...form, accountId: e.target.value })}>
@@ -2980,6 +3154,7 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
             {form.recurringEnabled ? "Este lançamento vai se repetir por vários meses." : `Esta compra será dividida em ${form.installmentsCount} parcelas.`} Confirme para criar todos os lançamentos de uma vez.
           </p>
           <button className="cr-btn primary" style={{ width: "100%", justifyContent: "center" }}
+            disabled={!(Number(form.amount) > 0) || !form.date || (isCredit && !form.cardId)}
             onClick={() => onGenerate({ ...form, id: draftId.current, amount: Number(form.amount) || 0 })}>
             {form.recurringEnabled ? "Criar lançamentos recorrentes" : "Criar parcelas"}
           </button>
@@ -2987,10 +3162,10 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
       ) : (
         <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 14, alignItems: "center" }}>
           <span className="cr-sub" style={{ margin: 0, fontSize: 12 }}>
-            {saveError || (saving ? "Salvando lançamento…" : autoStatus === "salvando" ? "Salvando…" : autoStatus === "salvo" ? "✓ Salvo automaticamente" : "Informe um valor maior que zero para salvar.")}
+            {saveError || (saving ? "Salvando lançamento…" : autoStatus === "salvando" ? "Salvando…" : autoStatus === "salvo" ? "✓ Salvo automaticamente" : form.type === "saida" && isCredit && !form.cardId ? "Selecione um cartão para gerar a fatura." : "Informe um valor maior que zero para salvar.")}
           </span>
           <button type="button" className="cr-btn primary" onClick={saveTransaction}
-            disabled={saving || !(Number(form.amount) > 0) || !form.date}>Salvar lançamento</button>
+            disabled={saving || !(Number(form.amount) > 0) || !form.date || (form.type === "saida" && isCredit && !form.cardId)}>Salvar lançamento</button>
         </div>
       )}
     </Modal>
@@ -3127,7 +3302,9 @@ function AccountModal({ item, onSave, onClose }) {
 
 function CardModal({ item, onSave, onClose }) {
   const [form, setForm] = useState(item || { name: "", limit: "", closingDay: "", dueDay: "", bank: "" });
-  const autoStatus = useAutoSave(form, onSave, (form) => ({ ...form, limit: Number(form.limit) || 0 }));
+  const validDay = (value) => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 31;
+  const autoStatus = useAutoSave(form, onSave, (form) => ({ ...form, limit: Number(form.limit) || 0 }), undefined,
+    (value) => !!value.name?.trim() && validDay(value.closingDay) && validDay(value.dueDay));
   return (
     <Modal title={item ? "Editar cartão" : "Novo cartão"} onClose={onClose}>
       <div className="cr-field"><label className="cr-label">Nome do cartão</label>
@@ -3138,10 +3315,11 @@ function CardModal({ item, onSave, onClose }) {
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Limite (R$)</label>
           <input type="number" className="cr-input" value={form.limit} onChange={(e) => setForm({ ...form, limit: e.target.value })} /></div>
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Dia de fechamento</label>
-          <input type="number" className="cr-input" value={form.closingDay} onChange={(e) => setForm({ ...form, closingDay: e.target.value })} /></div>
+          <input type="number" min="1" max="31" className="cr-input" value={form.closingDay} onChange={(e) => setForm({ ...form, closingDay: e.target.value })} /></div>
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Dia de vencimento</label>
-          <input type="number" className="cr-input" value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: e.target.value })} /></div>
+          <input type="number" min="1" max="31" className="cr-input" value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: e.target.value })} /></div>
       </div>
+      {(!validDay(form.closingDay) || !validDay(form.dueDay)) && <p className="cr-sub" role="alert" style={{ color: "#A1493C" }}>Informe os dias de fechamento e vencimento (1 a 31) para habilitar a fatura.</p>}
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
     </Modal>
   );
@@ -3534,6 +3712,8 @@ function StudyView({ study, setStudy, studyAreas, setStudyAreas }) {
   const [editingArea, setEditingArea] = useState(null);
   const [confirmArea, setConfirmArea] = useState(null);
   const [fStatus, setFStatus] = useState("todos");
+  const [fPriority, setFPriority] = useState("todos");
+  const [sortCourses, setSortCourses] = useState("priority");
   const [query, setQuery] = useState("");
   const [openAreas, setOpenAreas] = useState({});
 
@@ -3543,8 +3723,10 @@ function StudyView({ study, setStudy, studyAreas, setStudyAreas }) {
   const deleteArea = (id) => { setStudy(study.filter((c) => c.areaId !== id)); setStudyAreas(studyAreas.filter((a) => a.id !== id)); setConfirmArea(null); };
 
   const statusList = getList("courseStatus");
+  const priorityList = getList("coursePriority");
   const counts = (id) => study.filter((c) => courseStatusId(c) === id).length;
   const matches = (c) => (fStatus === "todos" || courseStatusId(c) === fStatus)
+    && (fPriority === "todos" || c.priority === fPriority)
     && (!query || (c.title + " " + (c.description || "")).toLowerCase().includes(query.toLowerCase()));
   const totalCourses = study.length;
 
@@ -3560,18 +3742,35 @@ function StudyView({ study, setStudy, studyAreas, setStudyAreas }) {
 
       <div className="cr-row" style={{ margin: "14px 0 0", flexWrap: "wrap" }}>
         <input className="cr-input" style={{ maxWidth: 260 }} placeholder="Buscar curso…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <select className="cr-select" style={{ maxWidth: 210 }} value={sortCourses} onChange={(e) => setSortCourses(e.target.value)} aria-label="Organizar cursos">
+          <option value="priority">Organizar por prioridade</option>
+          <option value="title">Organizar por nome</option>
+          <option value="deadline">Organizar por prazo</option>
+        </select>
       </div>
-      <FilterGroups groups={[{
-        key: "status", label: "Status", value: fStatus, onChange: setFStatus, onManage: () => ctx.openManager("courseStatus"),
-        options: statusList.map((s) => ({ value: s.id, label: s.name, count: counts(s.id) })),
-      }]} />
+      <FilterGroups groups={[
+        {
+          key: "status", label: "Status", value: fStatus, onChange: setFStatus, onManage: () => ctx.openManager("courseStatus"),
+          options: statusList.map((s) => ({ value: s.id, label: s.name, count: counts(s.id) })),
+        },
+        {
+          key: "priority", label: "Prioridade", value: fPriority, onChange: setFPriority, onManage: () => ctx.openManager("coursePriority"),
+          options: priorityList.map((p) => ({ value: p.id, label: p.name, count: study.filter((c) => c.priority === p.id).length })),
+        },
+      ]} />
 
       {studyAreas.length === 0 && <p className="cr-empty">Nenhuma área ainda. Clique em "Nova área" para criar a primeira (ex: CRM, Marketing, Dados).</p>}
 
       {studyAreas.map((area, areaIdx) => {
         const all = study.filter((c) => c.areaId === area.id);
-        const shown = all.filter(matches);
-        const hasFilter = fStatus !== "todos" || query;
+        const shown = all.filter(matches).sort((a, b) => {
+          if (sortCourses === "title") return (a.title || "").localeCompare(b.title || "", "pt-BR");
+          if (sortCourses === "deadline") return (a.deadline || "9999").localeCompare(b.deadline || "9999");
+          const aIndex = priorityList.findIndex((priority) => priority.id === a.priority);
+          const bIndex = priorityList.findIndex((priority) => priority.id === b.priority);
+          return (aIndex < 0 ? priorityList.length : aIndex) - (bIndex < 0 ? priorityList.length : bIndex);
+        });
+        const hasFilter = fStatus !== "todos" || fPriority !== "todos" || query;
         if (hasFilter && shown.length === 0) return null;
         const avg = all.length ? Math.round(all.reduce((s, c) => s + (courseStatusId(c) === "concluido" ? 100 : Number(c.progress) || 0), 0) / all.length) : 0;
         const isOpen = openAreas[area.id] !== undefined ? openAreas[area.id] : all.length > 0;
@@ -3612,6 +3811,8 @@ function StudyView({ study, setStudy, studyAreas, setStudyAreas }) {
                           <div className="cr-row" style={{ gap: 8 }}>
                             <strong style={{ fontSize: 15 }}>{c.title}</strong>
                             <span className="cr-chip">{listName("courseStatus", st)}</span>
+                            {c.priority && <span className="cr-chip">{listName("coursePriority", c.priority)}</span>}
+                            {c.paymentMode && <span className="cr-chip">{c.paymentMode === "pago" ? fmtBRL(c.price) : "Gratuito"}</span>}
                             {c.deadline && <span className="cr-chip">até {fmtDateShort(c.deadline)}</span>}
                             {Number(c.hours) > 0 && <span className="cr-chip">{c.hours}h</span>}
                           </div>
@@ -3627,6 +3828,7 @@ function StudyView({ study, setStudy, studyAreas, setStudyAreas }) {
                         <span className="cr-sub" style={{ margin: 0 }}>{pct}%</span>
                       </div>
                       <div className="cr-row" style={{ flexWrap: "wrap", gap: 6 }}>
+                        {c.certificate && <a className="cr-btn" href={c.certificate} download={c.certificateName || `${c.title}-certificado`}><FileText size={13} /> Certificado</a>}
                         {links.length === 0 && <button className="cr-btn ghost" style={{ border: "1.5px dashed var(--line)" }} onClick={() => setEditingCourse({ item: c, areaId: area.id })}><Link2 size={13} /> Adicionar link</button>}
                         {links.map((l, i) => (
                           <button key={l.id || i} className="cr-btn primary" onClick={() => openExternalLink(l.url)}><Link2 size={14} /> {linkLabel(l)}</button>
@@ -3667,14 +3869,38 @@ function StudyAreaModal({ item, onSave, onClose }) {
 }
 
 function CourseModal({ item, areaId, areas, onSave, onClose }) {
-  const [form, setForm] = useState(item || { areaId, title: "", description: "", status: "para estudar", progress: 0, links: [], hours: "", deadline: "", image: "", notes: "" });
-  const autoStatus = useAutoSave(form, onSave, (f) => ({ ...f, areaId: f.areaId || areaId, hours: Number(f.hours) || 0 }));
+  const ctx = useContext(ListsContext);
+  const [form, setForm] = useState(item || { areaId, title: "", description: "", status: "para estudar", progress: 0, links: [], hours: "", deadline: "", image: "", notes: "", paymentMode: "gratuito", price: "", priority: "", certificate: "", certificateName: "" });
+  const [certificateError, setCertificateError] = useState("");
+  const autoStatus = useAutoSave(form, onSave, (f) => ({ ...f, areaId: f.areaId || areaId, hours: Number(f.hours) || 0, price: f.paymentMode === "pago" ? Number(f.price) || 0 : 0 }), undefined,
+    (f) => !!f.title?.trim() && (f.paymentMode !== "pago" || Number(f.price) > 0));
   const links = form.links || [];
   const setLink = (id, field, value) => setForm({ ...form, links: links.map((l) => l.id === id ? { ...l, [field]: value } : l) });
   const setProgress = (v) => setForm({
     ...form, progress: v,
     status: v >= 100 ? (getList("courseStatus").find((s) => s.closed)?.id || "concluido") : (v > 0 && courseStatusId(form) === "para estudar" ? "estudando" : form.status),
   });
+  const attachCertificate = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type)) {
+      setCertificateError("Anexe um PDF, JPG ou PNG.");
+      event.target.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setCertificateError("O arquivo deve ter no máximo 5 MB.");
+      event.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCertificateError("");
+      setForm((current) => ({ ...current, certificate: reader.result, certificateName: file.name }));
+    };
+    reader.onerror = () => setCertificateError("Não foi possível ler o certificado. Tente outro arquivo.");
+    reader.readAsDataURL(file);
+  };
   return (
     <Modal title={item ? "Editar curso" : "Novo curso"} onClose={onClose}>
       <div className="cr-field"><label className="cr-label">Área</label>
@@ -3685,6 +3911,30 @@ function CourseModal({ item, areaId, areas, onSave, onClose }) {
         <input className="cr-input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="ex: CRM Estratégia" /></div>
       <div className="cr-field"><label className="cr-label">Descrição</label>
         <textarea className="cr-textarea" value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
+      <div className="cr-row">
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Modalidade de pagamento</label>
+          <select className="cr-select" value={form.paymentMode || "gratuito"} onChange={(e) => setForm({ ...form, paymentMode: e.target.value, price: e.target.value === "gratuito" ? "" : form.price })}>
+            <option value="gratuito">Gratuito</option><option value="pago">Pago</option>
+          </select></div>
+        {form.paymentMode === "pago" && (
+          <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor (R$) · obrigatório</label>
+            <input type="number" min="0.01" step="0.01" required aria-required="true" className="cr-input" value={form.price || ""} onChange={(e) => setForm({ ...form, price: e.target.value })} /></div>
+        )}
+      </div>
+      <div className="cr-field"><label className="cr-label">Prioridade</label>
+        <div className="cr-row">
+          <ManagedSelect listKey="coursePriority" value={form.priority || ""} emptyLabel="Selecione uma prioridade" onChange={(value) => setForm({ ...form, priority: value })} />
+          <button type="button" className="cr-btn" onClick={() => ctx.openManager("coursePriority")}><Plus size={13} /> Adicionar outra</button>
+        </div>
+      </div>
+      <div className="cr-field"><label className="cr-label">Certificado (PDF, JPG ou PNG)</label>
+        {form.certificate && <div className="cr-row" style={{ marginBottom: 6 }}>
+          <a className="cr-btn ghost" href={form.certificate} download={form.certificateName || "certificado"}><FileText size={13} /> {form.certificateName || "Ver certificado"}</a>
+          <button type="button" className="cr-btn ghost danger" onClick={() => setForm({ ...form, certificate: "", certificateName: "" })}><Trash2 size={13} /> Remover</button>
+        </div>}
+        <input type="file" accept="application/pdf,image/jpeg,image/png" className="cr-input" onChange={attachCertificate} />
+        {certificateError && <p className="cr-sub" role="alert" style={{ color: "#A1493C", margin: "4px 0 0" }}>{certificateError}</p>}
+      </div>
 
       <div className="cr-field"><label className="cr-label">Links do curso (aulas, plataforma, material…)</label>
         {studyLinks(form).filter((l) => l.id === "legacy").map((l) => (
@@ -4514,23 +4764,25 @@ function RoutinesCalendar({ routines, onEdit, onToggle }) {
   const [routineFilter, setRoutineFilter] = useState("todas");
   const todayIdx = (new Date().getDay() + 6) % 7;
   const today = todayStr();
+  const weekStart = startOfWeek(today);
   const list = routineFilter === "todas" ? routines : routines.filter((r) => r.id === routineFilter);
   const PX = 0.85; // pixels por minuto
 
   const columns = WEEKDAY_LABELS.map((label, day) => {
+    const date = addDays(weekStart, day);
     const timed = [], untimed = [];
     list.forEach((r) => (r.steps || []).forEach((s) => {
       if (!stepDays(s).includes(day)) return;
       const { start, end } = stepStartEnd(s);
       const cat = stepCategoryId(s);
-      if (!start) { untimed.push({ routine: r, step: s, cat }); return; }
+      if (!start) { untimed.push({ routine: r, step: s, cat, date }); return; }
       const sm = toMin(start);
       let em = end ? toMin(end) : sm + 60;
       if (em <= sm) em = sm + 30;
-      timed.push({ routine: r, step: s, cat, start, end: end || fromMin(em), sm, em });
+      timed.push({ routine: r, step: s, cat, start, end: end || fromMin(em), sm, em, date });
     }));
     layoutLanes(timed);
-    return { label, day, timed, untimed };
+    return { label, day, date, timed, untimed };
   });
   const allTimed = columns.flatMap((c) => c.timed);
   const gridStart = allTimed.length ? Math.min(7, Math.floor(Math.min(...allTimed.map((e) => e.sm)) / 60)) : 7;
@@ -4542,10 +4794,6 @@ function RoutinesCalendar({ routines, onEdit, onToggle }) {
 
   return (
     <div>
-      <div className="cr-card" style={{ borderLeft: "5px solid var(--clay)", marginTop: 14 }}>
-        <p className="cr-serif" style={{ margin: 0, fontSize: 17, color: TITLE_INK, fontWeight: 700 }}><span style={{ color: TITLE_WINE }}>CALENDÁRIO DE ROTINAS:</span> o que você planejou fazer</p>
-        <p className="cr-sub" style={{ margin: "2px 0 0" }}>É a rotina que você pretende seguir, não o que está no Google Agenda nem o que você de fato fez. Cada cor é uma categoria e cada bloco mostra início, término e o tempo ocupado.</p>
-      </div>
       <div className="cr-row" style={{ margin: "12px 0", flexWrap: "wrap", alignItems: "center" }}>
         <select className="cr-select" style={{ maxWidth: 240 }} value={routineFilter} onChange={(e) => setRoutineFilter(e.target.value)}>
           <option value="todas">Todas as rotinas</option>
@@ -4572,9 +4820,15 @@ function RoutinesCalendar({ routines, onEdit, onToggle }) {
               <div className="cr-sub" style={{ margin: 0, fontSize: 10.5, textAlign: "right", paddingRight: 4 }}>sem horário</div>
               {columns.map((c) => (
                 <div key={c.day}>
-                  {c.untimed.map((e, i) => (
-                    <div key={e.step.id + i} onClick={() => onEdit(e.routine)} style={{ cursor: "pointer", fontSize: 11, padding: "3px 6px", borderRadius: 6, marginBottom: 3, background: itemColor("routineCategory", e.cat), color: readableText(itemColor("routineCategory", e.cat)) }}>{stepLabel(e.step)}</div>
-                  ))}
+                  {c.untimed.map((e, i) => {
+                    const done = !!e.step.log?.[e.date];
+                    return (
+                      <div key={e.step.id + i} onClick={() => onEdit(e.routine)} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11, padding: "3px 6px", borderRadius: 6, marginBottom: 3, background: itemColor("routineCategory", e.cat), color: readableText(itemColor("routineCategory", e.cat)), opacity: done ? 0.62 : 1 }}>
+                        <div onClick={(event) => { event.stopPropagation(); onToggle(e.routine, e.step.id, e.date); }} style={{ width: 14, height: 14, flexShrink: 0, borderRadius: 4, border: `1.5px solid ${readableText(itemColor("routineCategory", e.cat))}`, background: done ? readableText(itemColor("routineCategory", e.cat)) : "transparent", display: "grid", placeItems: "center" }}>{done && <Check size={10} color={itemColor("routineCategory", e.cat)} />}</div>
+                        <span style={{ textDecoration: done ? "line-through" : "none" }}>{stepLabel(e.step)}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               ))}
             </div>
@@ -4590,22 +4844,20 @@ function RoutinesCalendar({ routines, onEdit, onToggle }) {
                 {c.timed.map((e, i) => {
                   const color = itemColor("routineCategory", e.cat);
                   const txt = readableText(color);
-                  const isToday = c.day === todayIdx;
-                  const doneToday = isToday && e.step.log && e.step.log[today];
+                  const done = !!e.step.log?.[e.date];
                   const h = Math.max(24, (e.em - e.sm) * PX - 2);
                   return (
                     <div key={e.step.id + "-" + i} onClick={() => onEdit(e.routine)}
                       title={`${stepLabel(e.step)} · ${listName("routineCategory", e.cat)} · ${e.start} – ${e.end} (${fmtDuration(e.em - e.sm)})`}
                       style={{ position: "absolute", top: (e.sm - gridStart * 60) * PX, height: h, left: `calc(${(e.lane * 100) / e.lanes}% + 1px)`, width: `calc(${100 / e.lanes}% - 3px)`,
-                        background: color, color: txt, borderRadius: 6, padding: "3px 6px", fontSize: 11, lineHeight: 1.25, overflow: "hidden", cursor: "pointer", boxSizing: "border-box", opacity: doneToday ? 0.55 : 1 }}>
-                      {isToday && (
-                        <div onClick={(ev) => { ev.stopPropagation(); onToggle(e.routine, e.step.id); }}
-                          style={{ position: "absolute", top: 3, right: 3, width: 14, height: 14, borderRadius: 4, border: `1.5px solid ${txt}`, background: doneToday ? txt : "transparent", color, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          {doneToday && <Check size={10} />}
-                        </div>
-                      )}
+                        background: color, color: txt, borderRadius: 6, padding: "3px 6px 3px 22px", fontSize: 11, lineHeight: 1.25, overflow: "hidden", cursor: "pointer", boxSizing: "border-box", opacity: done ? 0.55 : 1 }}>
+                      <div onClick={(ev) => { ev.stopPropagation(); onToggle(e.routine, e.step.id, e.date); }}
+                        aria-label={done ? "Marcar como pendente" : "Marcar como concluído"}
+                        style={{ position: "absolute", top: 3, left: 3, width: 14, height: 14, borderRadius: 4, border: `1.5px solid ${txt}`, background: done ? txt : "transparent", color, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {done && <Check size={10} />}
+                      </div>
                       <strong style={{ display: "block", fontSize: 10.5 }}>{e.start} – {e.end}</strong>
-                      <span style={{ textDecoration: doneToday ? "line-through" : "none" }}>{stepLabel(e.step)}</span>
+                      <span style={{ textDecoration: done ? "line-through" : "none" }}>{stepLabel(e.step)}</span>
                       {h > 56 && <span style={{ display: "block", opacity: 0.85, fontSize: 10 }}>{listName("routineCategory", e.cat)} · {fmtDuration(e.em - e.sm)}</span>}
                     </div>
                   );
@@ -4628,12 +4880,11 @@ function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal }) {
   const save = (data) => { setRoutines(upsertById(routines, data)); };
   const remove = (id) => setRoutines(routines.filter((x) => x.id !== id));
   // cada dia tem seu próprio "feito", assim dá para acompanhar o que foi realizado
-  const toggleStep = (routine, stepId) => {
-    const today = todayStr();
+  const toggleStep = (routine, stepId, date = todayStr()) => {
     const steps = routine.steps.map((s) => {
       if (s.id !== stepId) return s;
       const log = { ...(s.log || {}) };
-      if (log[today]) delete log[today]; else log[today] = true;
+      if (log[date]) delete log[date]; else log[date] = true;
       return { ...s, log };
     });
     setRoutines(routines.map((r) => r.id === routine.id ? { ...r, steps } : r));
@@ -5397,6 +5648,8 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
   const [section, setSection] = useState("procedimentos");
   const [editing, setEditing] = useState(null);
   const [registering, setRegistering] = useState(null);
+  const [financeMonth, setFinanceMonth] = useState("todos");
+  const [financeYear, setFinanceYear] = useState(String(new Date().getFullYear()));
   const [f, setF] = useState({ status: "todos", area: "todos", tipo: "todos", preco: "todos", local: "todos" });
   const setFilter = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }));
   const [customize, setCustomize] = useState(false);
@@ -5433,7 +5686,40 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
     const st = inferProcStatus(b);
     return { ...b, _status: statusList.some((x) => x.id === st) ? st : "", _region: inferRegion(b), _band: priceBand(b.cost), _place: pl ? pl.name : (b.clinic || ""), _placeObj: pl };
   });
-  const totalCost = procedures.reduce((sum, x) => sum + Number(x.cost || 0), 0);
+  const yearOptions = Array.from(new Set([
+    String(new Date().getFullYear()),
+    ...procedures.flatMap((procedure) => [
+      ...(procedure.history || []).map((entry) => entry.date?.slice(0, 4)),
+      procedure.plannedDate?.slice(0, 4), procedure.nextExpenseDate?.slice(0, 4),
+    ]),
+  ].filter(Boolean))).sort((a, b) => b.localeCompare(a));
+  const inPeriod = (date) => !!date && date.slice(0, 4) === financeYear && (financeMonth === "todos" || date.slice(5, 7) === financeMonth);
+  const realizedRecords = procedures.flatMap((procedure) => {
+    const history = Array.isArray(procedure.history) ? procedure.history : [];
+    if (history.length) return history.filter((entry) => inPeriod(entry.date)).map((entry) => ({ date: entry.date, amount: Number(entry.cost) || 0 }));
+    return procedure.dateDone && inPeriod(procedure.dateDone)
+      ? [{ date: procedure.dateDone, amount: Number(procedure.cost) || 0 }]
+      : [];
+  });
+  const realizedTotal = realizedRecords.reduce((sum, entry) => sum + entry.amount, 0);
+  const plannedProcedures = procedures.filter((procedure) => {
+    const status = inferProcStatus(procedure);
+    const hasPlannedWork = status !== "nunca" && !status.startsWith("paus")
+      && (status !== "jafiz" || procedure.recurring || procedure.nextExpenseDate || procedure.plannedDate);
+    const remaining = Number(procedure.plannedSessions) > 0
+      ? Number(procedure.plannedSessions) - (procedure.history || []).length
+      : 1;
+    return hasPlannedWork && remaining > 0 && Number(procedure.cost) > 0;
+  });
+  const plannedRecords = plannedProcedures.filter((procedure) =>
+    inPeriod(procedure.plannedDate || procedure.nextExpenseDate));
+  const plannedTotal = plannedRecords.reduce((sum, procedure) => {
+    const remaining = Number(procedure.plannedSessions) > 0
+      ? Number(procedure.plannedSessions) - (procedure.history || []).length
+      : 1;
+    return sum + Number(procedure.cost || 0) * Math.max(1, remaining);
+  }, 0);
+  const plannedUndated = plannedProcedures.filter((procedure) => !(procedure.plannedDate || procedure.nextExpenseDate)).length;
   const placeNames = Array.from(new Set(procedures.map((p) => p._place).filter(Boolean)));
 
   const matches = (p, except) =>
@@ -5469,7 +5755,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
   return (
     <div>
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
-        <div><h1 className="cr-h1 cr-serif">Procedimentos Estéticos</h1><p className="cr-sub">{fmtBRL(totalCost)} investidos ao todo.</p></div>
+        <div><h1 className="cr-h1 cr-serif">Procedimentos Estéticos</h1><p className="cr-sub">{fmtBRL(realizedTotal)} realizados · {fmtBRL(plannedTotal)} planejados no período selecionado.</p></div>
         {section === "procedimentos" && (
           <div className="cr-row">
             <button className="cr-btn" onClick={() => setCustomize(true)}><SettingsIcon size={13} /> Personalizar card</button>
@@ -5481,13 +5767,39 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
       <div className="cr-tabbar" style={{ marginTop: 14 }}>
         <button className={`cr-tabbtn ${section === "procedimentos" ? "active" : ""}`} onClick={() => setSection("procedimentos")}>Procedimentos</button>
         <button className={`cr-tabbtn ${section === "lugares" ? "active" : ""}`} onClick={() => setSection("lugares")}>Lugares e profissionais ({places.length})</button>
+        <button className={`cr-tabbtn ${section === "financeiro" ? "active" : ""}`} onClick={() => setSection("financeiro")}>Financeiro</button>
       </div>
 
       {section === "lugares" && <PlacesPanel places={places} setPlaces={setPlaces} beauty={beauty} setBeauty={setBeauty} />}
+      {section === "financeiro" && (
+        <div>
+          <div className="cr-row" style={{ margin: "14px 0", flexWrap: "wrap" }}>
+            <select className="cr-select" style={{ maxWidth: 180 }} value={financeMonth} onChange={(event) => setFinanceMonth(event.target.value)} aria-label="Filtrar por mês">
+              <option value="todos">Todos os meses</option>
+              {["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"].map((name, index) => <option key={index} value={String(index + 1).padStart(2, "0")}>{name}</option>)}
+            </select>
+            <select className="cr-select" style={{ maxWidth: 140 }} value={financeYear} onChange={(event) => setFinanceYear(event.target.value)} aria-label="Filtrar por ano">
+              {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </div>
+          <div className="cr-grid cr-grid-2">
+            <div className="cr-card"><p className="cr-label">Procedimentos realizados no período</p><p className="cr-serif" style={{ fontSize: 24 }}>{fmtBRL(realizedTotal)}</p></div>
+            <div className="cr-card"><p className="cr-label">Procedimentos planejados no período</p><p className="cr-serif" style={{ fontSize: 24 }}>{fmtBRL(plannedTotal)}</p></div>
+          </div>
+          {plannedUndated > 0 && <p className="cr-sub">{plannedUndated} procedimento(s) desejado(s) sem data prevista não foram incluídos no total do período. Defina uma data no cadastro para incluí-los.</p>}
+          <div className="cr-card">
+            <h3 className="cr-serif" style={{ marginTop: 0 }}>Realizações</h3>
+            {realizedRecords.length === 0 && <p className="cr-empty">Nenhuma realização cadastrada nesse período.</p>}
+            {realizedRecords.map((entry, index) => (
+              <div className="cr-list-row" key={`${entry.date}-${index}`}><span className="cr-list-title" style={{ flex: 1 }}>{fmtDateShort(entry.date)}</span><strong>{fmtBRL(entry.amount)}</strong></div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {section === "procedimentos" && (
         <div>
-          <FilterGroups groups={groups} defaultOpen="status" />
+          <FilterGroups groups={groups} />
 
           {dueAlerts.length > 0 && (
             <div className="cr-card" style={{ marginBottom: 22, borderColor: "#E3B5AB" }}>
@@ -5541,7 +5853,6 @@ const PROC_CARD_FIELDS = [
   { key: "maintenance", label: "Próxima manutenção e alerta", def: true },
   { key: "cost", label: "Valor", def: true },
   { key: "place", label: "Local e profissional", def: true },
-  { key: "social", label: "Botões de Instagram e agendamento", def: false },
   { key: "goal", label: "Objetivo", def: false },
   { key: "result", label: "Resultado", def: false },
   { key: "notes", label: "Observações", def: false },
@@ -5593,7 +5904,6 @@ function BeautyCard({ b, on, onEdit, onRemove, onRegister }) {
     ? (FREQUENCY_PRESETS.find((f) => f.unit === b.frequencyUnit && f.value === Number(b.frequencyValue))?.label
       || (b.frequencyUnit === "meses" ? `A cada ${b.frequencyValue} meses` : `A cada ${b.frequencyValue} dias`))
     : "";
-  const pl = b._placeObj;
   const chips = [
     on("region") && b._region && <span className="cr-chip" key="r">{b._region}</span>,
     on("degree") && b.degree && <span className="cr-chip" key="d">{b.degree}</span>,
@@ -5624,12 +5934,6 @@ function BeautyCard({ b, on, onEdit, onRemove, onRegister }) {
       {on("goal") && b.goal && <p style={{ fontSize: 13, margin: "4px 0" }}><strong>Objetivo:</strong> {b.goal}</p>}
       {on("place") && (b._place || b.professional) && (
         <p className="cr-sub" style={{ margin: "4px 0" }}>{[b.professional, b._place].filter(Boolean).join(" · ")}</p>
-      )}
-      {on("social") && pl && (pl.instagram || pl.booking) && (
-        <div className="cr-row" style={{ gap: 6, margin: "4px 0" }}>
-          {pl.instagram && <button className="cr-btn" style={{ padding: "4px 8px" }} onClick={stop(() => openExternalLink(instagramUrl(pl.instagram)))}>Instagram</button>}
-          {pl.booking && <button className="cr-btn" style={{ padding: "4px 8px" }} onClick={stop(() => openExternalLink(siteUrl(pl.booking)))}>Agendar</button>}
-        </div>
       )}
       {on("result") && b.result && <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>{b.result}</p>}
       {on("maintenance") && m && (
@@ -5718,6 +6022,7 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
     frequencyValue: f.recurring ? Number(f.frequencyValue) || "" : "",
   }));
   const preview = form.recurring ? (form.nextExpenseDate || nextMaintenanceDate(form.dateDone, form.frequencyUnit, form.frequencyValue)) : null;
+  const selectedPlace = places.find((place) => place.id === form.placeId);
   const matchedPresetKey = FREQUENCY_PRESETS.find((f) => f.key !== "custom" && f.unit === form.frequencyUnit && f.value === Number(form.frequencyValue))?.key;
   const selectedKey = matchedPresetKey || (form.frequencyValue ? "custom" : "");
 
@@ -5760,6 +6065,12 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
           <option value="">Nenhum local escolhido</option>
           {places.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select></div>
+      {selectedPlace && (selectedPlace.instagram || selectedPlace.booking) && (
+        <div className="cr-row" style={{ marginTop: -4, marginBottom: 8 }}>
+          {selectedPlace.instagram && <button className="cr-btn" onClick={() => openExternalLink(instagramUrl(selectedPlace.instagram))}>Instagram</button>}
+          {selectedPlace.booking && <button className="cr-btn" onClick={() => openExternalLink(siteUrl(selectedPlace.booking))}>Agendar</button>}
+        </div>
+      )}
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Profissional</label>
           <input className="cr-input" value={form.professional} onChange={(e) => setForm({ ...form, professional: e.target.value })} /></div>
@@ -5783,6 +6094,9 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
           <input type="date" className="cr-input" value={form.nextExpenseDate || preview || ""}
             onChange={(event) => setForm({ ...form, nextExpenseDate: event.target.value })} /></div>
       </div>
+      {!form.recurring && <div className="cr-field"><label className="cr-label">Data planejada (opcional)</label>
+        <input type="date" className="cr-input" value={form.plannedDate || ""}
+          onChange={(event) => setForm({ ...form, plannedDate: event.target.value })} /></div>}
 
       <FormSection title="Recorrência e alertas" />
       <div className="cr-field">
@@ -6400,7 +6714,7 @@ function ShoppingView({ shopping, setShopping }) {
       )}
 
       {editing && <ShoppingModal item={editing === "new" ? null : editing} defaultKind={tab} onSave={save} onClose={() => setEditing(null)} />}
-      {purchasing && <SourceExpenseModal item={purchasing} title={`Confirmar compra: ${purchasing.name}`} amount={purchasing.price}
+      {purchasing && <SourceExpenseModal item={purchasing} title={`Confirmar compra: ${purchasing.name}`} amount={purchasing.price} allowNoAmount
         onSave={(entry) => registerPurchase(purchasing, entry)} onClose={() => setPurchasing(null)} />}
     </div>
   );
@@ -6447,14 +6761,16 @@ function ShoppingCard({ s, onEdit, onRemove, onPurchase }) {
   );
 }
 
-function SourceExpenseModal({ item, title, amount, onSave, onClose }) {
+function SourceExpenseModal({ item, title, amount, onSave, onClose, allowNoAmount = false }) {
   const [form, setForm] = useState({ date: todayStr(), amount: Number(amount) || "", description: "" });
   const [saving, setSaving] = useState(false);
   const save = () => {
-    if (!form.date || form.date > todayStr() || !(Number(form.amount) > 0) || saving) return;
+    const hasAmount = String(form.amount).trim() !== "";
+    if (!form.date || form.date > todayStr() || (!allowNoAmount && !(Number(form.amount) > 0))
+      || (allowNoAmount && hasAmount && !(Number(form.amount) > 0)) || saving) return;
     setSaving(true);
     onSave({
-      id: uid(), date: form.date, amount: Number(form.amount),
+      id: uid(), date: form.date, amount: hasAmount ? Number(form.amount) : null,
       description: form.description.trim(), category: item.category || "",
       priority: item.priority || "media",
     });
@@ -6463,12 +6779,12 @@ function SourceExpenseModal({ item, title, amount, onSave, onClose }) {
     <Modal size="small" title={title} onClose={onClose}>
       <div className="cr-field"><label className="cr-label">Data da despesa</label>
         <input type="date" max={todayStr()} className="cr-input" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></div>
-      <div className="cr-field"><label className="cr-label">Valor realmente pago (R$)</label>
+      <div className="cr-field"><label className="cr-label">Valor realmente pago (R$){allowNoAmount ? " · opcional" : ""}</label>
         <input type="number" min="0.01" step="0.01" className="cr-input" value={form.amount}
           onChange={(event) => setForm({ ...form, amount: event.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Observação (opcional)</label>
         <input className="cr-input" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></div>
-      <button className="cr-btn primary" disabled={saving || !form.date || form.date > todayStr() || !(Number(form.amount) > 0)}
+      <button className="cr-btn primary" disabled={saving || !form.date || form.date > todayStr() || (!allowNoAmount && !(Number(form.amount) > 0)) || (allowNoAmount && String(form.amount).trim() !== "" && !(Number(form.amount) > 0))}
         style={{ width: "100%", justifyContent: "center" }} onClick={save}>Registrar despesa real</button>
     </Modal>
   );
@@ -6538,6 +6854,7 @@ function ShoppingModal({ item, defaultKind, onSave, onClose }) {
 function HobbiesView({ hobbies, setHobbies }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [recording, setRecording] = useState(null);
   const [filterCategory, setFilterCategory] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
@@ -6550,12 +6867,14 @@ function HobbiesView({ hobbies, setHobbies }) {
   const registerExpense = (hobby, entry) => {
     const expenseHistory = Array.isArray(hobby.expenseHistory) ? hobby.expenseHistory : [];
     if (expenseHistory.some((saved) => saved.id === entry.id)) return;
-    setHobbies(upsertById(hobbies, {
+    const updated = {
       ...hobby,
       lastExpenseDate: entry.date,
       nextExpenseDate: nextFinanceDate(entry.date, hobby.expenseFrequency),
       expenseHistory: [entry, ...expenseHistory],
-    }));
+    };
+    setHobbies(upsertById(hobbies, updated));
+    setViewing(updated);
     setRecording(null);
   };
 
@@ -6585,7 +6904,7 @@ function HobbiesView({ hobbies, setHobbies }) {
 
       {viewAll || filterCategory !== "todas" ? (
         <div className="cr-grid cr-grid-3">
-          {filtered.map((h) => <HobbyCard key={h.id} h={h} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} onExpense={() => setRecording(h)} />)}
+          {filtered.map((h) => <HobbyCard key={h.id} h={h} onView={() => setViewing(h)} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} />)}
         </div>
       ) : (
         [...order, ""].map((cat) => {
@@ -6595,7 +6914,7 @@ function HobbiesView({ hobbies, setHobbies }) {
             <div key={cat || "sem"} style={{ marginBottom: 36 }}>
               <SectionTitle title={cat ? listName("hobbyCategory", cat) : "Sem categoria"} count={`${items.length} ${items.length === 1 ? "hobby" : "hobbies"}`} />
               <div className="cr-grid cr-grid-3">
-                {items.map((h) => <HobbyCard key={h.id} h={h} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} onExpense={() => setRecording(h)} />)}
+                {items.map((h) => <HobbyCard key={h.id} h={h} onView={() => setViewing(h)} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} />)}
               </div>
             </div>
           );
@@ -6603,13 +6922,55 @@ function HobbiesView({ hobbies, setHobbies }) {
       )}
 
       {editing && <HobbyModal item={editing === "new" ? null : editing} onSave={save} onClose={() => setEditing(null)} />}
-      {recording && <SourceExpenseModal item={recording} title={`Registrar despesa: ${recording.name}`} amount={recording.cost}
-        onSave={(entry) => registerExpense(recording, entry)} onClose={() => setRecording(null)} />}
+      {viewing && (
+        <Modal title={viewing.name} onClose={() => setViewing(null)}>
+          {viewing.image && <img src={viewing.image} alt="" style={{ width: "100%", maxHeight: 300, objectFit: "cover", borderRadius: 12, marginBottom: 12 }} />}
+          {viewing.description && <p style={{ whiteSpace: "pre-wrap" }}>{viewing.description}</p>}
+          {viewing.goal && <p><strong>Objetivo:</strong> {viewing.goal}</p>}
+          <div className="cr-row" style={{ flexWrap: "wrap" }}>
+            <span className="cr-chip">{listName("hobbyStatus", viewing.status || "quero experimentar")}</span>
+            {viewing.frequency && <span className="cr-chip">{viewing.frequency}</span>}
+            {viewing.level && <span className="cr-chip">Nível: {viewing.level}</span>}
+            {viewing.timeSpent > 0 && <span className="cr-chip">{viewing.timeSpent}h dedicadas</span>}
+          </div>
+          {viewing.materials && <p><strong>Materiais:</strong> {viewing.materials}</p>}
+          {viewing.notes && <p style={{ whiteSpace: "pre-wrap" }}><strong>Observações:</strong> {viewing.notes}</p>}
+          <h3 className="cr-serif">Despesas</h3>
+          {(viewing.expenses || []).length === 0 && <p className="cr-empty">Nenhuma despesa planejada cadastrada.</p>}
+          {(viewing.expenses || []).map((expense) => (
+            <div className="cr-list-row" key={expense.id}>
+              <div style={{ flex: 1 }}>
+                <strong>{expense.description || viewing.name}</strong>
+                <div className="cr-sub" style={{ margin: 0 }}>{fmtDateShort(expense.date)} · {expense.frequency === "pontual" ? "Esporádica" : expense.frequency}</div>
+              </div>
+              <strong>{fmtBRL(expense.amount)}</strong>
+              <button className="cr-btn ghost" onClick={() => setRecording({ hobby: viewing, expense })}>Registrar gasto real</button>
+            </div>
+          ))}
+          {(viewing.expenseHistory || []).length > 0 && (
+            <>
+              <h3 className="cr-serif" style={{ marginTop: 16 }}>Gastos registrados</h3>
+              {viewing.expenseHistory.map((expense) => (
+                <div className="cr-list-row" key={expense.id}>
+                  <span className="cr-list-title" style={{ flex: 1 }}>{expense.description || "Despesa"} · {fmtDateShort(expense.date)}</span>
+                  {expense.amount > 0 && <strong>{fmtBRL(expense.amount)}</strong>}
+                </div>
+              ))}
+            </>
+          )}
+          <div className="cr-row" style={{ marginTop: 16 }}>
+            <button className="cr-btn" onClick={() => setRecording({ hobby: viewing, expense: null })}>Registrar outro gasto real</button>
+            <button className="cr-btn" onClick={() => { setEditing(viewing); setViewing(null); }}><Pencil size={13} /> Editar hobby</button>
+          </div>
+        </Modal>
+      )}
+      {recording && <SourceExpenseModal item={recording.hobby} title={`Registrar despesa: ${recording.expense?.description || recording.hobby.name}`} amount={recording.expense?.amount ?? recording.hobby.cost}
+        onSave={(entry) => registerExpense(recording.hobby, { ...entry, expenseId: recording.expense?.id })} onClose={() => setRecording(null)} />}
     </div>
   );
 }
 
-function HobbyCard({ h, onEdit, onRemove, onExpense }) {
+function HobbyCard({ h, onView, onEdit, onRemove }) {
   return (
     <div className="cr-card">
       {h.image ? (
@@ -6645,19 +7006,10 @@ function HobbyCard({ h, onEdit, onRemove, onExpense }) {
         </>
       )}
       <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 8 }}>
-        <span className="cr-sub" style={{ margin: 0 }}>{h.timeSpent ? `${h.timeSpent}h dedicadas` : ""}{h.cost ? ` · ${fmtBRL(h.cost)}` : ""}</span>
+        <span className="cr-sub" style={{ margin: 0 }}>{h.timeSpent ? `${h.timeSpent}h dedicadas` : ""}</span>
         {h.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(h.link)}><Link2 size={12} /> Abrir link</button>}
       </div>
-      {h.expenseFrequency && h.nextExpenseDate && (
-        <p className="cr-sub" style={{ margin: "4px 0" }}>Próxima despesa prevista: {fmtDateShort(h.nextExpenseDate)} · {h.expenseFrequency}</p>
-      )}
-      {h.expenseType && <p className="cr-sub" style={{ margin: "4px 0" }}>Tipo de despesa: {h.expenseType}</p>}
-      {(h.expenseHistory || []).length > 0 && (
-        <p className="cr-sub" style={{ margin: "4px 0" }}>Despesas reais registradas: {(h.expenseHistory || []).length}</p>
-      )}
-      <button className="cr-btn" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={onExpense}>
-        Registrar despesa real
-      </button>
+      <button className="cr-btn ghost" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={onView}>Ver detalhes</button>
     </div>
   );
 }
@@ -6666,14 +7018,21 @@ function HobbyModal({ item, onSave, onClose }) {
   const [form, setForm] = useState(item || {
     name: "", category: "", image: "", description: "", goal: "", frequency: "", level: "",
     status: "quero experimentar", progress: 0, timeSpent: "", materials: "", cost: "", link: "", notes: "",
-    priority: "media", expenseType: "atividade", expenseFrequency: "pontual", nextExpenseDate: "", expenseHistory: [],
+    priority: "media", expenses: [], expenseHistory: [],
   });
+  const [expenseDraft, setExpenseDraft] = useState({ description: "", amount: "", date: todayStr(), frequency: "pontual" });
   const autoStatus = useAutoSave(form, onSave, (form) => ({
     ...form,
     timeSpent: Number(form.timeSpent) || 0,
-    cost: Number(form.cost) || 0,
+    expenses: (Array.isArray(form.expenses) ? form.expenses : []).map((expense) => ({ ...expense, amount: Number(expense.amount) || 0 })),
     expenseHistory: Array.isArray(form.expenseHistory) ? form.expenseHistory : [],
   }));
+  const expenses = Array.isArray(form.expenses) ? form.expenses : [];
+  const addExpense = () => {
+    if (!expenseDraft.description.trim() || !(Number(expenseDraft.amount) > 0) || !expenseDraft.date) return;
+    setForm({ ...form, expenses: [...expenses, { ...expenseDraft, id: uid(), description: expenseDraft.description.trim(), amount: Number(expenseDraft.amount) }] });
+    setExpenseDraft({ description: "", amount: "", date: todayStr(), frequency: "pontual" });
+  };
   return (
     <Modal title={item ? "Editar hobby" : "Novo hobby"} onClose={onClose}>
       <div className="cr-field"><label className="cr-label">Nome</label>
@@ -6700,29 +7059,36 @@ function HobbyModal({ item, onSave, onClose }) {
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Tempo dedicado (h)</label>
           <input type="number" className="cr-input" value={form.timeSpent} onChange={(e) => setForm({ ...form, timeSpent: e.target.value })} /></div>
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor estimado por despesa (R$)</label>
-          <input type="number" className="cr-input" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} /></div>
       </div>
-      <div className="cr-row">
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Prioridade</label>
-          <ManagedSelect listKey="priority" value={form.priority || "media"} onChange={(value) => setForm({ ...form, priority: value })} /></div>
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Tipo de despesa</label>
-          <select className="cr-select" value={form.expenseType || "atividade"} onChange={(event) => setForm({ ...form, expenseType: event.target.value })}>
-            <option value="atividade">Atividade</option><option value="material">Material</option>
-            <option value="equipamento">Equipamento</option><option value="curso">Curso</option>
-            <option value="assinatura">Assinatura</option><option value="outro">Outro</option>
-          </select></div>
+      <div className="cr-field"><label className="cr-label">Prioridade</label>
+        <ManagedSelect listKey="priority" value={form.priority || "media"} onChange={(value) => setForm({ ...form, priority: value })} /></div>
+      <div className="cr-card" style={{ margin: "8px 0 14px" }}>
+        <h3 className="cr-serif" style={{ margin: "0 0 8px", fontSize: 16 }}>Despesas previstas</h3>
+        {expenses.map((expense) => (
+          <div className="cr-list-row" key={expense.id}>
+            <div style={{ flex: 1 }}>
+              <strong>{expense.description}</strong>
+              <div className="cr-sub" style={{ margin: 0 }}>{fmtDateShort(expense.date)} · {expense.frequency === "pontual" ? "Esporádica" : expense.frequency}</div>
+            </div>
+            <strong>{fmtBRL(expense.amount)}</strong>
+            <button type="button" className="cr-btn ghost danger" aria-label="Remover despesa" onClick={() => setForm({ ...form, expenses: expenses.filter((entry) => entry.id !== expense.id) })}><Trash2 size={13} /></button>
+          </div>
+        ))}
+        <div className="cr-field" style={{ marginTop: 10 }}><label className="cr-label">Descrição</label>
+          <input className="cr-input" value={expenseDraft.description} onChange={(event) => setExpenseDraft({ ...expenseDraft, description: event.target.value })} placeholder="Mensalidade, uniforme, inscrição…" /></div>
+        <div className="cr-row">
+          <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor (R$)</label>
+            <input type="number" min="0.01" step="0.01" className="cr-input" value={expenseDraft.amount} onChange={(event) => setExpenseDraft({ ...expenseDraft, amount: event.target.value })} /></div>
+          <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Data</label>
+            <input type="date" className="cr-input" value={expenseDraft.date} onChange={(event) => setExpenseDraft({ ...expenseDraft, date: event.target.value })} /></div>
+          <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Frequência</label>
+            <select className="cr-select" value={expenseDraft.frequency} onChange={(event) => setExpenseDraft({ ...expenseDraft, frequency: event.target.value })}>
+              <option value="pontual">Esporádica</option><option value="mensal">Mensal</option>
+              <option value="trimestral">Trimestral</option><option value="semestral">Semestral</option><option value="anual">Anual</option>
+            </select></div>
+        </div>
+        <button type="button" className="cr-btn" disabled={!expenseDraft.description.trim() || !(Number(expenseDraft.amount) > 0) || !expenseDraft.date} onClick={addExpense}><Plus size={13} /> Adicionar despesa</button>
       </div>
-      <div className="cr-row">
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Frequência da despesa</label>
-          <select className="cr-select" value={form.expenseFrequency || "pontual"} onChange={(event) => setForm({ ...form, expenseFrequency: event.target.value })}>
-            <option value="mensal">Mensal</option><option value="trimestral">Trimestral</option>
-            <option value="semestral">Semestral</option><option value="anual">Anual</option><option value="pontual">Pontual</option>
-          </select></div>
-      </div>
-      <div className="cr-field"><label className="cr-label">Próxima despesa prevista</label>
-        <input type="date" className="cr-input" value={form.nextExpenseDate || ""}
-          onChange={(event) => setForm({ ...form, nextExpenseDate: event.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Materiais necessários</label>
         <input className="cr-input" value={form.materials} onChange={(e) => setForm({ ...form, materials: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Link (tutorial, comunidade, aula…)</label>
@@ -6850,7 +7216,7 @@ function SelfCareView({ selfcare, setSelfcare }) {
         <div><h1 className="cr-h1 cr-serif">Self-Care & Bem-estar</h1><p className="cr-sub">Relaxamento e bem-estar, separado de procedimentos estéticos.</p></div>
         <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
       </div>
-      <FilterGroups defaultOpen="status" groups={[{ key: "status", label: "Status", value: fStatus, onChange: setFStatus, onManage: () => ctx.openManager("selfcareStatus"), options }]} />
+      <FilterGroups groups={[{ key: "status", label: "Status", value: fStatus, onChange: setFStatus, onManage: () => ctx.openManager("selfcareStatus"), options }]} />
       {selfcare.length === 0 && <p className="cr-empty">Nada registrado ainda.</p>}
       {selfcare.length > 0 && filtered.length === 0 && <p className="cr-empty">Nenhum item com esse status.</p>}
       {(() => {

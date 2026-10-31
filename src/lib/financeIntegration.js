@@ -196,6 +196,15 @@ function generateProcedureRecords(beauty, fromDate, untilDate) {
     });
     const status = String(procedure.procStatus || "").trim().toLowerCase();
     if (procedure.archived || status === "nunca" || status.startsWith("paus")) return;
+    if (!procedure.recurring && validDate(procedure.plannedDate) && procedure.plannedDate >= fromDate
+      && procedure.plannedDate <= untilDate && !history.some((entry) => entry.date === procedure.plannedDate)) {
+      const record = projectedRecord(
+        "beauty", procedure, procedure.plannedDate, procedure.cost, procedure.category || "Procedimentos",
+        procedure.priority || "alta", "procedure", "planned-session",
+      );
+      if (record) result.push(record);
+      return;
+    }
     const interval = procedure.frequencyUnit === "dias"
       ? { days: Number(procedure.frequencyValue) }
       : { months: Number(procedure.frequencyValue) };
@@ -237,6 +246,35 @@ function generateHobbyRecords(hobbies, fromDate, untilDate) {
     });
     const status = String(hobby.status || "").trim().toLowerCase();
     if (hobby.archived || status.startsWith("cancel") || status.startsWith("conclu") || status.startsWith("paus")) return;
+    const expenses = Array.isArray(hobby.expenses) ? hobby.expenses : [];
+    expenses.forEach((expense, index) => {
+      const amount = positiveAmount(expense.amount);
+      if (!amount || !validDate(expense.date)) return;
+      const frequency = frequencyMonths(expense.frequency);
+      let date = expense.date;
+      if (frequency && date < fromDate) {
+        while (date < fromDate) date = shiftMonths(date, frequency);
+      }
+      let count = 0;
+      while (date >= fromDate && date <= untilDate && count < 24) {
+        const alreadyRecorded = history.some((entry) => entry.expenseId === expense.id && entry.date === date);
+        if (!alreadyRecorded) {
+          const record = projectedRecord(
+            "hobbies", hobby, date, amount, expense.category || hobby.category || "Hobbies",
+            hobby.priority || "media", "hobby", `expense:${expense.id || index}`,
+          );
+          if (record) {
+            record.sourceRef.eventId = `forecast:expense:${expense.id || index}:${date}`;
+            record.desc = `${[hobby.name, expense.description].filter(Boolean).join(" · ") || "Despesa de hobby"} (previsto)`;
+            result.push(record);
+          }
+        }
+        if (!frequency) break;
+        date = shiftMonths(date, frequency);
+        count += 1;
+      }
+    });
+    if (expenses.length > 0) return;
     const interval = frequencyMonths(hobby.expenseFrequency);
     if (!validDate(hobby.nextExpenseDate) || !positiveAmount(hobby.cost)) return;
     let date = hobby.nextExpenseDate;
@@ -277,9 +315,36 @@ export function buildIntegratedFinance({ finance = [], shopping = [], beauty = [
   return [...finance, ...unique.values()];
 }
 
+function receiptDateForMonth(receipt, month) {
+  if (!validDate(receipt.date)) return "";
+  if (receipt.frequency !== "mensal") return dateMonth(receipt.date) === month ? receipt.date : "";
+  if (month < dateMonth(receipt.date)) return "";
+  const [year, monthNumber] = month.split("-").map(Number);
+  const day = Number(receipt.date.slice(8, 10));
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return `${month}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+}
+
+function scheduledIncomeForMonth(transactions, plan, month) {
+  const receipts = Array.isArray(plan?.receipts) ? plan.receipts : [];
+  return receipts.reduce((sum, receipt) => {
+    const date = receiptDateForMonth(receipt, month);
+    if (!date) return sum;
+    const alreadyRecorded = transactions.some((transaction) =>
+      transaction.type === "entrada"
+      && transaction.status !== "cancelado"
+      && ((transaction.sourceRef?.type === "receiptSchedule"
+        && transaction.sourceRef.sourceId === receipt.id
+        && transaction.sourceRef.eventId === month)
+        || (transaction.date === date && positiveAmount(transaction.amount) === positiveAmount(receipt.amount))));
+    return sum + (alreadyRecorded ? 0 : positiveAmount(receipt.amount));
+  }, 0);
+}
+
 export function buildFinanceForecast(transactions, plan, fromMonth, horizonMonths = 12) {
   const expectedIncome = positiveAmount(plan?.netSalary)
     || Math.max(0, positiveAmount(plan?.grossSalary) + positiveAmount(plan?.extraIncome) - positiveAmount(plan?.deductions));
+  const hasReceiptSchedules = Array.isArray(plan?.receipts) && plan.receipts.length > 0;
   const priorities = (transaction) => String(transaction.sourcePriority || "").toLowerCase();
   return Array.from({ length: horizonMonths }, (_, offset) => {
     const [year, month] = fromMonth.split("-").map(Number);
@@ -304,11 +369,11 @@ export function buildFinanceForecast(transactions, plan, fromMonth, horizonMonth
     const optionalEstimate = expenses.filter((transaction) => transaction.sourceKind === "previsao"
       && ["baixa", "low", "opcional"].includes(priorities(transaction)))
       .reduce((sum, transaction) => sum + positiveAmount(transaction.amount), 0);
-    const salary = offset === 0 ? 0 : expectedIncome;
+    const salary = !hasReceiptSchedules && offset > 0 ? expectedIncome : 0;
     const allocations = Array.isArray(plan?.allocations) ? plan.allocations.filter((allocation) => allocation.protected) : [];
     const transfers = expenses.filter((transaction) => transaction.expenseClass === "reserve" || transaction.expenseClass === "investment");
     const protectedRemaining = (income) => protectedAmountRemaining(allocations, income, transfers);
-    const modeledIncome = incomeReceived + committedIncome + salary;
+    const modeledIncome = incomeReceived + committedIncome + salary + scheduledIncomeForMonth(transactions, plan, key);
     const plannedReserve = protectedRemaining(modeledIncome);
     const probableReserve = protectedRemaining(modeledIncome);
     const attentionReserve = protectedRemaining(incomeReceived + committedIncome);
@@ -331,8 +396,11 @@ export function buildFinanceAlerts(transactions, plan, month, today) {
   const monthEntries = allMonthEntries.filter((transaction) => transaction.type === "saida");
   const plannedByCategory = new Map();
   const limits = Array.isArray(plan?.allocations) ? plan.allocations : [];
-  const expectedMonthlyIncome = positiveAmount(plan?.netSalary)
-    || Math.max(0, positiveAmount(plan?.grossSalary) + positiveAmount(plan?.extraIncome) - positiveAmount(plan?.deductions));
+  const receipts = Array.isArray(plan?.receipts) ? plan.receipts : [];
+  const expectedMonthlyIncome = receipts.length
+    ? receipts.reduce((sum, receipt) => sum + (receiptDateForMonth(receipt, month) ? positiveAmount(receipt.amount) : 0), 0)
+    : positiveAmount(plan?.netSalary)
+      || Math.max(0, positiveAmount(plan?.grossSalary) + positiveAmount(plan?.extraIncome) - positiveAmount(plan?.deductions));
   monthEntries.forEach((transaction) => plannedByCategory.set(transaction.category || "Sem categoria",
     (plannedByCategory.get(transaction.category || "Sem categoria") || 0) + positiveAmount(transaction.amount)));
   const alerts = [];
