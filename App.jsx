@@ -1415,14 +1415,6 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
                 <Music2 size={42} strokeWidth={1.8} />
               </div>
               <div style={{ flex: 1, minWidth: 220 }}>
-                <div className="cr-row" style={{ gap: 8, flexWrap: "wrap" }}>
-                  <input aria-label="Nome da música" className="cr-input" value={settings.musicTitle || ""}
-                    onChange={(event) => setSettings({ ...settings, musicTitle: event.target.value })}
-                    placeholder="Nome da música" style={{ flex: 1, minWidth: 150, background: "#FFFDF8", color: "#211D1A" }} />
-                  <input aria-label="Artista" className="cr-input" value={settings.musicArtist || ""}
-                    onChange={(event) => setSettings({ ...settings, musicArtist: event.target.value })}
-                    placeholder="Artista" style={{ flex: 1, minWidth: 120, background: "#FFFDF8", color: "#211D1A" }} />
-                </div>
                 <div className="cr-row" style={{ justifyContent: "center", gap: 16, margin: "12px 0 4px" }}>
                   <button className="cr-btn ghost" aria-label="Voltar na simulação" onClick={() => setMusicProgress((value) => Math.max(0, value - 10))} style={{ color: "#FFFDF8" }}><SkipBack size={18} /></button>
                   <button className="cr-btn" aria-label={musicPlaying ? "Pausar simulação" : "Reproduzir simulação"}
@@ -1441,10 +1433,8 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
             </div>
             <div className="cr-field" style={{ margin: "14px 0 0" }}>
               <label className="cr-label" htmlFor="dashboard-music-lyrics" style={{ color: "#FFF2ED" }}>Letra</label>
-              <textarea id="dashboard-music-lyrics" className="cr-textarea" value={settings.musicLyrics || ""}
-                onChange={(event) => setSettings({ ...settings, musicLyrics: event.target.value })}
-                placeholder="Cole ou escreva a letra que deseja acompanhar"
-                style={{ minHeight: 112, background: "#FFFDF8", color: "#211D1A" }} />
+              <p>“Hoje estou feliz, acordei com o pé direito 
+E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
             </div>
           </section>
         );
