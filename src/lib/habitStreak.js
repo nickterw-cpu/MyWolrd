@@ -7,9 +7,13 @@ function validDateKey(value) {
 export function habitStreak(log = {}, today = new Date().toISOString().slice(0, 10)) {
   if (!validDateKey(today) || !log || typeof log !== "object") return 0;
 
-  const cursor = new Date(`${today}T00:00:00Z`);
-  if (!log[today]) cursor.setUTCDate(cursor.getUTCDate() - 1);
+  const latestDate = Object.keys(log)
+    .filter((date) => log[date] && date <= today && validDateKey(date))
+    .sort()
+    .at(-1);
+  if (!latestDate) return 0;
 
+  const cursor = new Date(`${latestDate}T00:00:00Z`);
   let streak = 0;
   while (true) {
     const key = cursor.toISOString().slice(0, 10);

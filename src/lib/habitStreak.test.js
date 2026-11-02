@@ -11,6 +11,16 @@ describe("habitStreak", () => {
     expect(habitStreak(log, "2026-02-02")).toBe(7);
   });
 
+  it("counts while historical days are marked from left to right", () => {
+    const dates = ["2026-01-27", "2026-01-28", "2026-01-29", "2026-01-30", "2026-01-31", "2026-02-01", "2026-02-02"];
+    const log = {};
+
+    dates.forEach((date, index) => {
+      log[date] = true;
+      expect(habitStreak(log, "2026-02-02")).toBe(index + 1);
+    });
+  });
+
   it("keeps yesterday's active streak when today is not checked yet", () => {
     expect(habitStreak({ "2026-01-31": true, "2026-02-01": true }, "2026-02-02")).toBe(2);
   });

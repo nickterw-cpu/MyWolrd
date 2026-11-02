@@ -14,7 +14,8 @@ import {
   Home, CalendarDays, Target, Repeat, Wallet, NotebookPen, Link2, Settings as SettingsIcon,
   Plus, Trash2, Pencil, X, Check, Search, Download, Upload, Sparkles, Flame, ChevronLeft, ChevronRight,
   GraduationCap, Briefcase, Sparkle, Image as ImageIcon, BookHeart, SearchCheck, Compass,
-  HardDrive, Mail, FileText, BookOpen, ShoppingBag, ShoppingCart, Heart, Bot, Palette, ListChecks, Music2, Play
+  HardDrive, Mail, FileText, BookOpen, ShoppingBag, ShoppingCart, Heart, Bot, Palette, ListChecks,
+  Music2, Play, Pause, SkipBack, SkipForward, Star
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -712,7 +713,7 @@ const DEFAULT_WIDGETS = [
   { id: "stats", label: "Indicadores rápidos", visible: true },
   { id: "focus", label: "Foco de hoje", visible: true },
   { id: "overdue", label: "Atrasadas", visible: true },
-  { id: "weekCalendar", label: "Cronograma semanal (Google Agenda)", visible: true },
+  { id: "weekCalendar", label: "Google Agenda", visible: true },
   { id: "musicPlayer", label: "Player de música", visible: true },
   { id: "upcoming", label: "Próximos prazos", visible: true },
   { id: "goals", label: "Metas ativas", visible: true },
@@ -727,7 +728,9 @@ const DEFAULT_WIDGETS = [
 // para quem já tinha uma lista de widgets salva antes deles existirem.
 function reconcileWidgets(saved) {
   const list = (saved && saved.length ? saved.filter((widget) => widget.id !== "agenda") : DEFAULT_WIDGETS)
-    .map((widget) => widget.id === "musicPlayer" ? { ...widget, label: "Player de música" } : widget);
+    .map((widget) => widget.id === "musicPlayer"
+      ? { ...widget, label: "Player de música" }
+      : widget.id === "weekCalendar" ? { ...widget, label: "Google Agenda" } : widget);
   const savedIds = new Set(list.map((w) => w.id));
   const missing = DEFAULT_WIDGETS.filter((w) => !savedIds.has(w.id));
   return missing.length ? [...list, ...missing] : list;
@@ -750,7 +753,6 @@ const DEFAULT_SETTINGS = {
   quote: "Pequenos passos todos os dias constroem grandes mudanças.",
   theme: { clay: "#7A1712", rose: "#591208", sage: "#6E534A" },
   dashboardWidgets: DEFAULT_WIDGETS,
-  musicUrl: "",
   paymentMethods: ["Débito", "Crédito", "Pix", "Dinheiro", "Transferência", "Boleto", "Outro"],
   financeCategories: ["Alimentação", "Transporte", "Beleza", "Estudos", "Lazer", "Moradia", "Saúde", "Assinaturas", "Outros"],
   financePlan: { grossSalary: "", extraIncome: "", deductions: "", netSalary: "", payday: "5", allocations: [] },
@@ -1060,7 +1062,8 @@ function ImagePickerField({ label, value, onChange, maxMB = 1.5 }) {
       <div className="cr-row">
         <input type="file" accept="image/*" className="cr-input" onChange={handleFile} />
       </div>
-      <input className="cr-input" style={{ marginTop: 6 }} placeholder="ou link de imagem (URL)"
+      <label className="cr-label" style={{ marginTop: 6 }}>Link da imagem (opcional)</label>
+      <input className="cr-input"
         value={value && value.startsWith("data:") ? "" : (value || "")}
         onChange={(e) => onChange(e.target.value)} />
       {error && <p className="cr-sub" style={{ color: "#A1493C", margin: "4px 0 0" }}>{error}</p>}
@@ -1176,7 +1179,7 @@ function DonutChart({ data, size = 200, thickness = 32 }) {
   );
 }
 
-function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, personaldev, setTasks, setHabits, setSettings, goTo }) {
+function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev, gcal, setGcal, setTasks, setHabits, setSettings, goTo }) {
   const today = todayStr();
   const now = new Date();
   const hour = now.getHours();
@@ -1203,7 +1206,8 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
   const [quickTitle, setQuickTitle] = useState("");
-  const [musicError, setMusicError] = useState("");
+  const [musicPlaying, setMusicPlaying] = useState(false);
+  const [musicProgress, setMusicProgress] = useState(0);
   const addQuick = () => {
     if (!quickTitle.trim()) return;
     setTasks([{ id: uid(), title: quickTitle.trim(), area: areas[0]?.id, priority: "media", dueDate: today, done: false }, ...tasks]);
@@ -1348,64 +1352,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
         );
       }
       case "weekCalendar": {
-        const weekStart = startOfWeek(todayStr());
-        const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-        const startHour = 7;
-        const endHour = 22;
-        const hourHeight = 48;
-        const eventsByDay = days.map((date) => tasks.filter((task) => task.dueDate === date));
-        return (
-          <div className="cr-card" key="weekCalendar" style={{ marginBottom: 16 }}>
-            <div className="cr-row" style={{ justifyContent: "space-between" }}>
-              <h3 className="cr-serif" style={{ margin: "0 0 12px", fontSize: 16 }}>Agenda da semana</h3>
-              <button className="cr-btn ghost" onClick={() => goTo("tasks")}>ver planejamento</button>
-            </div>
-            <div className="cr-calendar-scroll">
-              <div style={{ minWidth: 840 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "48px repeat(7, minmax(105px, 1fr))", gap: 4 }}>
-                  <div />
-                  {days.map((d) => (
-                    <div key={d} style={{ textAlign: "center", padding: "6px 2px", borderBottom: "1px solid var(--line)", background: d === today ? "#FBF0E4" : undefined }}>
-                      <span className="cr-sub" style={{ display: "block", margin: 0, textTransform: "capitalize", fontSize: 10.5 }}>{fmtWeekday(d)}</span>
-                      <strong className="cr-serif" style={{ fontSize: 13 }}>{d.slice(8, 10)}</strong>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "48px repeat(7, minmax(105px, 1fr))", gap: 4, marginBottom: 6 }}>
-                  <span className="cr-sub" style={{ margin: 0, textAlign: "right", paddingRight: 4, fontSize: 10 }}>dia todo</span>
-                  {eventsByDay.map((dayTasks, index) => (
-                    <div key={days[index]} style={{ minHeight: 8, borderLeft: "1px solid var(--line)" }}>
-                      {dayTasks.filter((task) => !/^\d{2}:\d{2}$/.test(task.time || "")).map((task) => (
-                        <div key={task.id} title={task.title} style={{ margin: "2px 2px 4px", padding: "3px 5px", borderRadius: 5, fontSize: 10, background: task.done ? "#E9E5DD" : "#F5E8E3", color: task.done ? "var(--ink-soft)" : "#7A1712", textDecoration: task.done ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "48px repeat(7, minmax(105px, 1fr))", gap: 4 }}>
-                  <div style={{ position: "relative", height: (endHour - startHour) * hourHeight }}>
-                    {Array.from({ length: endHour - startHour }, (_, i) => (
-                      <span key={i} className="cr-sub" style={{ position: "absolute", top: i * hourHeight - 7, right: 4, margin: 0, fontSize: 10 }}>{String(startHour + i).padStart(2, "0")}:00</span>
-                    ))}
-                  </div>
-                  {days.map((d) => {
-                    const dayTasks = eventsByDay[days.indexOf(d)];
-                    const timed = dayTasks.filter((tk) => /^\d{2}:\d{2}$/.test(tk.time || ""));
-                    return (
-                      <div key={d} style={{ minHeight: (endHour - startHour) * hourHeight, position: "relative", borderLeft: "1px solid var(--line)", background: d === today ? "#FFFCF7" : undefined, backgroundImage: "repeating-linear-gradient(to bottom, transparent 0, transparent 47px, var(--line) 48px)" }}>
-                        {timed.map((tk) => {
-                          const [h, m] = tk.time.split(":").map(Number);
-                          const minutes = h * 60 + m - startHour * 60;
-                          if (minutes < 0 || minutes >= (endHour - startHour) * 60) return null;
-                          return <div key={tk.id} title={`${tk.time} · ${tk.title}`} style={{ position: "absolute", top: minutes / 60 * hourHeight, left: 3, right: 3, minHeight: 28, padding: "3px 5px", borderLeft: "3px solid #7A1712", borderRadius: 5, background: tk.done ? "#E9E5DD" : "#F5E8E3", color: tk.done ? "var(--ink-soft)" : "#7A1712", textDecoration: tk.done ? "line-through" : "none", fontSize: 10, lineHeight: 1.3, overflow: "hidden", zIndex: 1 }}><strong>{tk.time}</strong> {tk.title}</div>;
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        );
+        return <GoogleAgendaView gcal={gcal} setGcal={setGcal} />;
       }
       case "financeCategory": {
         const catData = expenseCategoryData(finance, todayStr().slice(0, 7));
@@ -1440,50 +1387,65 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
         );
       }
       case "financeChart": {
-        const byMonthDash = (() => {
-          const map = {};
-          finance.filter((f) => (!f.status || f.status === "pago") && f.sourceKind !== "previsao").forEach((f) => {
-            const m = f.date.slice(0, 7);
-            map[m] = map[m] || { month: monthLabel(m), _m: m, entrada: 0, saida: 0 };
-            map[m][f.type === "entrada" ? "entrada" : "saida"] += Number(f.amount);
-          });
-          return Object.values(map).sort((a, b) => a._m.localeCompare(b._m)).slice(-6);
-        })();
         return (
           <div className="cr-card" key="financeChart" style={{ marginBottom: 16 }}>
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
               <h3 className="cr-serif" style={{ margin: "0 0 12px", fontSize: 16 }}>Finanças — últimos meses</h3>
-              <button className="cr-btn ghost" onClick={() => goTo("finance")}>ver detalhes</button>
+              <button className="cr-btn" onClick={() => goTo("finance")}>Ir para finanças</button>
             </div>
-            {byMonthDash.length === 0
-              ? <p className="cr-empty">Nenhum lançamento financeiro ainda.</p>
-              : <MiniBarChartFinance data={byMonthDash} height={220} />}
+            <FinanceChartContent finance={finance} chartMonth={settings.financeChartMonth || "todos"}
+              onChartMonthChange={(value) => setSettings({ ...settings, financeChartMonth: value })} />
           </div>
         );
       }
       case "musicPlayer":
+        const songDuration = 210;
+        const formatPlayerTime = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
         return (
-          <section className="cr-card" key="musicPlayer" style={{ marginBottom: 16, background: "#7A1712", color: "#FBF8F2", borderColor: "#7A1712" }}>
+          <section className="cr-card" key="musicPlayer" style={{ marginBottom: 16, background: "#8F1111", color: "#FFFDF8", borderColor: "#8F1111" }}>
             <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
               <div>
-                <p className="cr-label" style={{ color: "#F0D8D2", marginBottom: 4 }}>MyWorld · música</p>
-                <h2 className="cr-serif" style={{ margin: 0, fontSize: 20 }}>Seu espaço, seu som</h2>
+                <p className="cr-label" style={{ color: "#FFF2ED", marginBottom: 4 }}>MYWORLD · PLAYER</p>
+                <h2 className="cr-serif" style={{ margin: 0, fontSize: 20 }}>Sua música, suas palavras</h2>
               </div>
-              <Music2 size={22} />
+              <Music2 size={22} aria-hidden="true" />
             </div>
-            <div className="cr-field" style={{ margin: "12px 0 8px" }}>
-              <label className="cr-label" htmlFor="dashboard-music-url" style={{ color: "#F0D8D2" }}>Link direto de áudio (MP3, OGG ou WAV)</label>
-              <input id="dashboard-music-url" className="cr-input" value={settings.musicUrl || ""}
-                onChange={(event) => { setSettings({ ...settings, musicUrl: event.target.value }); setMusicError(""); }}
-                placeholder="https://…" style={{ background: "#FBF8F2", color: "#211D1A" }} />
+            <div className="cr-row" style={{ alignItems: "stretch", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
+              <div aria-hidden="true" style={{ width: 112, height: 112, flexShrink: 0, borderRadius: 10, background: "linear-gradient(145deg, #F0D9CF, #C77B6C)", color: "#68100D", display: "grid", placeItems: "center" }}>
+                <Music2 size={42} strokeWidth={1.8} />
+              </div>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <div className="cr-row" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <input aria-label="Nome da música" className="cr-input" value={settings.musicTitle || ""}
+                    onChange={(event) => setSettings({ ...settings, musicTitle: event.target.value })}
+                    placeholder="Nome da música" style={{ flex: 1, minWidth: 150, background: "#FFFDF8", color: "#211D1A" }} />
+                  <input aria-label="Artista" className="cr-input" value={settings.musicArtist || ""}
+                    onChange={(event) => setSettings({ ...settings, musicArtist: event.target.value })}
+                    placeholder="Artista" style={{ flex: 1, minWidth: 120, background: "#FFFDF8", color: "#211D1A" }} />
+                </div>
+                <div className="cr-row" style={{ justifyContent: "center", gap: 16, margin: "12px 0 4px" }}>
+                  <button className="cr-btn ghost" aria-label="Voltar na simulação" onClick={() => setMusicProgress((value) => Math.max(0, value - 10))} style={{ color: "#FFFDF8" }}><SkipBack size={18} /></button>
+                  <button className="cr-btn" aria-label={musicPlaying ? "Pausar simulação" : "Reproduzir simulação"}
+                    onClick={() => setMusicPlaying((value) => !value)}
+                    style={{ borderRadius: "50%", width: 42, height: 42, justifyContent: "center", background: "#FFFDF8", color: "#8F1111", borderColor: "#FFFDF8" }}>
+                    {musicPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+                  </button>
+                  <button className="cr-btn ghost" aria-label="Avançar na simulação" onClick={() => setMusicProgress((value) => Math.min(songDuration, value + 10))} style={{ color: "#FFFDF8" }}><SkipForward size={18} /></button>
+                </div>
+                <input aria-label="Progresso da simulação" type="range" min="0" max={songDuration} value={musicProgress}
+                  onChange={(event) => setMusicProgress(Number(event.target.value))} style={{ width: "100%", accentColor: "#FFFDF8" }} />
+                <div className="cr-row" style={{ justifyContent: "space-between", color: "#FFF2ED", fontSize: 11 }}>
+                  <span>{formatPlayerTime(musicProgress)}</span><span>{formatPlayerTime(songDuration)}</span>
+                </div>
+              </div>
             </div>
-            {settings.musicUrl && (
-              <audio controls preload="none" src={settings.musicUrl} onError={() => setMusicError("Não foi possível reproduzir este link. Use o endereço direto de um arquivo de áudio.")}
-                onCanPlay={() => setMusicError("")} style={{ width: "100%" }}>
-                Seu navegador não oferece suporte à reprodução de áudio.
-              </audio>
-            )}
-            {musicError && <p role="alert" style={{ color: "#FFE1DC", marginBottom: 0 }}>{musicError}</p>}
+            <div className="cr-field" style={{ margin: "14px 0 0" }}>
+              <label className="cr-label" htmlFor="dashboard-music-lyrics" style={{ color: "#FFF2ED" }}>Letra</label>
+              <textarea id="dashboard-music-lyrics" className="cr-textarea" value={settings.musicLyrics || ""}
+                onChange={(event) => setSettings({ ...settings, musicLyrics: event.target.value })}
+                placeholder="Cole ou escreva a letra que deseja acompanhar"
+                style={{ minHeight: 112, background: "#FFFDF8", color: "#211D1A" }} />
+            </div>
           </section>
         );
       case "goals":
@@ -1526,9 +1488,6 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
         <div key={w.id} style={{ marginBottom: 26 }}>{renderWidget(w.id)}</div>
       ))}
 
-      <p className="cr-sub" style={{ marginTop: 18 }}>
-        {notes.length} nota(s) guardadas · <button className="cr-btn ghost" style={{ padding: 0, textDecoration: "underline" }} onClick={() => goTo("notes")}>abrir notas</button>
-      </p>
     </div>
   );
 }
@@ -1792,7 +1751,7 @@ function TaskModal({ task, areas, onSave, onClose }) {
         {form.repeat && form.repeat !== "nenhuma" && <p className="cr-sub" style={{ marginTop: 4 }}>Ao concluir, a próxima já é criada sozinha.</p>}
       </div>
       <div className="cr-field"><label className="cr-label">Link (reunião, evento…)</label>
-        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://…" /></div>
+        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
     </Modal>
   );
@@ -2019,7 +1978,7 @@ function GoalModal({ goal, areas, onSave, onClose }) {
       <div className="cr-field"><label className="cr-label">Progresso: {form.progress}%</label>
         <input type="range" min="0" max="100" value={form.progress} onChange={(e) => setForm({ ...form, progress: Number(e.target.value) })} style={{ width: "100%" }} /></div>
       <div className="cr-field"><label className="cr-label">Link (opcional)</label>
-        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://…" /></div>
+        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Notas / motivo</label>
         <textarea className="cr-textarea" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
@@ -2130,6 +2089,42 @@ function monthLabel(m) {
   const [y, mo] = m.split("-");
   const names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
   return `${names[Number(mo) - 1]}/${y.slice(2)}`;
+}
+
+function financeChartMonths(finance) {
+  const map = {};
+  finance.forEach((entry) => {
+    if (typeof entry.date !== "string" || entry.status === "cancelado"
+      || (entry.status && entry.status !== "pago")
+      || (entry.type === "saida" && ["reserve", "investment"].includes(entry.expenseClass))) return;
+    const month = entry.date.slice(0, 7);
+    map[month] = map[month] || { month: monthLabel(month), _m: month, entrada: 0, saida: 0 };
+    map[month][entry.type === "entrada" ? "entrada" : "saida"] += Number(entry.amount) || 0;
+  });
+  return Object.values(map).sort((a, b) => a._m.localeCompare(b._m));
+}
+
+function FinanceChartContent({ finance, chartMonth, onChartMonthChange }) {
+  const months = financeChartMonths(finance);
+  const chartData = chartMonth === "todos"
+    ? months.slice(-6)
+    : months.filter((entry) => entry._m === chartMonth);
+
+  return (
+    <>
+      <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap" }}>
+        <p className="cr-label" style={{ margin: 0 }}>{chartMonth === "todos" ? "Últimos meses" : `Movimentação de ${monthLabel(chartMonth)}`}</p>
+        <select className="cr-select" aria-label="Selecionar mês do gráfico" value={chartMonth}
+          onChange={(event) => onChartMonthChange(event.target.value)}>
+          <option value="todos">Últimos 6 meses</option>
+          {months.slice().reverse().map((entry) => <option key={entry._m} value={entry._m}>{monthLabel(entry._m)}</option>)}
+        </select>
+      </div>
+      {chartData.length === 0
+        ? <p className="cr-empty">Nenhum lançamento financeiro ainda.</p>
+        : <MiniBarChartFinance data={chartData} height={220} />}
+    </>
+  );
 }
 
 function dateInMonth(month, day) {
@@ -2294,7 +2289,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const [tab, setTab] = useState("visao");
   const [filterStatus, setFilterStatus] = useState("todos");
   const [monthOffset, setMonthOffset] = useState(0);
-  const [chartMonth, setChartMonth] = useState("todos");
+  const chartMonth = settings.financeChartMonth || "todos";
   const [receiptTarget, setReceiptTarget] = useState("");
   const [invoiceCard, setInvoiceCard] = useState(cards[0]?.id || "");
   const [invoicePaymentAmount, setInvoicePaymentAmount] = useState("");
@@ -2452,22 +2447,6 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     attention: sum.attention + entry.attentionBalance,
   }), { planned: 0, probable: 0, attention: 0 });
 
-  const byMonth = useMemo(() => {
-    const map = {};
-    finance.forEach((f) => {
-      if (typeof f.date !== "string") return;
-      if (f.status === "cancelado" || (f.status && f.status !== "pago")
-        || (f.type === "saida" && ["reserve", "investment"].includes(f.expenseClass))) return;
-      const m = f.date.slice(0, 7);
-      map[m] = map[m] || { month: monthLabel(m), _m: m, entrada: 0, saida: 0 };
-      map[m][f.type === "entrada" ? "entrada" : "saida"] += Number(f.amount);
-    });
-    return Object.values(map).sort((a, b) => a._m.localeCompare(b._m));
-  }, [finance]);
-  const chartData = chartMonth === "todos"
-    ? byMonth.slice(-6)
-    : byMonth.filter((entry) => entry._m === chartMonth);
-
   const filteredTx = finance
     .filter((f) => filterStatus === "todos" || effectiveStatus(f) === filterStatus)
     .slice().sort((a, b) => b.date.localeCompare(a.date));
@@ -2591,16 +2570,10 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                 </div>
               ))}
           </div>
-          {byMonth.length > 0 && (
+          {financeChartMonths(finance).length > 0 && (
             <div className="cr-card" style={{ marginBottom: 16 }}>
-              <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap" }}>
-                <p className="cr-label" style={{ margin: 0 }}>{chartMonth === "todos" ? "Últimos meses" : `Movimentação de ${monthLabel(chartMonth)}`}</p>
-                <select className="cr-select" aria-label="Selecionar mês do gráfico" value={chartMonth} onChange={(event) => setChartMonth(event.target.value)}>
-                  <option value="todos">Últimos 6 meses</option>
-                  {byMonth.slice().reverse().map((entry) => <option key={entry._m} value={entry._m}>{monthLabel(entry._m)}</option>)}
-                </select>
-              </div>
-              <MiniBarChartFinance data={chartData} />
+              <FinanceChartContent finance={finance} chartMonth={chartMonth}
+                onChartMonthChange={(value) => setSettings({ ...settings, financeChartMonth: value })} />
             </div>
           )}
           {(() => {
@@ -3352,7 +3325,7 @@ function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, 
       )}
 
       <div className="cr-field"><label className="cr-label">Link (nota fiscal, comprovante, produto…)</label>
-        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://…" /></div>
+        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
 
       {needsGeneration ? (
         <div style={{ marginTop: 14 }}>
@@ -3605,7 +3578,7 @@ function NoteModal({ note, areas, onSave, onClose }) {
       <div className="cr-field"><label className="cr-label">Área</label>
         <AreaSelect value={form.area} onChange={(v) => setForm({ ...form, area: v })} areas={areas} /></div>
       <div className="cr-field"><label className="cr-label">Link de referência (opcional)</label>
-        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://…" /></div>
+        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
     </Modal>
   );
@@ -3681,7 +3654,7 @@ function AppModal({ app, onSave, onClose }) {
       <div className="cr-field"><label className="cr-label">Nome</label>
         <input className="cr-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Link</label>
-        <input className="cr-input" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://…" /></div>
+        <input className="cr-input" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} /></div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
     </Modal>
   );
@@ -4171,14 +4144,14 @@ function CourseModal({ item, areaId, areas, onSave, onClose }) {
       <div className="cr-field"><label className="cr-label">Links do curso (aulas, plataforma, material…)</label>
         {studyLinks(form).filter((l) => l.id === "legacy").map((l) => (
           <div className="cr-row" key="legacy" style={{ marginBottom: 6 }}>
-            <input className="cr-input" value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://…" />
+            <input className="cr-input" value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} />
             <button className="cr-btn ghost danger" onClick={() => setForm({ ...form, link: "" })}><Trash2 size={13} /></button>
           </div>
         ))}
         {links.map((l) => (
           <div className="cr-row" key={l.id} style={{ marginBottom: 6 }}>
             <input className="cr-input" style={{ maxWidth: 170 }} placeholder="Nome (ex: Aula 1)" value={l.label} onChange={(e) => setLink(l.id, "label", e.target.value)} />
-            <input className="cr-input" placeholder="https://…" value={l.url} onChange={(e) => setLink(l.id, "url", e.target.value)} />
+            <input className="cr-input" value={l.url} onChange={(e) => setLink(l.id, "url", e.target.value)} />
             <button className="cr-btn ghost danger" onClick={() => setForm({ ...form, links: links.filter((x) => x.id !== l.id) })}><Trash2 size={13} /></button>
           </div>
         ))}
@@ -4266,7 +4239,7 @@ function CareerModal({ item, onSave, onClose }) {
           <ManagedSelect listKey="careerStatus" value={form.status} onChange={(v) => setForm({ ...form, status: v })} /></div>
       </div>
       <div className="cr-field"><label className="cr-label">Link (vaga, portfólio, documento do Drive…)</label>
-        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://drive.google.com/…" /></div>
+        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Notas</label>
         <textarea className="cr-textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
@@ -4888,7 +4861,6 @@ function GoogleConnectModal({ gcal, setGcal, onClose }) {
         Cole um link por linha; o nome de cada agenda é preenchido automaticamente. Os links são salvos no seu Supabase, em uma tabela que o navegador não consegue ler, e não entram nos backups.
       </p>
       <textarea className="cr-input" rows={5} style={{ width: "100%", boxSizing: "border-box" }} value={bulk}
-        placeholder={"https://calendar.google.com/calendar/ical/…/basic.ics\nhttps://calendar.google.com/calendar/ical/…/basic.ics"}
         onChange={(e) => setBulk(e.target.value)} />
       <div className="cr-row" style={{ marginTop: 8 }}>
         <button className="cr-btn primary" disabled={busy} onClick={addLinks}>{busy ? "Salvando…" : "Salvar e adicionar"}</button>
@@ -5388,7 +5360,7 @@ function CustomPageView({ page, setPage }) {
               <div key={l.id} style={{ marginBottom: 10 }}>
                 <div className="cr-row" style={{ marginBottom: 4 }}>
                   <input className="cr-input" style={{ maxWidth: 140 }} placeholder="Nome" value={l.label} onChange={(e) => setPage({ ...page, links: links.map((x) => x.id === l.id ? { ...x, label: e.target.value } : x) })} />
-                  <input className="cr-input" placeholder="https://…" value={l.url} onChange={(e) => setPage({ ...page, links: links.map((x) => x.id === l.id ? { ...x, url: e.target.value } : x) })} />
+                  <input className="cr-input" value={l.url} onChange={(e) => setPage({ ...page, links: links.map((x) => x.id === l.id ? { ...x, url: e.target.value } : x) })} />
                   <button className="cr-btn ghost danger" onClick={() => setPage({ ...page, links: links.filter((x) => x.id !== l.id) })}><Trash2 size={13} /></button>
                 </div>
                 {l.url && <button className="cr-btn primary" style={{ width: "100%", justifyContent: "center" }} onClick={() => openExternalLink(siteUrl(l.url))}><Link2 size={14} /> {l.label || "Abrir link"}</button>}
@@ -6089,7 +6061,9 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
                 <SectionTitle title={sec.label} count={`${items.length} ${items.length === 1 ? "procedimento" : "procedimentos"}`} />
                 <div className="cr-grid cr-grid-3">
                   {items.map((b) => (
-                    <BeautyCard key={b.id} b={b} on={on} onEdit={() => setEditing(originalOf(b))} onRemove={() => remove(b.id)} onRegister={() => setRegistering(originalOf(b))} />
+                    <BeautyCard key={b.id} b={b} on={on} onEdit={() => setEditing(originalOf(b))} onRemove={() => remove(b.id)}
+                      onRegister={() => setRegistering(originalOf(b))}
+                      onRate={(rating) => setBeauty(beauty.map((item) => item.id === b.id ? { ...item, rating } : item))} />
                   ))}
                 </div>
               </div>
@@ -6158,7 +6132,7 @@ function FormSection({ title }) {
   );
 }
 
-function BeautyCard({ b, on, onEdit, onRemove, onRegister }) {
+function BeautyCard({ b, on, onEdit, onRemove, onRegister, onRate }) {
   const [showHistory, setShowHistory] = useState(false);
   const stop = (fn) => (e) => { if (e && e.stopPropagation) e.stopPropagation(); fn(e); };
   const m = maintenanceStatus(b);
@@ -6192,11 +6166,22 @@ function BeautyCard({ b, on, onEdit, onRemove, onRegister }) {
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{m && on("maintenance") ? `${statusEmoji(m.level)} ` : ""}{b.name}</h3>
         <button className="cr-btn ghost danger" title="Excluir" onClick={stop(onRemove)}><Trash2 size={13} /></button>
       </div>
+      <div className="cr-row" role="group" aria-label={`Avaliação de ${b.name}`} style={{ gap: 2, marginTop: 6 }}>
+        {Array.from({ length: 5 }, (_, index) => {
+          const value = index + 1;
+          const selected = value <= Number(b.rating || 0);
+          return (
+            <button key={value} type="button" className="cr-btn ghost" aria-label={`${value} estrela${value === 1 ? "" : "s"}`}
+              aria-pressed={Number(b.rating || 0) === value} onClick={stop(() => onRate(value))}
+              style={{ padding: 2, color: "#000", minWidth: 24 }}>
+              <Star size={17} fill={selected ? "#000" : "none"} stroke="#000" />
+            </button>
+          );
+        })}
+      </div>
       {chips.length > 0 && <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>{chips}</div>}
       {on("goal") && b.goal && <p style={{ fontSize: 13, margin: "4px 0" }}><strong>Objetivo:</strong> {b.goal}</p>}
-      {on("place") && (b._place || b.professional) && (
-        <p className="cr-sub" style={{ margin: "4px 0" }}>{[b.professional, b._place].filter(Boolean).join(" · ")}</p>
-      )}
+      {on("place") && b.professional && <p className="cr-sub" style={{ margin: "4px 0" }}>{b.professional}</p>}
       {on("result") && b.result && <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>{b.result}</p>}
       {on("maintenance") && m && (
         <div className="cr-row" style={{ marginTop: 6, flexWrap: "wrap" }}>
@@ -6213,7 +6198,7 @@ function BeautyCard({ b, on, onEdit, onRemove, onRegister }) {
         </div>
       )}
       {on("notes") && b.notes && <p style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 4 }}>{b.notes}</p>}
-      {(on("actions") || (on("link") && b.link)) && (
+      {(on("actions") || b.link) && (
         <div className="cr-row" style={{ marginTop: 8, flexWrap: "wrap" }}>
           {on("actions") && <button className="cr-btn" style={{ padding: "4px 8px" }} onClick={stop(onRegister)}>+ Registrar realização</button>}
           {on("actions") && b.history && b.history.length > 0 && (
@@ -6221,7 +6206,7 @@ function BeautyCard({ b, on, onEdit, onRemove, onRegister }) {
               {showHistory ? "Ocultar histórico" : `Ver histórico (${b.history.length})`}
             </button>
           )}
-          {on("link") && b.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={stop(() => openExternalLink(b.link))}><Link2 size={12} /> Abrir link</button>}
+          {b.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={stop(() => openExternalLink(b.link))}><Link2 size={12} /> Abrir Link</button>}
         </div>
       )}
       {showHistory && b.history && (
@@ -6410,7 +6395,7 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
       <div className="cr-field"><label className="cr-label">Resultado (esperado / obtido)</label>
         <input className="cr-input" value={form.result} onChange={(e) => setForm({ ...form, result: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Link (referência, vídeo, post…)</label>
-        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://…" /></div>
+        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Observações</label>
         <textarea className="cr-textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
       {item && (
@@ -6525,15 +6510,15 @@ function PlaceModal({ item, beauty, onSave, onClose }) {
         <input className="cr-input" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Instagram</label>
-          <input className="cr-input" value={form.instagram} onChange={(e) => setForm({ ...form, instagram: e.target.value })} placeholder="@perfil ou link" /></div>
+          <input className="cr-input" value={form.instagram} onChange={(e) => setForm({ ...form, instagram: e.target.value })} /></div>
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Profissional</label>
           <input className="cr-input" value={form.professional} onChange={(e) => setForm({ ...form, professional: e.target.value })} /></div>
       </div>
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Site</label>
-          <input className="cr-input" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} placeholder="https://…" /></div>
+          <input className="cr-input" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} /></div>
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Link de agendamento</label>
-          <input className="cr-input" value={form.booking} onChange={(e) => setForm({ ...form, booking: e.target.value })} placeholder="https://…" /></div>
+          <input className="cr-input" value={form.booking} onChange={(e) => setForm({ ...form, booking: e.target.value })} /></div>
       </div>
       <div className="cr-field"><label className="cr-label">Avaliação pessoal</label>
         <div className="cr-row" style={{ gap: 2 }}>
@@ -6664,7 +6649,7 @@ function VisionModal({ item, onSave, onClose }) {
           <div className="cr-field">
             <label className="cr-label">ou link de imagem (URL)</label>
             <input className="cr-input" value={form.content && form.content.startsWith("data:") ? "" : form.content}
-              onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder="https://…" />
+              onChange={(e) => setForm({ ...form, content: e.target.value })} />
           </div>
           {form.content && (
             <div className="cr-field">
@@ -6874,6 +6859,17 @@ function productStatus(s) {
   return st;
 }
 
+const PURCHASE_CLASS_OPTIONS = [
+  { value: "unico", label: "Compra única" },
+  { value: "cotidiano", label: "Cotidiano" },
+  { value: "periodico", label: "Periódico" },
+  { value: "outro", label: "Outro" },
+];
+
+function purchaseClassLabel(value) {
+  return PURCHASE_CLASS_OPTIONS.find((option) => option.value === value)?.label || "Não informado";
+}
+
 function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
@@ -6882,6 +6878,7 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
   const [filter, setFilter] = useState("todos");
   const [filterCategory, setFilterCategory] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
+  const [financeFilters, setFinanceFilters] = useState({ query: "", category: "todas", purchaseClass: "todas", from: "", to: "" });
 
   useEffect(() => {
     if (!["shopping"].includes(originTarget?.type)) return;
@@ -6895,7 +6892,13 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
     clearOriginTarget();
   }, [originTarget, shopping, clearOriginTarget]);
 
-  const save = (data) => { setShopping(upsertById(shopping, data)); };
+  const save = (data) => {
+    const markedPurchased = String(data.status || "").trim().toLowerCase() === "comprado";
+    setShopping(upsertById(shopping, {
+      ...data,
+      archived: data.purchaseClass === "unico" && markedPurchased ? true : data.archived,
+    }));
+  };
   const remove = (id) => setShopping(shopping.flatMap((item) => {
     if (item.id !== id) return [item];
     if ((item.purchaseHistory || []).length > 0) return [{ ...item, archived: true }];
@@ -6907,6 +6910,7 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
     const kind = inferShoppingKind(item);
     setShopping(upsertById(shopping, {
       ...item,
+      archived: item.purchaseClass === "unico" || item.archived,
       status: kind === "desejo" ? "comprado" : "ainda tem",
       lastPurchaseDate: purchase.date,
       nextPurchaseDate: nextFinanceDate(purchase.date, item.purchaseFrequency, item.productDurationDays),
@@ -6924,6 +6928,33 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
     : withKind.filter((s) => s._kind === tab);
   const filtered = inTab.filter((s) => (filter === "todos" || s._status === filter) && (filterCategory === "todas" || s.category === filterCategory));
   const categories = Array.from(new Set(inTab.map((s) => s.category).filter(Boolean)));
+  const purchaseRows = shopping.flatMap((item) => (Array.isArray(item.purchaseHistory) ? item.purchaseHistory : [])
+    .map((purchase, index) => ({
+      id: `${item.id}:${purchase.id || `${purchase.date}-${index}`}`,
+      itemName: item.name,
+      date: purchase.date,
+      amount: Number(purchase.amount) || 0,
+      category: item.category || "",
+      purchaseClass: item.purchaseClass || (item.purchaseFrequency === "pontual" ? "unico" : "periodico"),
+      description: purchase.description || "",
+    }))
+    .filter((purchase) => purchase.amount > 0 && typeof purchase.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(purchase.date)));
+  const filteredPurchaseRows = purchaseRows.filter((purchase) =>
+    (!financeFilters.query || `${purchase.itemName} ${purchase.description}`.toLowerCase().includes(financeFilters.query.toLowerCase()))
+    && (financeFilters.category === "todas" || purchase.category === financeFilters.category)
+    && (financeFilters.purchaseClass === "todas" || purchase.purchaseClass === financeFilters.purchaseClass)
+    && (!financeFilters.from || purchase.date >= financeFilters.from)
+    && (!financeFilters.to || purchase.date <= financeFilters.to))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const filteredPurchaseTotal = filteredPurchaseRows.reduce((sum, purchase) => sum + purchase.amount, 0);
+  const totalByProduct = Array.from(filteredPurchaseRows.reduce((totals, purchase) => {
+    const current = totals.get(purchase.itemName) || { name: purchase.itemName, total: 0, count: 0 };
+    current.total += purchase.amount;
+    current.count += 1;
+    totals.set(purchase.itemName, current);
+    return totals;
+  }, new Map()).values()).sort((a, b) => b.total - a.total);
+  const purchaseCategories = Array.from(new Set(purchaseRows.map((purchase) => purchase.category).filter(Boolean)));
   const totalDesejado = withKind.filter((s) => s._kind === "desejo" && !isClosedItem("wishStatus", s.status)).reduce((sum, s) => sum + Number(s.price || 0), 0);
   const toRebuy = withKind.filter((s) => s._kind === "rotina" && isClosedItem("productStatus", s._status)).length;
   const originalOf = (s) => shopping.find((x) => x.id === s.id);
@@ -6962,25 +6993,81 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
         <div>
           <h1 className="cr-h1 cr-serif">Wishlist</h1>
           <p className="cr-sub">
-            {tab === "desejo" ? `${fmtBRL(totalDesejado)} em itens desejados.` : tab === "recomprar" ? `${inTab.length} produto(s) na lista de recompra.` : `${inTab.length} produtos na rotina${toRebuy ? `, ${toRebuy} para recomprar` : ""}.`}
+            {tab === "desejo" ? `${fmtBRL(totalDesejado)} em itens desejados.` : tab === "recomprar" ? `${inTab.length} produto(s) na lista de recompra.` : tab === "finance" ? `${purchaseRows.length} compra(s) registrada(s), somando ${fmtBRL(purchaseRows.reduce((sum, purchase) => sum + purchase.amount, 0))}.` : `${inTab.length} produtos na rotina${toRebuy ? `, ${toRebuy} para recomprar` : ""}.`}
           </p>
         </div>
-        <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
+        {tab !== "finance" && <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>}
       </div>
 
       <div className="cr-tabbar" style={{ marginTop: 14 }}>
         <button className={`cr-tabbtn ${tab === "desejo" ? "active" : ""}`} onClick={() => { setTab("desejo"); setFilter("todos"); setFilterCategory("todas"); }}>Desejos</button>
         <button className={`cr-tabbtn ${tab === "rotina" ? "active" : ""}`} onClick={() => { setTab("rotina"); setFilter("todos"); setFilterCategory("todas"); }}>Produtos e rotina</button>
         <button className={`cr-tabbtn ${tab === "recomprar" ? "active" : ""}`} onClick={() => { setTab("recomprar"); setFilter("todos"); setFilterCategory("todas"); }}>Recomprar</button>
+        <button className={`cr-tabbtn ${tab === "finance" ? "active" : ""}`} onClick={() => setTab("finance")}>Financeiro</button>
       </div>
 
-      {restockDue.length > 0 && (
+      {tab !== "finance" && restockDue.length > 0 && (
         <div className="cr-card" role="status" style={{ marginTop: 14, borderColor: "#E3B5AB", color: "#7A1712" }}>
           <strong>Seu produto deve estar acabando! Está na hora de recomprar. Como estão os seus gastos?</strong>
           <p className="cr-sub" style={{ marginBottom: 0 }}>{restockDue.map((item) => item.name).join(" · ")}</p>
         </div>
       )}
 
+      {tab === "finance" ? (
+        <section aria-label="Despesas da Wishlist" style={{ marginTop: 14 }}>
+          <div className="cr-grid cr-grid-2" style={{ marginBottom: 14 }}>
+            <div className="cr-card"><p className="cr-label">Total no filtro</p><p className="cr-serif" style={{ fontSize: 24, margin: 0 }}>{fmtBRL(filteredPurchaseTotal)}</p></div>
+            <div className="cr-card"><p className="cr-label">Compras registradas</p><p className="cr-serif" style={{ fontSize: 24, margin: 0 }}>{filteredPurchaseRows.length}</p></div>
+          </div>
+          <div className="cr-card" style={{ marginBottom: 14 }}>
+            <div className="cr-row" style={{ flexWrap: "wrap" }}>
+              <input className="cr-input" aria-label="Buscar compras" value={financeFilters.query}
+                onChange={(event) => setFinanceFilters({ ...financeFilters, query: event.target.value })}
+                placeholder="Buscar produto ou observação" style={{ flex: "1 1 200px" }} />
+              <select className="cr-select" aria-label="Filtrar compras por categoria" value={financeFilters.category}
+                onChange={(event) => setFinanceFilters({ ...financeFilters, category: event.target.value })}>
+                <option value="todas">Todas as categorias</option>
+                {purchaseCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+              <select className="cr-select" aria-label="Filtrar compras por classe" value={financeFilters.purchaseClass}
+                onChange={(event) => setFinanceFilters({ ...financeFilters, purchaseClass: event.target.value })}>
+                <option value="todas">Todas as classes</option>
+                {PURCHASE_CLASS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              <label className="cr-label" style={{ margin: 0 }}>De <input type="date" className="cr-input" aria-label="Data inicial das compras"
+                value={financeFilters.from} onChange={(event) => setFinanceFilters({ ...financeFilters, from: event.target.value })} /></label>
+              <label className="cr-label" style={{ margin: 0 }}>Até <input type="date" className="cr-input" aria-label="Data final das compras"
+                value={financeFilters.to} onChange={(event) => setFinanceFilters({ ...financeFilters, to: event.target.value })} /></label>
+            </div>
+          </div>
+          {totalByProduct.length > 0 && (
+            <div className="cr-card" style={{ marginBottom: 14 }}>
+              <h2 className="cr-serif" style={{ margin: "0 0 8px", fontSize: 16 }}>Total por produto</h2>
+              {totalByProduct.map((product) => (
+                <div className="cr-list-row" key={product.name}>
+                  <span className="cr-list-title" style={{ flex: 1 }}>{product.name} · {product.count} compra(s)</span>
+                  <strong>{fmtBRL(product.total)}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+          {filteredPurchaseRows.length === 0
+            ? <p className="cr-empty">Nenhuma compra com esses filtros.</p>
+            : <div className="cr-card">
+              <h2 className="cr-serif" style={{ margin: "0 0 8px", fontSize: 16 }}>Gastos registrados</h2>
+              {filteredPurchaseRows.map((purchase) => (
+                <div className="cr-list-row" key={purchase.id}>
+                  <span className="cr-chip">{fmtDateShort(purchase.date)}</span>
+                  <span className="cr-list-title" style={{ flex: 1 }}>{purchase.itemName}{purchase.description ? ` · ${purchase.description}` : ""}</span>
+                  <span className="cr-chip">{purchase.category || "Sem categoria"}</span>
+                  <span className="cr-chip">{purchaseClassLabel(purchase.purchaseClass)}</span>
+                  <strong>{fmtBRL(purchase.amount)}</strong>
+                </div>
+              ))}
+            </div>}
+        </section>
+      ) : (
+      <>
       <div className="cr-row" style={{ margin: "14px 0", flexWrap: "wrap" }}>
         <select className="cr-select" style={{ maxWidth: 190 }} value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="todos">Todos os status</option>
@@ -7010,6 +7097,8 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
             </div>
           </div>
         ))
+      )}
+      </>
       )}
 
       {editing && <ShoppingModal item={editing === "new" ? null : editing} defaultKind={tab === "recomprar" ? "rotina" : tab} onSave={save} onClose={() => setEditing(null)} />}
@@ -7085,8 +7174,8 @@ function SourceExpenseModal({ item, title, amount, onSave, onClose, allowNoAmoun
 
 function ShoppingModal({ item, defaultKind, onSave, onClose }) {
   const [form, setForm] = useState(item
-    ? { ...item, kind: inferShoppingKind(item), status: inferShoppingKind(item) === "rotina" ? productStatus(item) : item.status }
-    : { name: "", category: "", store: "", price: "", priority: "media", link: "", kind: defaultKind || "desejo", status: (defaultKind === "rotina" ? "ainda tem" : "desejado"), desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
+    ? { ...item, kind: inferShoppingKind(item), purchaseClass: item.purchaseClass || (item.purchaseFrequency === "pontual" ? "unico" : "periodico"), status: inferShoppingKind(item) === "rotina" ? productStatus(item) : item.status }
+    : { name: "", category: "", store: "", price: "", priority: "media", link: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" ? "ainda tem" : "desejado"), desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
   const autoStatus = useAutoSave(form, onSave, (form) => ({
     ...form,
     price: Number(form.price) || 0,
@@ -7103,6 +7192,11 @@ function ShoppingModal({ item, defaultKind, onSave, onClose }) {
         </select></div>
       <div className="cr-field"><label className="cr-label">Produto</label>
         <input className="cr-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+      <div className="cr-field"><label className="cr-label">Classe do item</label>
+        <select className="cr-select" value={form.purchaseClass || "periodico"}
+          onChange={(event) => setForm({ ...form, purchaseClass: event.target.value })}>
+          {PURCHASE_CLASS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select></div>
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Categoria</label>
           <ManagedSelect listKey="wishCategory" value={form.category} emptyLabel="Sem categoria" onChange={(v) => setForm({ ...form, category: v })} /></div>
@@ -7118,7 +7212,7 @@ function ShoppingModal({ item, defaultKind, onSave, onClose }) {
         )}
       </div>
       <div className="cr-field"><label className="cr-label">Link do produto</label>
-        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://…" /></div>
+        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Status</label>
         <ManagedSelect listKey={isRoutine ? "productStatus" : "wishStatus"} value={form.status} onChange={(v) => setForm({ ...form, status: v })} /></div>
       <div className="cr-field"><label className="cr-label">{isRoutine ? "Frequência de reposição" : "Frequência de compra"}</label>
@@ -7390,7 +7484,7 @@ function HobbyModal({ item, onSave, onClose }) {
       <div className="cr-field"><label className="cr-label">Materiais necessários</label>
         <input className="cr-input" value={form.materials} onChange={(e) => setForm({ ...form, materials: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Link (tutorial, comunidade, aula…)</label>
-        <input className="cr-input" value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://…" /></div>
+        <input className="cr-input" value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Notas</label>
         <textarea className="cr-textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
@@ -7791,7 +7885,7 @@ function PersonalDevModal({ item, onSave, onClose }) {
       <div className="cr-field"><label className="cr-label">Notas</label>
         <textarea className="cr-textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Link (opcional)</label>
-        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://…" /></div>
+        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
     </Modal>
   );
@@ -8395,7 +8489,7 @@ export default function App({ onSignOut }) {
         </div>
       )}
       <div className="cr-main">
-        {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={integratedFinance} notes={notes} areas={areas} settings={settings} personaldev={personaldev} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab} />}
+        {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={integratedFinance} areas={areas} settings={settings} personaldev={personaldev} gcal={gcal} setGcal={setGcal} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab} />}
         {tab === "search" && <GlobalSearchView query={searchQuery} setQuery={setSearchQuery} all={searchData} goTo={setTab} />}
         {tab === "tasks" && <PlanningHub tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="tarefas" gcal={gcal} setGcal={setGcal} />}
         {tab === "routines" && <PlanningHub key="routines" tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="rotinas" gcal={gcal} setGcal={setGcal} />}

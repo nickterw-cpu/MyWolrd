@@ -20,7 +20,9 @@ A aplicação web reúne:
 - Exportação e importação de backup em JSON.
 - Instalação da aplicação web como PWA em celulares e computadores compatíveis.
 
-Metas incluem uma visualização completa e um plano de ação editável. Hábitos contam sequências por datas consecutivas, inclusive entre meses. A Wishlist mantém uma área de recompra com data de compra, duração estimada e alertas dentro do aplicativo. O planejamento financeiro permite discriminar descontos e cadastrar vários recebimentos mensais; lançamentos integrados podem abrir e excluir o respectivo evento na área de origem.
+Metas incluem uma visualização completa e um plano de ação editável. Hábitos contam sequências por datas consecutivas, inclusive entre meses e ao marcar os dias em ordem cronológica. O dashboard usa a mesma agenda Google da área de planejamento e rotinas e oferece um player visual simulado com campos para música, artista e letra, sem exigir link de áudio. O gráfico financeiro compartilha o filtro de mês entre o dashboard e a aba Finanças.
+
+A Wishlist mantém uma área de recompra com data de compra, duração estimada e alertas dentro do aplicativo. Os produtos têm classes de compra e uma aba Financeiro com gastos por item, filtros por classe, categoria, texto e período. Itens de compra única desaparecem da lista quando comprados, sem perder o histórico financeiro. O planejamento financeiro permite discriminar descontos e cadastrar vários recebimentos mensais; lançamentos integrados podem abrir e excluir o respectivo evento na área de origem.
 
 A interface adapta os menus, formulários, filtros e listas para celular, tablet e computador. Áreas, status e categorias podem ser gerenciados nas próprias telas ou em **Configurações → Listas, categorias e status**; objetivos de investimentos também são editáveis na área de investimentos. As mudanças atualizam os formulários e filtros sem apagar os registros associados.
 

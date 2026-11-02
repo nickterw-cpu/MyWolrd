@@ -48,6 +48,31 @@ describe("buildIntegratedFinance", () => {
 
   });
 
+  it("keeps a unique purchased item's expense after it is archived", () => {
+    const result = buildIntegratedFinance({
+      today,
+      shopping: [{
+        id: "wish-unique",
+        name: "Livro",
+        kind: "desejo",
+        purchaseClass: "unico",
+        status: "comprado",
+        archived: true,
+        purchaseFrequency: "mensal",
+        nextPurchaseDate: "2026-11-01",
+        price: 80,
+        purchaseHistory: [{ id: "unique-purchase", date: "2026-10-17", amount: 80 }],
+      }],
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      date: "2026-10-17",
+      amount: 80,
+      sourceRef: { type: "shopping", sourceId: "wish-unique", eventId: "unique-purchase" },
+    });
+  });
+
   it("does not create a financial amount for a Wishlist purchase without a price", () => {
     const result = buildIntegratedFinance({
       today,
