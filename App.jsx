@@ -1403,18 +1403,15 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
         const formatPlayerTime = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
         return (
           <section className="cr-card" key="musicPlayer" style={{ marginBottom: 16, background: "#8F1111", color: "#FFFDF8", borderColor: "#8F1111" }}>
-            <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
-              <Music2 size={22} aria-hidden="true" />
-            </div>
             <div className="cr-row" style={{ alignItems: "stretch", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
               <div aria-hidden="true" style={{ width: 112, height: 112, flexShrink: 0, borderRadius: 10, background: "linear-gradient(145deg, #F0D9CF, #C77B6C)", color: "#68100D", display: "grid", placeItems: "center" }}>
                 <Music2 size={42} strokeWidth={1.8} />
-              </div>
-            </div>
-            <div className="cr-field" style={{ margin: "14px 0 0" }}>
+               <div className="cr-field" style={{ margin: "14px 0 0" }}>
               <label className="cr-label" htmlFor="dashboard-music-lyrics" style={{ color: "#FFF2ED" }}>Letra</label>
               <p>“Hoje estou feliz, acordei com o pé direito
               E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
+            </div>
+              </div>
             </div>
           </section>
         );
