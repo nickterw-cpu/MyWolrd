@@ -11,6 +11,24 @@ import {
 const today = "2026-10-18";
 
 describe("buildIntegratedFinance", () => {
+  it("supports itemized deductions while preserving legacy total deductions", () => {
+    const itemized = buildFinanceForecast([], {
+      grossSalary: 5000,
+      extraIncome: 500,
+      deductions: [{ id: "inss", amount: 450 }, { id: "health", amount: 150 }],
+      allocations: [],
+    }, "2026-10", 2);
+    const legacy = buildFinanceForecast([], {
+      grossSalary: 5000,
+      extraIncome: 500,
+      deductions: 600,
+      allocations: [],
+    }, "2026-10", 2);
+
+    expect(itemized[1].expectedIncome).toBe(4900);
+    expect(legacy[1].expectedIncome).toBe(4900);
+  });
+
   it("converts a confirmed Wishlist purchase exactly once without changing manual transactions", () => {
     const purchase = { id: "buy-1", date: "2026-10-17", amount: 120, category: "Casa" };
     const manual = [{ id: "manual-1", date: "2026-10-01", type: "entrada", amount: 3000, status: "pago" }];

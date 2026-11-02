@@ -7,8 +7,8 @@ export default defineConfig({
       registerType: "prompt",
       includeAssets: ["apple-touch-icon.png"],
       manifest: {
-        name: "Central",
-        short_name: "Central",
+        name: "MyWorld",
+        short_name: "MyWorld",
         description: "Sua gestão pessoal, em um só lugar.",
         lang: "pt-BR",
         display: "standalone",

@@ -1,6 +1,6 @@
-# Central
+# MyWorld
 
-Central é um aplicativo pessoal para organizar tarefas, metas, hábitos, finanças e outras áreas da vida. Este repositório contém duas versões independentes:
+MyWorld é um aplicativo pessoal para organizar tarefas, metas, hábitos, finanças e outras áreas da vida. Este repositório contém duas versões independentes:
 
 - **Aplicação web** (`App.jsx`, `src/`): React e Vite no navegador, login Google e dados sincronizados manualmente pelo Supabase.
 - **Arquivo independente** (`central.html`): funciona sem instalar o projeto e guarda os dados no armazenamento local do navegador. Não entra na conta Google nem sincroniza com o Supabase.
@@ -19,6 +19,8 @@ A aplicação web reúne:
 - Configurações de áreas, categorias, listas e aparência.
 - Exportação e importação de backup em JSON.
 - Instalação da aplicação web como PWA em celulares e computadores compatíveis.
+
+Metas incluem uma visualização completa e um plano de ação editável. Hábitos contam sequências por datas consecutivas, inclusive entre meses. A Wishlist mantém uma área de recompra com data de compra, duração estimada e alertas dentro do aplicativo. O planejamento financeiro permite discriminar descontos e cadastrar vários recebimentos mensais; lançamentos integrados podem abrir e excluir o respectivo evento na área de origem.
 
 A interface adapta os menus, formulários, filtros e listas para celular, tablet e computador. Áreas, status e categorias podem ser gerenciados nas próprias telas ou em **Configurações → Listas, categorias e status**; objetivos de investimentos também são editáveis na área de investimentos. As mudanças atualizam os formulários e filtros sem apagar os registros associados.
 

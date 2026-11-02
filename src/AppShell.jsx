@@ -94,7 +94,7 @@ export default function AppShell() {
     return (
       <main className="auth-screen">
         <section className="auth-card">
-          <h1>✦ Central</h1>
+          <h1>MyWorld</h1>
           <p>Entre com sua conta Google para acessar e sincronizar seus dados.</p>
           {authError && <div className="auth-error" role="alert">{authError}</div>}
           <button className="auth-button" onClick={signInWithGoogle}>Continuar com Google</button>

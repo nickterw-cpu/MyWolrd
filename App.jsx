@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback, useRef, createContext
 import { reloadUserData, storageDelete, storageGet, storageSet } from "./src/lib/userData.js";
 import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
+import { habitStreak } from "./src/lib/habitStreak.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, summarizeFinanceMonth } from "./src/lib/financePlan.js";
 import {
@@ -75,11 +76,25 @@ function progressColor(pct) {
   return "#C8453A";
 }
 
+function routineCategoryId(routine) {
+  return routine.category || (routine.steps || []).map((step) => stepCategoryId(step)).find(Boolean) || "";
+}
+
 function upsertById(list, data, extraNew) {
   const exists = list.some((x) => x.id === data.id);
   return exists
     ? list.map((x) => (x.id === data.id ? { ...x, ...data } : x))
     : [{ ...data, ...(extraNew || {}) }, ...list];
+}
+
+function removeHistoryEvent(history, eventId) {
+  return (Array.isArray(history) ? history : [])
+    .map((entry, index) => ({ ...entry, id: entry.id || `legacy:${entry.date || "sem-data"}:${index}` }))
+    .filter((entry) => entry.id !== eventId);
+}
+
+function latestHistoryEntry(history) {
+  return history.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0] || null;
 }
 
 const READY_KEYS = ["name", "title", "criterio", "subject", "content", "desc", "item", "text", "gratitude"];
@@ -698,7 +713,7 @@ const DEFAULT_WIDGETS = [
   { id: "focus", label: "Foco de hoje", visible: true },
   { id: "overdue", label: "Atrasadas", visible: true },
   { id: "weekCalendar", label: "Cronograma semanal (Google Agenda)", visible: true },
-  { id: "musicPlayer", label: "Letra do dia", visible: true },
+  { id: "musicPlayer", label: "Player de música", visible: true },
   { id: "upcoming", label: "Próximos prazos", visible: true },
   { id: "goals", label: "Metas ativas", visible: true },
   { id: "financeCategory", label: "Gastos por categoria", visible: true },
@@ -711,7 +726,8 @@ const DEFAULT_WIDGETS = [
 // Garante que widgets novos criados em atualizações futuras apareçam também
 // para quem já tinha uma lista de widgets salva antes deles existirem.
 function reconcileWidgets(saved) {
-  const list = saved && saved.length ? saved.filter((widget) => widget.id !== "agenda") : DEFAULT_WIDGETS;
+  const list = (saved && saved.length ? saved.filter((widget) => widget.id !== "agenda") : DEFAULT_WIDGETS)
+    .map((widget) => widget.id === "musicPlayer" ? { ...widget, label: "Player de música" } : widget);
   const savedIds = new Set(list.map((w) => w.id));
   const missing = DEFAULT_WIDGETS.filter((w) => !savedIds.has(w.id));
   return missing.length ? [...list, ...missing] : list;
@@ -734,6 +750,7 @@ const DEFAULT_SETTINGS = {
   quote: "Pequenos passos todos os dias constroem grandes mudanças.",
   theme: { clay: "#7A1712", rose: "#591208", sage: "#6E534A" },
   dashboardWidgets: DEFAULT_WIDGETS,
+  musicUrl: "",
   paymentMethods: ["Débito", "Crédito", "Pix", "Dinheiro", "Transferência", "Boleto", "Outro"],
   financeCategories: ["Alimentação", "Transporte", "Beleza", "Estudos", "Lazer", "Moradia", "Saúde", "Assinaturas", "Outros"],
   financePlan: { grossSalary: "", extraIncome: "", deductions: "", netSalary: "", payday: "5", allocations: [] },
@@ -1186,6 +1203,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
   const [quickTitle, setQuickTitle] = useState("");
+  const [musicError, setMusicError] = useState("");
   const addQuick = () => {
     if (!quickTitle.trim()) return;
     setTasks([{ id: uid(), title: quickTitle.trim(), area: areas[0]?.id, priority: "media", dueDate: today, done: false }, ...tasks]);
@@ -1315,27 +1333,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
             ))}
           </div>
         );
-      case "musicPlayer":
-        return (
-          <div className="cr-card" key="musicPlayer" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 16, background: "linear-gradient(115deg, #173D32, #285B49)", color: "#fff" }}>
-            <div aria-hidden="true" style={{ width: 58, height: 58, borderRadius: 10, display: "grid", placeItems: "center", flexShrink: 0, background: "linear-gradient(145deg, #E8C584, #C88961)" }}>
-              <Music2 size={26} color="#173D32" />
-            </div>
-            <div style={{ flex: 1, minWidth: 180 }}>
-              <p style={{ margin: "0 0 3px", opacity: 0.75, fontSize: 11, letterSpacing: 1, textTransform: "uppercase" }}>Player · letra do dia</p>
-              <p className="cr-serif" style={{ margin: "0 0 8px", fontSize: 16, color: "#fff" }}>Hoje estou feliz</p>
-              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.55, color: "#F5EFE4" }}>
-                “Hoje estou feliz, acordei com o pé direito<br />E eu vou fazer de novo, eu vou fazer muito bem feito”
-              </p>
-              <div aria-hidden="true" style={{ height: 3, borderRadius: 3, marginTop: 12, background: "rgba(255,255,255,.25)" }}>
-                <div style={{ width: "38%", height: "100%", borderRadius: 3, background: "#D5B875" }} />
-              </div>
-            </div>
-            <div aria-hidden="true" style={{ width: 38, height: 38, borderRadius: "50%", display: "grid", placeItems: "center", flexShrink: 0, background: "#D5B875", color: "#173D32" }}>
-              <Play size={18} fill="currentColor" />
-            </div>
-          </div>
-        );
+      
       case "distribution": {
         const distData = areas
           .map((a) => ({ label: a.name, color: a.color || "#B0A594", value: tasks.filter((tk) => tk.area === a.id && !tk.done).length }))
@@ -1378,7 +1376,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
                   {eventsByDay.map((dayTasks, index) => (
                     <div key={days[index]} style={{ minHeight: 8, borderLeft: "1px solid var(--line)" }}>
                       {dayTasks.filter((task) => !/^\d{2}:\d{2}$/.test(task.time || "")).map((task) => (
-                        <div key={task.id} title={task.title} style={{ margin: "2px 2px 4px", padding: "3px 5px", borderRadius: 5, fontSize: 10, background: task.done ? "#E9E5DD" : "#E8EEE7", textDecoration: task.done ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</div>
+                        <div key={task.id} title={task.title} style={{ margin: "2px 2px 4px", padding: "3px 5px", borderRadius: 5, fontSize: 10, background: task.done ? "#E9E5DD" : "#F5E8E3", color: task.done ? "var(--ink-soft)" : "#7A1712", textDecoration: task.done ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</div>
                       ))}
                     </div>
                   ))}
@@ -1398,7 +1396,7 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
                           const [h, m] = tk.time.split(":").map(Number);
                           const minutes = h * 60 + m - startHour * 60;
                           if (minutes < 0 || minutes >= (endHour - startHour) * 60) return null;
-                          return <div key={tk.id} title={`${tk.time} · ${tk.title}`} style={{ position: "absolute", top: minutes / 60 * hourHeight, left: 3, right: 3, minHeight: 28, padding: "3px 5px", borderLeft: "3px solid #6E8A76", borderRadius: 5, background: tk.done ? "#E9E5DD" : "#E8EEE7", textDecoration: tk.done ? "line-through" : "none", fontSize: 10, lineHeight: 1.3, overflow: "hidden", zIndex: 1 }}><strong>{tk.time}</strong> {tk.title}</div>;
+                          return <div key={tk.id} title={`${tk.time} · ${tk.title}`} style={{ position: "absolute", top: minutes / 60 * hourHeight, left: 3, right: 3, minHeight: 28, padding: "3px 5px", borderLeft: "3px solid #7A1712", borderRadius: 5, background: tk.done ? "#E9E5DD" : "#F5E8E3", color: tk.done ? "var(--ink-soft)" : "#7A1712", textDecoration: tk.done ? "line-through" : "none", fontSize: 10, lineHeight: 1.3, overflow: "hidden", zIndex: 1 }}><strong>{tk.time}</strong> {tk.title}</div>;
                         })}
                       </div>
                     );
@@ -1463,6 +1461,31 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
           </div>
         );
       }
+      case "musicPlayer":
+        return (
+          <section className="cr-card" key="musicPlayer" style={{ marginBottom: 16, background: "#7A1712", color: "#FBF8F2", borderColor: "#7A1712" }}>
+            <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+              <div>
+                <p className="cr-label" style={{ color: "#F0D8D2", marginBottom: 4 }}>MyWorld · música</p>
+                <h2 className="cr-serif" style={{ margin: 0, fontSize: 20 }}>Seu espaço, seu som</h2>
+              </div>
+              <Music2 size={22} />
+            </div>
+            <div className="cr-field" style={{ margin: "12px 0 8px" }}>
+              <label className="cr-label" htmlFor="dashboard-music-url" style={{ color: "#F0D8D2" }}>Link direto de áudio (MP3, OGG ou WAV)</label>
+              <input id="dashboard-music-url" className="cr-input" value={settings.musicUrl || ""}
+                onChange={(event) => { setSettings({ ...settings, musicUrl: event.target.value }); setMusicError(""); }}
+                placeholder="https://…" style={{ background: "#FBF8F2", color: "#211D1A" }} />
+            </div>
+            {settings.musicUrl && (
+              <audio controls preload="none" src={settings.musicUrl} onError={() => setMusicError("Não foi possível reproduzir este link. Use o endereço direto de um arquivo de áudio.")}
+                onCanPlay={() => setMusicError("")} style={{ width: "100%" }}>
+                Seu navegador não oferece suporte à reprodução de áudio.
+              </audio>
+            )}
+            {musicError && <p role="alert" style={{ color: "#FFE1DC", marginBottom: 0 }}>{musicError}</p>}
+          </section>
+        );
       case "goals":
         return (
           <div className="cr-card" key="goals" style={{ marginBottom: 16 }}>
@@ -1485,13 +1508,15 @@ function Dashboard({ tasks, goals, habits, finance, notes, areas, settings, pers
   };
 
   // pair non-stats widgets two-by-two for a tidier layout
-  const nonStats = widgets.filter((w) => w.id !== "stats" && w.id !== "panorama");
+  const nonStats = widgets.filter((w) => w.id !== "stats" && w.id !== "panorama" && w.id !== "musicPlayer");
   return (
     <div>
       <p className="cr-sub" style={{ marginBottom: 2, textTransform: "capitalize" }}>{dataFmt}</p>
       <h1 className="cr-h1 cr-serif">{greeting.g}{settings.name ? `, ${settings.name}` : ""}! {greeting.emoji}</h1>
       <p className="cr-sub" style={{ fontStyle: "italic" }}>{greeting.sub}</p>
       {settings.quote && <p className="cr-sub" style={{ fontStyle: "italic", opacity: 0.8 }}>{settings.quote}</p>}
+
+      {widgets.some((w) => w.id === "musicPlayer") && renderWidget("musicPlayer")}
 
       {widgets.some((w) => w.id === "panorama") && renderWidget("panorama")}
 
@@ -1780,11 +1805,16 @@ function TaskModal({ task, areas, onSave, onClose }) {
 function GoalsView({ goals, setGoals, areas }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [filterStatus, setFilterStatus] = useState("todos");
   const [filterArea, setFilterArea] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
   const save = (data) => { setGoals(upsertById(goals, data)); };
   const remove = (id) => setGoals(goals.filter((x) => x.id !== id));
+  const updateGoal = (data) => {
+    setGoals(upsertById(goals, data));
+    setViewing(data);
+  };
 
   const filtered = goals.filter((g) => {
     if (filterStatus !== "todos" && g.status !== filterStatus) return false;
@@ -1846,7 +1876,7 @@ function GoalsView({ goals, setGoals, areas }) {
 
       {viewAll ? (
         <div className="cr-grid cr-grid-2">
-          {filtered.map((g) => <GoalCard key={g.id} g={g} areas={areas} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} />)}
+          {filtered.map((g) => <GoalCard key={g.id} g={g} areas={areas} onView={() => setViewing(g)} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} />)}
         </div>
       ) : (
         <div>
@@ -1854,7 +1884,7 @@ function GoalsView({ goals, setGoals, areas }) {
             <div key={area.id} style={{ marginBottom: 22 }}>
               <SectionTitle title={area.name} count={`${items.length} ${items.length === 1 ? "meta" : "metas"}`} />
               <div className="cr-grid cr-grid-2">
-                {items.map((g) => <GoalCard key={g.id} g={g} areas={areas} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} />)}
+                {items.map((g) => <GoalCard key={g.id} g={g} areas={areas} onView={() => setViewing(g)} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} />)}
               </div>
             </div>
           ))}
@@ -1862,7 +1892,7 @@ function GoalsView({ goals, setGoals, areas }) {
             <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
               <SectionTitle title="Concluídas" count={`${finished.length}`} />
               <div className="cr-grid cr-grid-2">
-                {finished.map((g) => <GoalCard key={g.id} g={g} areas={areas} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} dimmed />)}
+                {finished.map((g) => <GoalCard key={g.id} g={g} areas={areas} onView={() => setViewing(g)} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} dimmed />)}
               </div>
             </div>
           )}
@@ -1870,30 +1900,34 @@ function GoalsView({ goals, setGoals, areas }) {
       )}
 
       {editing && <GoalModal goal={editing === "new" ? null : editing} areas={areas} onSave={save} onClose={() => setEditing(null)} />}
+      {viewing && <GoalDetailsModal goal={viewing} areas={areas} onChange={updateGoal}
+        onEdit={() => { setEditing(viewing); setViewing(null); }} onClose={() => setViewing(null)} />}
     </div>
   );
 }
 
-function GoalCard({ g, areas, onEdit, onRemove, dimmed }) {
+function GoalCard({ g, areas, onView, onEdit, onRemove, dimmed }) {
   return (
-    <div className="cr-card" style={dimmed ? { opacity: 0.75 } : undefined}>
+    <div className="cr-card" role="button" tabIndex={0} onClick={onView}
+      onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onView(); } }}
+      style={{ cursor: "pointer", ...(dimmed ? { opacity: 0.75 } : {}) }}>
       {g.image ? (
         <img src={g.image} alt="" style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 10, marginBottom: 8 }} />
       ) : (
-        <button onClick={onEdit} style={{
+        <div style={{
           width: "100%", height: 76, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
           background: "#FBF8F4", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          gap: 3, cursor: "pointer", color: "var(--ink-soft)",
+          gap: 3, color: "var(--ink-soft)",
         }}>
           <ImageIcon size={16} />
-          <span style={{ fontSize: 11 }}>Adicionar imagem</span>
-        </button>
+          <span style={{ fontSize: 11 }}>Sem imagem</span>
+        </div>
       )}
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{g.name}</h3>
         <div className="cr-row" style={{ gap: 4 }}>
-          <button className="cr-btn ghost" onClick={onEdit}><Pencil size={14} /></button>
-          <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={14} /></button>
+          <button className="cr-btn ghost" aria-label="Editar meta" onClick={(event) => { event.stopPropagation(); onEdit(); }}><Pencil size={14} /></button>
+          <button className="cr-btn ghost danger" aria-label="Excluir meta" onClick={(event) => { event.stopPropagation(); onRemove(); }}><Trash2 size={14} /></button>
         </div>
       </div>
       <div className="cr-row" style={{ margin: "8px 0" }}>
@@ -1903,9 +1937,66 @@ function GoalCard({ g, areas, onEdit, onRemove, dimmed }) {
       </div>
       <div className="cr-progress-track"><div className="cr-progress-fill" style={{ width: `${g.progress}%`, background: progressColor(g.progress) }} /></div>
       <p className="cr-sub" style={{ marginTop: 6 }}>{g.progress}% concluído</p>
-      {g.note && <p style={{ fontSize: 13.5, marginTop: 6 }}>{g.note}</p>}
-      {g.link && <button className="cr-btn ghost" style={{ marginTop: 6, padding: "4px 8px" }} onClick={() => openExternalLink(g.link)}><Link2 size={12} /> Abrir link</button>}
+      <p className="cr-sub" style={{ marginTop: 6 }}>Abrir detalhes da meta</p>
     </div>
+  );
+}
+
+function GoalDetailsModal({ goal, areas, onChange, onEdit, onClose }) {
+  const [tab, setTab] = useState("detalhes");
+  const [actionText, setActionText] = useState("");
+  const actionPlan = Array.isArray(goal.actionPlan) ? goal.actionPlan : [];
+  const addAction = () => {
+    const text = actionText.trim();
+    if (!text) return;
+    onChange({ ...goal, actionPlan: [...actionPlan, { id: uid(), text, done: false }] });
+    setActionText("");
+  };
+  const toggleAction = (id) => onChange({
+    ...goal,
+    actionPlan: actionPlan.map((action) => action.id === id ? { ...action, done: !action.done } : action),
+  });
+  const removeAction = (id) => onChange({ ...goal, actionPlan: actionPlan.filter((action) => action.id !== id) });
+  return (
+    <Modal title={goal.name} onClose={onClose}>
+      <div className="cr-tabbar">
+        <button className={`cr-tabbtn ${tab === "detalhes" ? "active" : ""}`} onClick={() => setTab("detalhes")}>Detalhes</button>
+        <button className={`cr-tabbtn ${tab === "plano" ? "active" : ""}`} onClick={() => setTab("plano")}>Plano de Ação</button>
+      </div>
+      {tab === "detalhes" ? (
+        <div style={{ marginTop: 12 }}>
+          {goal.image && <img src={goal.image} alt="" style={{ width: "100%", maxHeight: 280, objectFit: "cover", borderRadius: 10 }} />}
+          <div className="cr-row" style={{ margin: "10px 0", flexWrap: "wrap" }}>
+            <AreaBadge area={goal.area} areas={areas} />
+            <span className="cr-chip">{listName("goalStatus", goal.status)}</span>
+            {goal.deadline && <span className="cr-chip">até {fmtDateShort(goal.deadline)}</span>}
+          </div>
+          <div className="cr-progress-track"><div className="cr-progress-fill" style={{ width: `${goal.progress}%`, background: progressColor(goal.progress) }} /></div>
+          <p className="cr-sub">{goal.progress}% concluído</p>
+          {goal.note && <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{goal.note}</p>}
+          {goal.link && <button className="cr-btn ghost" onClick={() => openExternalLink(goal.link)}><Link2 size={13} /> Abrir link</button>}
+          <button className="cr-btn" style={{ marginTop: 14 }} onClick={onEdit}><Pencil size={13} /> Editar informações</button>
+        </div>
+      ) : (
+        <div style={{ marginTop: 12 }}>
+          <div className="cr-row">
+            <input className="cr-input" aria-label="Nova etapa" placeholder="Adicionar tarefa ou etapa…" value={actionText}
+              onChange={(event) => setActionText(event.target.value)} onKeyDown={(event) => event.key === "Enter" && addAction()} />
+            <button className="cr-btn primary" onClick={addAction} disabled={!actionText.trim()}><Plus size={14} /> Adicionar</button>
+          </div>
+          {!actionPlan.length && <p className="cr-empty">Adicione as tarefas e etapas necessárias para alcançar esta meta.</p>}
+          {actionPlan.map((action) => (
+            <div className="cr-list-row" key={action.id}>
+              <button type="button" className={`cr-checkbox ${action.done ? "checked" : ""}`} aria-label={action.done ? "Reabrir etapa" : "Concluir etapa"} onClick={() => toggleAction(action.id)}>
+                {action.done && <Check size={13} />}
+              </button>
+              <span className="cr-list-title" style={{ flex: 1, textDecoration: action.done ? "line-through" : "none" }}>{action.text}</span>
+              <button className="cr-btn ghost danger" aria-label="Excluir etapa" onClick={() => removeAction(action.id)}><Trash2 size={13} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -1946,14 +2037,7 @@ function last7Days() {
 }
 
 function streakFor(habit) {
-  let streak = 0;
-  let d = new Date();
-  while (true) {
-    const key = localDateStr(d);
-    if (habit.log[key]) { streak++; d.setDate(d.getDate() - 1); }
-    else break;
-  }
-  return streak;
+  return habitStreak(habit.log, todayStr());
 }
 
 function HabitsView({ habits, setHabits, areas }) {
@@ -2204,15 +2288,23 @@ function overallMood(tasks, goals, habits, finance) {
   };
 }
 
-function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping, beauty, setBeauty, hobbies, setHobbies, accounts, setAccounts, cards, setCards, settings, setSettings, investments, setInvestments, goTo }) {
+function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping, beauty, setBeauty, hobbies, setHobbies, accounts, setAccounts, cards, setCards, settings, setSettings, investments, setInvestments, goTo, onOrigin, originTarget, clearOriginTarget }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
   const [tab, setTab] = useState("visao");
   const [filterStatus, setFilterStatus] = useState("todos");
   const [monthOffset, setMonthOffset] = useState(0);
+  const [chartMonth, setChartMonth] = useState("todos");
+  const [receiptTarget, setReceiptTarget] = useState("");
   const [invoiceCard, setInvoiceCard] = useState(cards[0]?.id || "");
   const [invoicePaymentAmount, setInvoicePaymentAmount] = useState("");
   const [invoicePaymentDate, setInvoicePaymentDate] = useState(todayStr());
+  useEffect(() => {
+    if (originTarget?.type !== "receiptSchedule") return;
+    setTab("planejamento");
+    setReceiptTarget(originTarget.sourceId);
+    clearOriginTarget();
+  }, [originTarget, clearOriginTarget]);
   useEffect(() => {
     if (cards.length && !cards.some((card) => card.id === invoiceCard)) setInvoiceCard(cards[0].id);
     if (!cards.length) setInvoiceCard("");
@@ -2240,7 +2332,61 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     setEditing(null);
   };
   const discardDraft = (id) => { if (manualFinance.some((x) => x.id === id)) setFinance(manualFinance.filter((x) => x.id !== id)); };
-  const remove = (id) => setFinance(manualFinance.filter((x) => x.id !== id));
+  const remove = (id) => {
+    const transaction = finance.find((entry) => entry.id === id);
+    if (!transaction?.sourceRef) {
+      setFinance(manualFinance.filter((entry) => entry.id !== id));
+      return;
+    }
+    if (transaction.sourceKind === "previsao") return;
+    const { type, sourceId, eventId } = transaction.sourceRef;
+    if (type === "receiptSchedule") {
+      setFinance(manualFinance.filter((entry) => entry.id !== id));
+    } else if (type === "shopping") {
+      setShopping(shopping.map((item) => {
+        if (item.id !== sourceId) return item;
+        const purchaseHistory = removeHistoryEvent(item.purchaseHistory, eventId);
+        const latest = latestHistoryEntry(purchaseHistory);
+        return {
+          ...item,
+          purchaseHistory,
+          lastPurchaseDate: latest?.date || "",
+          nextPurchaseDate: latest ? nextFinanceDate(latest.date, item.purchaseFrequency, item.productDurationDays) : "",
+        };
+      }));
+    } else if (type === "beauty") {
+      setBeauty(beauty.map((item) => {
+        if (item.id !== sourceId) return item;
+        const history = removeHistoryEvent(item.history, eventId);
+        const latest = latestHistoryEntry(history);
+        return {
+          ...item,
+          history,
+          dateDone: latest?.date || "",
+          professional: latest?.professional || "",
+          clinic: latest?.clinic || "",
+          cost: latest?.cost ?? item.cost,
+          notes: latest?.notes || "",
+          result: latest?.result || "",
+          nextExpenseDate: latest && item.recurring
+            ? nextFinanceDate(latest.date, item.frequencyUnit === "dias" ? "" : `a cada ${item.frequencyValue} meses`, item.frequencyUnit === "dias" ? item.frequencyValue : 0)
+            : "",
+        };
+      }));
+    } else if (type === "hobbies") {
+      setHobbies(hobbies.map((item) => {
+        if (item.id !== sourceId) return item;
+        const expenseHistory = removeHistoryEvent(item.expenseHistory, eventId);
+        const latest = latestHistoryEntry(expenseHistory);
+        return {
+          ...item,
+          expenseHistory,
+          lastExpenseDate: latest?.date || "",
+          nextExpenseDate: latest ? nextFinanceDate(latest.date, item.expenseFrequency) : "",
+        };
+      }));
+    }
+  };
 
   const selectedMonth = useMemo(() => {
     const d = new Date();
@@ -2316,8 +2462,11 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       map[m] = map[m] || { month: monthLabel(m), _m: m, entrada: 0, saida: 0 };
       map[m][f.type === "entrada" ? "entrada" : "saida"] += Number(f.amount);
     });
-    return Object.values(map).sort((a, b) => a._m.localeCompare(b._m)).slice(-6);
+    return Object.values(map).sort((a, b) => a._m.localeCompare(b._m));
   }, [finance]);
+  const chartData = chartMonth === "todos"
+    ? byMonth.slice(-6)
+    : byMonth.filter((entry) => entry._m === chartMonth);
 
   const filteredTx = finance
     .filter((f) => filterStatus === "todos" || effectiveStatus(f) === filterStatus)
@@ -2444,8 +2593,14 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           </div>
           {byMonth.length > 0 && (
             <div className="cr-card" style={{ marginBottom: 16 }}>
-              <p className="cr-label" style={{ marginBottom: 6 }}>Últimos meses</p>
-              <MiniBarChartFinance data={byMonth} />
+              <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap" }}>
+                <p className="cr-label" style={{ margin: 0 }}>{chartMonth === "todos" ? "Últimos meses" : `Movimentação de ${monthLabel(chartMonth)}`}</p>
+                <select className="cr-select" aria-label="Selecionar mês do gráfico" value={chartMonth} onChange={(event) => setChartMonth(event.target.value)}>
+                  <option value="todos">Últimos 6 meses</option>
+                  {byMonth.slice().reverse().map((entry) => <option key={entry._m} value={entry._m}>{monthLabel(entry._m)}</option>)}
+                </select>
+              </div>
+              <MiniBarChartFinance data={chartData} />
             </div>
           )}
           {(() => {
@@ -2462,7 +2617,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             <p className="cr-label" style={{ marginBottom: 6 }}>Lançamentos do mês</p>
             {monthTx.length === 0 && <p className="cr-empty">Nada neste mês.</p>}
             {monthTx.slice().sort((a, b) => b.date.localeCompare(a.date)).map((f) => (
-              <FinanceRow key={f.id} f={f} onEdit={() => setEditing(f)} onRemove={() => remove(f.id)} goTo={goTo} />
+              <FinanceRow key={f.id} f={f} onEdit={() => setEditing(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} />
             ))}
           </div>
         </div>
@@ -2481,14 +2636,15 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           <div className="cr-card">
             {filteredTx.length === 0 && <p className="cr-empty">Nenhum lançamento encontrado.</p>}
             {filteredTx.map((f) => (
-              <FinanceRow key={f.id} f={f} onEdit={() => setEditing(f)} onRemove={() => remove(f.id)} goTo={goTo} />
+              <FinanceRow key={f.id} f={f} onEdit={() => setEditing(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} />
             ))}
           </div>
         </div>
       )}
 
       {tab === "planejamento" && (
-        <FinancePlanningPanel finance={finance} manualFinance={manualFinance} setFinance={setFinance} month={selectedMonth} settings={settings} setSettings={setSettings} summary={planSummary} />
+        <FinancePlanningPanel finance={finance} manualFinance={manualFinance} setFinance={setFinance} month={selectedMonth} settings={settings} setSettings={setSettings} summary={planSummary}
+          receiptTarget={receiptTarget} onReceiptTargetHandled={() => setReceiptTarget("")} />
       )}
 
       {tab === "fatura" && (
@@ -2566,7 +2722,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       {tab === "investimentos" && <InvestmentsPanel investments={investments} setInvestments={setInvestments} settings={settings} setSettings={setSettings} />}
 
       {tab === "contas" && (
-        <AccountsCardsPanel accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} />
+        <AccountsCardsPanel accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} finance={finance} />
       )}
 
       {editing && (
@@ -2578,22 +2734,21 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   );
 }
 
-function FinancePlanningPanel({ finance, manualFinance, setFinance, month, settings, setSettings, summary }) {
+function FinancePlanningPanel({ finance, manualFinance, setFinance, month, settings, setSettings, summary, receiptTarget, onReceiptTargetHandled }) {
   const plan = settings.financePlan || { grossSalary: "", extraIncome: "", deductions: "", netSalary: "", payday: "5", allocations: [] };
   const allocations = Array.isArray(plan.allocations) ? plan.allocations : [];
   const receipts = Array.isArray(plan.receipts) ? plan.receipts : [];
   const [receiptDraft, setReceiptDraft] = useState({ description: "", amount: "", date: todayStr(), frequency: "mensal" });
   const grossSalary = Number(plan.grossSalary) || 0;
   const extraIncome = Number(plan.extraIncome) || 0;
-  const deductions = Number(plan.deductions) || 0;
+  const deductionRows = Array.isArray(plan.deductions)
+    ? plan.deductions
+    : Number(plan.deductions) > 0
+      ? [{ id: "legacy-deductions", description: "Descontos anteriores", amount: Number(plan.deductions) }]
+      : [];
+  const deductions = deductionRows.reduce((total, row) => total + (Number(row.amount) || 0), 0);
   const calculatedNet = Math.max(0, grossSalary + extraIncome - deductions);
   const expectedNet = Number(plan.netSalary) > 0 ? Number(plan.netSalary) : calculatedNet;
-  const scheduledMonthlyIncome = receipts.reduce((sum, receipt) => sum + (receiptDate(receipt) ? Number(receipt.amount) || 0 : 0), 0);
-  const plannedIncome = receipts.length ? scheduledMonthlyIncome : expectedNet;
-  const expectedAllocationTotal = allocations.reduce((total, allocation) =>
-    total + allocationValue(allocation, plannedIncome), 0);
-  const plannedUnallocated = plannedIncome - expectedAllocationTotal;
-  const setPlan = (next) => setSettings({ ...settings, financePlan: { ...plan, ...next } });
   const receiptDate = (receipt) => {
     if (!receipt.date) return "";
     if (receipt.frequency !== "mensal") return receipt.date.slice(0, 7) === month ? receipt.date : "";
@@ -2602,6 +2757,30 @@ function FinancePlanningPanel({ finance, manualFinance, setFinance, month, setti
     const lastDay = new Date(year, monthNumber, 0).getDate();
     return `${month}-${String(Math.min(Number(receipt.date.slice(8, 10)), lastDay)).padStart(2, "0")}`;
   };
+  const scheduledMonthlyIncome = receipts.reduce((sum, receipt) => sum + (receiptDate(receipt) ? Number(receipt.amount) || 0 : 0), 0);
+  const plannedIncome = receipts.length ? scheduledMonthlyIncome : expectedNet;
+  const expectedAllocationTotal = allocations.reduce((total, allocation) =>
+    total + allocationValue(allocation, plannedIncome), 0);
+  const plannedUnallocated = plannedIncome - expectedAllocationTotal;
+  const setPlan = (next) => setSettings({ ...settings, financePlan: { ...plan, ...next } });
+  const updateDeduction = (id, changes) => setPlan({
+    deductions: deductionRows.map((row) => row.id === id ? { ...row, ...changes } : row),
+  });
+  const addDeduction = () => setPlan({
+    deductions: [...deductionRows, { id: uid(), description: "", amount: "" }],
+  });
+  const removeDeduction = (id) => setPlan({ deductions: deductionRows.filter((row) => row.id !== id) });
+  const paydayDates = Array.isArray(plan.paydayDates)
+    ? plan.paydayDates
+    : plan.payday ? [String(plan.payday)] : [""];
+  const updatePayday = (index, value) => setPlan({
+    paydayDates: paydayDates.map((date, current) => current === index ? value : date),
+  });
+  useEffect(() => {
+    if (!receiptTarget) return;
+    document.getElementById(`finance-receipt-${receiptTarget}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    onReceiptTargetHandled();
+  }, [receiptTarget, onReceiptTargetHandled]);
   const addReceipt = () => {
     if (!receiptDraft.description.trim() || !(Number(receiptDraft.amount) > 0) || !receiptDraft.date) return;
     setPlan({ receipts: [...receipts, { ...receiptDraft, id: uid(), description: receiptDraft.description.trim(), amount: Number(receiptDraft.amount) }] });
@@ -2616,7 +2795,7 @@ function FinancePlanningPanel({ finance, manualFinance, setFinance, month, setti
     setFinance(upsertById(manualFinance, {
       id: `income:${receipt.id}:${month}`,
       type: "entrada", category: "Recebimentos", desc: receipt.description,
-      amount: Number(receipt.amount), date, status: "pago", sourceRef,
+      amount: Number(receipt.amount), date, status: "pago", sourceRef, sourceLabel: receipt.description,
     }));
   };
   const updateAllocation = (id, changes) => setPlan({
@@ -2654,7 +2833,7 @@ function FinancePlanningPanel({ finance, manualFinance, setFinance, month, setti
           const registered = !!matchingIncome;
           const received = matchingIncome && (!matchingIncome.status || matchingIncome.status === "pago");
           return (
-            <div className="cr-list-row" key={receipt.id}>
+            <div className="cr-list-row" id={`finance-receipt-${receipt.id}`} key={receipt.id}>
               <div style={{ flex: 1 }}>
                 <strong>{receipt.description}</strong>
                 <div className="cr-sub" style={{ margin: 0 }}>{date ? fmtDateShort(date) : "Não previsto neste mês"} · {receipt.frequency === "mensal" ? "Mensal" : "Pontual"}</div>
@@ -2690,9 +2869,21 @@ function FinancePlanningPanel({ finance, manualFinance, setFinance, month, setti
             onChange={(event) => setPlan({ extraIncome: event.target.value })} aria-label="Renda extra prevista" />
         </div>
         <div className="cr-card">
-          <p className="cr-label">Descontos e deduções</p>
-          <input type="number" min="0" step="0.01" className="cr-input" value={plan.deductions ?? ""}
-            onChange={(event) => setPlan({ deductions: event.target.value })} aria-label="Descontos e deduções" />
+          <div className="cr-row" style={{ justifyContent: "space-between" }}>
+            <p className="cr-label" style={{ margin: 0 }}>Descontos e deduções</p>
+            <button type="button" className="cr-btn ghost" aria-label="Adicionar desconto" onClick={addDeduction}><Plus size={13} /> Desconto</button>
+          </div>
+          {deductionRows.map((row) => (
+            <div className="cr-row" key={row.id} style={{ marginTop: 8 }}>
+              <input className="cr-input" aria-label="Nome do desconto" placeholder="Ex.: INSS, plano de saúde"
+                value={row.description || ""} onChange={(event) => updateDeduction(row.id, { description: event.target.value })} />
+              <input type="number" min="0" step="0.01" className="cr-input" aria-label="Valor do desconto"
+                value={row.amount ?? ""} onChange={(event) => updateDeduction(row.id, { amount: event.target.value })} />
+              <button type="button" className="cr-btn ghost danger" aria-label="Remover desconto" onClick={() => removeDeduction(row.id)}><Trash2 size={13} /></button>
+            </div>
+          ))}
+          {deductionRows.length === 0 && <p className="cr-sub">Nenhum desconto cadastrado. Total: {fmtBRL(0)}</p>}
+          {deductionRows.length > 0 && <p className="cr-sub" style={{ marginBottom: 0 }}>Total descontado: {fmtBRL(deductions)}</p>}
         </div>
         <div className="cr-card">
           <p className="cr-label">Salário líquido esperado (opcional)</p>
@@ -2701,9 +2892,19 @@ function FinancePlanningPanel({ finance, manualFinance, setFinance, month, setti
           <p className="cr-sub" style={{ margin: "6px 0 0" }}>Estimativa calculada: {fmtBRL(calculatedNet)}.</p>
         </div>
         <div className="cr-card">
-          <p className="cr-label">Dia previsto para receber</p>
-          <input type="number" min="1" max="31" step="1" className="cr-input" value={plan.payday ?? "5"}
-            onChange={(event) => setPlan({ payday: event.target.value })} aria-label="Dia previsto para receber" />
+          <div className="cr-row" style={{ justifyContent: "space-between" }}>
+            <p className="cr-label" style={{ margin: 0 }}>Dias previstos para receber</p>
+            <button type="button" className="cr-btn ghost" aria-label="Adicionar dia de recebimento"
+              onClick={() => setPlan({ paydayDates: [...paydayDates, ""] })}><Plus size={13} /> Data</button>
+          </div>
+          {paydayDates.map((date, index) => (
+            <div className="cr-row" key={`${index}-${date}`} style={{ marginTop: 8 }}>
+              <input type="number" min="1" max="31" step="1" className="cr-input" value={date}
+                onChange={(event) => updatePayday(index, event.target.value)} aria-label={`Dia previsto ${index + 1}`} />
+              {paydayDates.length > 1 && <button type="button" className="cr-btn ghost danger" aria-label="Remover dia de recebimento"
+                onClick={() => setPlan({ paydayDates: paydayDates.filter((_, current) => current !== index) })}><Trash2 size={13} /></button>}
+            </div>
+          ))}
         </div>
         <div className="cr-card">
           <p className="cr-label">Renda líquida prevista</p>
@@ -2829,9 +3030,10 @@ function FinancePlanningPanel({ finance, manualFinance, setFinance, month, setti
   );
 }
 
-function FinanceRow({ f, onEdit, onRemove, goTo }) {
+function FinanceRow({ f, onEdit, onRemove, goTo, onOrigin }) {
   const st = effectiveStatus(f);
-  const originTabs = { shopping: "shopping", beauty: "beauty", hobbies: "hobbies" };
+  const originTabs = { shopping: "shopping", beauty: "beauty", hobbies: "hobbies", receiptSchedule: "finance" };
+  const deletableSource = ["receiptSchedule", "shopping", "beauty", "hobbies"].includes(f.sourceRef?.type);
   return (
     <div className="cr-list-row">
       <span className="cr-chip">{fmtDateShort(f.date)}</span>
@@ -2849,7 +3051,11 @@ function FinanceRow({ f, onEdit, onRemove, goTo }) {
         {f.type === "entrada" ? "+" : "-"}{fmtBRL(f.amount)}
       </span>
       {f.sourceRef
-        ? <button className="cr-btn ghost" title={`Abrir ${f.sourceLabel} na aba de origem`} onClick={() => goTo(originTabs[f.sourceRef.type] || "finance")}>Origem</button>
+        ? <>
+          <button className="cr-btn ghost" title={`Abrir ${f.sourceLabel} na aba de origem`}
+            onClick={() => onOrigin ? onOrigin(f.sourceRef) : goTo(originTabs[f.sourceRef.type] || "finance")}>Origem</button>
+          {deletableSource && f.sourceKind !== "previsao" && <button className="cr-btn ghost danger" aria-label="Excluir lançamento integrado" onClick={onRemove}><Trash2 size={14} /></button>}
+        </>
         : <>
           <button className="cr-btn ghost" onClick={onEdit}><Pencil size={14} /></button>
           <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={14} /></button>
@@ -3213,7 +3419,7 @@ function MiniBarChartFinance({ data, height = 280 }) {
   );
 }
 
-function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, setSettings }) {
+function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, setSettings, finance }) {
   const [editingAccount, setEditingAccount] = useState(null);
   const [editingCard, setEditingCard] = useState(null);
   const [newMethod, setNewMethod] = useState("");
@@ -3238,12 +3444,20 @@ function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, 
         </div>
         {accounts.length === 0 && <p className="cr-empty">Nenhuma conta cadastrada.</p>}
         {accounts.map((a) => (
-          <div className="cr-list-row" key={a.id}>
-            <span className="cr-list-title" style={{ flex: 1 }}>{a.name}</span>
-            <span className="cr-chip">{a.type}</span>
-            <button className="cr-btn ghost" onClick={() => setEditingAccount(a)}><Pencil size={13} /></button>
-            <button className="cr-btn ghost danger" onClick={() => setAccounts(accounts.filter((x) => x.id !== a.id))}><Trash2 size={13} /></button>
-          </div>
+          (() => {
+            const posted = finance.filter((entry) => entry.accountId === a.id && entry.status !== "cancelado"
+              && (!entry.status || entry.status === "pago"));
+            const balance = posted.reduce((total, entry) => total + (entry.type === "entrada" ? 1 : -1) * Number(entry.amount || 0), 0);
+            return (
+              <div className="cr-list-row" key={a.id}>
+                <span className="cr-list-title" style={{ flex: 1 }}>{a.name}</span>
+                <span className="cr-chip">{a.type}</span>
+                <span className="cr-chip">Saldo registrado: {fmtBRL(balance)}</span>
+                <button className="cr-btn ghost" onClick={() => setEditingAccount(a)}><Pencil size={13} /></button>
+                <button className="cr-btn ghost danger" onClick={() => setAccounts(accounts.filter((x) => x.id !== a.id))}><Trash2 size={13} /></button>
+              </div>
+            );
+          })()
         ))}
       </div>
 
@@ -3287,8 +3501,13 @@ function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, 
 }
 
 function AccountModal({ item, onSave, onClose }) {
-  const [form, setForm] = useState(item || { name: "", type: "conta bancária" });
-  const autoStatus = useAutoSave(form, onSave, undefined);
+  const [form, setForm] = useState(item || { id: uid(), name: "", type: "conta bancária" });
+  const autoStatus = useAutoSave(form, onSave, undefined, undefined, (value) => !!value.name?.trim());
+  const saveNow = () => {
+    if (!form.name.trim()) return;
+    onSave(form);
+    onClose();
+  };
   return (
     <Modal title={item ? "Editar conta" : "Nova conta"} onClose={onClose}>
       <div className="cr-field"><label className="cr-label">Nome</label>
@@ -3296,15 +3515,21 @@ function AccountModal({ item, onSave, onClose }) {
       <div className="cr-field"><label className="cr-label">Tipo</label>
         <ManagedSelect listKey="accountType" value={form.type} onChange={(v) => setForm({ ...form, type: v })} /></div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
+      <button type="button" className="cr-btn primary" disabled={!form.name.trim()} onClick={saveNow}>Salvar conta</button>
     </Modal>
   );
 }
 
 function CardModal({ item, onSave, onClose }) {
-  const [form, setForm] = useState(item || { name: "", limit: "", closingDay: "", dueDay: "", bank: "" });
+  const [form, setForm] = useState(item || { id: uid(), name: "", limit: "", closingDay: "", dueDay: "", bank: "" });
   const validDay = (value) => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 31;
   const autoStatus = useAutoSave(form, onSave, (form) => ({ ...form, limit: Number(form.limit) || 0 }), undefined,
     (value) => !!value.name?.trim() && validDay(value.closingDay) && validDay(value.dueDay));
+  const saveNow = () => {
+    if (!form.name.trim() || !validDay(form.closingDay) || !validDay(form.dueDay)) return;
+    onSave({ ...form, limit: Number(form.limit) || 0 });
+    onClose();
+  };
   return (
     <Modal title={item ? "Editar cartão" : "Novo cartão"} onClose={onClose}>
       <div className="cr-field"><label className="cr-label">Nome do cartão</label>
@@ -3321,6 +3546,7 @@ function CardModal({ item, onSave, onClose }) {
       </div>
       {(!validDay(form.closingDay) || !validDay(form.dueDay)) && <p className="cr-sub" role="alert" style={{ color: "#A1493C" }}>Informe os dias de fechamento e vencimento (1 a 31) para habilitar a fatura.</p>}
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
+      <button type="button" className="cr-btn primary" disabled={!form.name.trim() || !validDay(form.closingDay) || !validDay(form.dueDay)} onClick={saveNow}>Salvar cartão</button>
     </Modal>
   );
 }
@@ -3744,6 +3970,7 @@ function StudyView({ study, setStudy, studyAreas, setStudyAreas }) {
         <input className="cr-input" style={{ maxWidth: 260 }} placeholder="Buscar curso…" value={query} onChange={(e) => setQuery(e.target.value)} />
         <select className="cr-select" style={{ maxWidth: 210 }} value={sortCourses} onChange={(e) => setSortCourses(e.target.value)} aria-label="Organizar cursos">
           <option value="priority">Organizar por prioridade</option>
+          <option value="status">Organizar por status</option>
           <option value="title">Organizar por nome</option>
           <option value="deadline">Organizar por prazo</option>
         </select>
@@ -3766,6 +3993,11 @@ function StudyView({ study, setStudy, studyAreas, setStudyAreas }) {
         const shown = all.filter(matches).sort((a, b) => {
           if (sortCourses === "title") return (a.title || "").localeCompare(b.title || "", "pt-BR");
           if (sortCourses === "deadline") return (a.deadline || "9999").localeCompare(b.deadline || "9999");
+          if (sortCourses === "status") {
+            const aIndex = statusList.findIndex((status) => status.id === courseStatusId(a));
+            const bIndex = statusList.findIndex((status) => status.id === courseStatusId(b));
+            return (aIndex < 0 ? statusList.length : aIndex) - (bIndex < 0 ? statusList.length : bIndex);
+          }
           const aIndex = priorityList.findIndex((priority) => priority.id === a.priority);
           const bIndex = priorityList.findIndex((priority) => priority.id === b.priority);
           return (aIndex < 0 ? priorityList.length : aIndex) - (bIndex < 0 ? priorityList.length : bIndex);
@@ -4774,7 +5006,7 @@ function RoutinesCalendar({ routines, onEdit, onToggle }) {
     list.forEach((r) => (r.steps || []).forEach((s) => {
       if (!stepDays(s).includes(day)) return;
       const { start, end } = stepStartEnd(s);
-      const cat = stepCategoryId(s);
+      const cat = s.category ? stepCategoryId(s) : r.category || stepCategoryId(s);
       if (!start) { untimed.push({ routine: r, step: s, cat, date }); return; }
       const sm = toMin(start);
       let em = end ? toMin(end) : sm + 60;
@@ -4872,13 +5104,19 @@ function RoutinesCalendar({ routines, onEdit, onToggle }) {
 }
 
 function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal }) {
+  const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
   const [view, setView] = useState("calendario");
+  const [filterCategory, setFilterCategory] = useState("todas");
   const [confirmDel, setConfirmDel] = useState(null);
   const [dayOpen, setDayOpen] = useState(null);
   const [showDoneSteps, setShowDoneSteps] = useState(false);
   const save = (data) => { setRoutines(upsertById(routines, data)); };
   const remove = (id) => setRoutines(routines.filter((x) => x.id !== id));
+  const filteredRoutines = filterCategory === "todas"
+    ? routines
+    : routines.filter((routine) => routineCategoryId(routine) === filterCategory);
+  const routineCategories = getList("routineCategory");
   // cada dia tem seu próprio "feito", assim dá para acompanhar o que foi realizado
   const toggleStep = (routine, stepId, date = todayStr()) => {
     const steps = routine.steps.map((s) => {
@@ -4902,11 +5140,22 @@ function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal }) {
         <button className={`cr-tabbtn ${view === "google" ? "active" : ""}`} onClick={() => setView("google")}>Google Agenda (agendado de verdade)</button>
         <button className={`cr-tabbtn ${view === "lista" ? "active" : ""}`} onClick={() => setView("lista")}>Lista</button>
       </div>
+      {view !== "google" && (
+        <div className="cr-row" style={{ marginTop: 12, flexWrap: "wrap" }}>
+          <select className="cr-select" style={{ maxWidth: 240 }} aria-label="Filtrar rotinas por categoria"
+            value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)}>
+            <option value="todas">Todas as categorias</option>
+            <option value="">Sem categoria</option>
+            {routineCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+          </select>
+          <button className="cr-btn" onClick={() => ctx.openManager("routineCategory")}><SettingsIcon size={13} /> Gerenciar categorias</button>
+        </div>
+      )}
 
       {view === "google" ? (
         <GoogleAgendaView gcal={gcal} setGcal={setGcal} />
       ) : view === "calendario" ? (
-        routines.length === 0 ? <p className="cr-empty">Nenhuma rotina cadastrada ainda.</p> : <RoutinesCalendar routines={routines} onEdit={setEditing} onToggle={toggleStep} />
+        filteredRoutines.length === 0 ? <p className="cr-empty">Nenhuma rotina nesta categoria ainda.</p> : <RoutinesCalendar routines={filteredRoutines} onEdit={setEditing} onToggle={toggleStep} />
       ) : (
         <>
         <div className="cr-row" style={{ marginTop: 12 }}>
@@ -4914,7 +5163,7 @@ function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal }) {
         </div>
         <div className="cr-grid cr-grid-2" style={{ marginTop: 8 }}>
           {routines.length === 0 && <p className="cr-empty">Nenhuma rotina cadastrada ainda.</p>}
-          {routines.map((r) => (
+          {filteredRoutines.map((r) => (
             <div className="cr-card" key={r.id}>
               <div className="cr-row" style={{ justifyContent: "space-between" }}>
                 <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{r.name}</h3>
@@ -4922,6 +5171,9 @@ function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal }) {
                   <button className="cr-btn ghost" onClick={() => setEditing(r)}><Pencil size={13} /></button>
                   <button className="cr-btn ghost danger" onClick={() => setConfirmDel(r)}><Trash2 size={13} /></button>
                 </div>
+                <span className="cr-chip" style={{ marginTop: 6, background: itemColor("routineCategory", routineCategoryId(r)), color: readableText(itemColor("routineCategory", routineCategoryId(r))) }}>
+                  {listName("routineCategory", routineCategoryId(r))}
+                </span>
               </div>
               <p className="cr-sub" style={{ margin: "2px 0 6px" }}>Marcações valem para hoje e recomeçam amanhã.</p>
               {r.steps.length > 0 && !showDoneSteps && r.steps.every((x) => x.log && x.log[todayStr()]) && <p className="cr-empty">Tudo feito por hoje.</p>}
@@ -5272,7 +5524,7 @@ function WorkoutDayPage({ routine, step, onChange, onClose }) {
 function RoutineModal({ routine, onSave, onClose }) {
   const [form, setForm] = useState(routine
     ? { ...routine, steps: routine.steps.map((st) => (st.start ? st : { ...st, ...stepStartEnd(st) })) }
-    : { name: "", steps: [] });
+    : { name: "", category: "", steps: [] });
   const autoStatus = useAutoSave(form, onSave, undefined);
   const addStep = () => setForm({ ...form, steps: [...form.steps, { id: uid(), text: "", time: "", start: "", end: "", category: "", days: [0, 1, 2, 3, 4, 5, 6], done: false }] });
   const setTimes = (id, patch) => setForm({ ...form, steps: form.steps.map((st) => {
@@ -5293,6 +5545,9 @@ function RoutineModal({ routine, onSave, onClose }) {
     <Modal title={routine ? "Editar rotina" : "Nova rotina"} onClose={onClose}>
       <div className="cr-field"><label className="cr-label">Nome da rotina</label>
         <input className="cr-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="ex: Rotina da manhã" /></div>
+      <div className="cr-field"><label className="cr-label">Categoria</label>
+        <ManagedSelect listKey="routineCategory" value={form.category || ""} emptyLabel="Sem categoria"
+          onChange={(value) => setForm({ ...form, category: value })} /></div>
       <label className="cr-label">Etapas (marque os dias da semana em que cada uma acontece)</label>
       {form.steps.map((s) => {
         const days = stepDays(s);
@@ -5643,7 +5898,7 @@ function placeOf(b, places) {
   return (places || []).find((p) => p.id === b.placeId) || null;
 }
 
-function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSettings }) {
+function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSettings, originTarget, clearOriginTarget }) {
   const ctx = useContext(ListsContext);
   const [section, setSection] = useState("procedimentos");
   const [editing, setEditing] = useState(null);
@@ -5655,6 +5910,13 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
   const [customize, setCustomize] = useState(false);
   const on = (k) => cardFieldOn(settings || {}, k);
   const liveEditing = editing && editing !== "new" ? (beauty.find((x) => x.id === editing.id) || editing) : null;
+
+  useEffect(() => {
+    if (originTarget?.type !== "beauty") return;
+    const item = beauty.find((entry) => entry.id === originTarget.sourceId);
+    if (item) setEditing(item);
+    clearOriginTarget();
+  }, [originTarget, beauty, clearOriginTarget]);
 
   const save = (data) => { setBeauty(upsertById(beauty, { ...data, userEdited: true }, { history: data.history || [] })); };
   const remove = (id) => setBeauty(beauty.flatMap((item) => {
@@ -6612,7 +6874,7 @@ function productStatus(s) {
   return st;
 }
 
-function ShoppingView({ shopping, setShopping }) {
+function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
   const [purchasing, setPurchasing] = useState(null);
@@ -6620,6 +6882,18 @@ function ShoppingView({ shopping, setShopping }) {
   const [filter, setFilter] = useState("todos");
   const [filterCategory, setFilterCategory] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
+
+  useEffect(() => {
+    if (!["shopping"].includes(originTarget?.type)) return;
+    const item = shopping.find((entry) => entry.id === originTarget.sourceId);
+    if (item) {
+      setTab(inferShoppingKind(item));
+      setFilter("todos");
+      setFilterCategory("todas");
+      setEditing(item);
+    }
+    clearOriginTarget();
+  }, [originTarget, shopping, clearOriginTarget]);
 
   const save = (data) => { setShopping(upsertById(shopping, data)); };
   const remove = (id) => setShopping(shopping.flatMap((item) => {
@@ -6645,7 +6919,9 @@ function ShoppingView({ shopping, setShopping }) {
     const kind = inferShoppingKind(s);
     return { ...s, _kind: kind, _status: kind === "rotina" ? productStatus(s) : s.status };
   });
-  const inTab = withKind.filter((s) => s._kind === tab);
+  const inTab = tab === "recomprar"
+    ? withKind.filter((item) => item._status === "comprado" || item._status === "quero recomprar")
+    : withKind.filter((s) => s._kind === tab);
   const filtered = inTab.filter((s) => (filter === "todos" || s._status === filter) && (filterCategory === "todas" || s.category === filterCategory));
   const categories = Array.from(new Set(inTab.map((s) => s.category).filter(Boolean)));
   const totalDesejado = withKind.filter((s) => s._kind === "desejo" && !isClosedItem("wishStatus", s.status)).reduce((sum, s) => sum + Number(s.price || 0), 0);
@@ -6663,7 +6939,22 @@ function ShoppingView({ shopping, setShopping }) {
   };
 
   const statusKey = tab === "rotina" ? "productStatus" : "wishStatus";
-  const statusOptions = getList(statusKey);
+  const restockDue = inTab.filter((item) => {
+    const lastPurchase = item.lastPurchaseDate || item.purchaseHistory?.[0]?.date;
+    if (!lastPurchase) return false;
+    const due = item.nextPurchaseDate || (lastPurchase
+      ? nextFinanceDate(lastPurchase, item.purchaseFrequency, item.productDurationDays)
+      : "");
+    if (!due) return false;
+    const daysUntil = Math.ceil((Date.parse(`${due}T00:00:00Z`) - Date.parse(`${todayStr()}T00:00:00Z`)) / 86400000);
+    return daysUntil <= 7;
+  });
+  const statusOptions = tab === "recomprar"
+    ? Array.from(new Map(inTab.map((item) => [
+      item._status,
+      { id: item._status, name: listName(item._kind === "rotina" ? "productStatus" : "wishStatus", item._status) },
+    ])).values())
+    : getList(statusKey);
 
   return (
     <div>
@@ -6671,7 +6962,7 @@ function ShoppingView({ shopping, setShopping }) {
         <div>
           <h1 className="cr-h1 cr-serif">Wishlist</h1>
           <p className="cr-sub">
-            {tab === "desejo" ? `${fmtBRL(totalDesejado)} em itens desejados.` : `${inTab.length} produtos na rotina${toRebuy ? `, ${toRebuy} para recomprar` : ""}.`}
+            {tab === "desejo" ? `${fmtBRL(totalDesejado)} em itens desejados.` : tab === "recomprar" ? `${inTab.length} produto(s) na lista de recompra.` : `${inTab.length} produtos na rotina${toRebuy ? `, ${toRebuy} para recomprar` : ""}.`}
           </p>
         </div>
         <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
@@ -6680,14 +6971,22 @@ function ShoppingView({ shopping, setShopping }) {
       <div className="cr-tabbar" style={{ marginTop: 14 }}>
         <button className={`cr-tabbtn ${tab === "desejo" ? "active" : ""}`} onClick={() => { setTab("desejo"); setFilter("todos"); setFilterCategory("todas"); }}>Desejos</button>
         <button className={`cr-tabbtn ${tab === "rotina" ? "active" : ""}`} onClick={() => { setTab("rotina"); setFilter("todos"); setFilterCategory("todas"); }}>Produtos e rotina</button>
+        <button className={`cr-tabbtn ${tab === "recomprar" ? "active" : ""}`} onClick={() => { setTab("recomprar"); setFilter("todos"); setFilterCategory("todas"); }}>Recomprar</button>
       </div>
+
+      {restockDue.length > 0 && (
+        <div className="cr-card" role="status" style={{ marginTop: 14, borderColor: "#E3B5AB", color: "#7A1712" }}>
+          <strong>Seu produto deve estar acabando! Está na hora de recomprar. Como estão os seus gastos?</strong>
+          <p className="cr-sub" style={{ marginBottom: 0 }}>{restockDue.map((item) => item.name).join(" · ")}</p>
+        </div>
+      )}
 
       <div className="cr-row" style={{ margin: "14px 0", flexWrap: "wrap" }}>
         <select className="cr-select" style={{ maxWidth: 190 }} value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="todos">Todos os status</option>
           {statusOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
-        <button className="cr-btn" title="Gerenciar opções (criar, renomear, excluir, reordenar)" onClick={() => ctx.openManager(statusKey)}><SettingsIcon size={13} /> Gerenciar status</button>
+        {tab !== "recomprar" && <button className="cr-btn" title="Gerenciar opções (criar, renomear, excluir, reordenar)" onClick={() => ctx.openManager(statusKey)}><SettingsIcon size={13} /> Gerenciar status</button>}
         <select className="cr-select" style={{ maxWidth: 200 }} value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
           <option value="todas">Todas as categorias</option>
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -6700,32 +6999,29 @@ function ShoppingView({ shopping, setShopping }) {
 
       {viewAll || filterCategory !== "todas" ? (
         <div className="cr-grid cr-grid-3">
-          {filtered.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} />)}
+          {filtered.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} forcePurchase={tab === "recomprar"} />)}
         </div>
       ) : (
         byCategory().map(([cat, items]) => (
           <div key={cat} style={{ marginBottom: 22 }}>
             <SectionTitle title={cat} count={`${items.length} ${items.length === 1 ? "item" : "itens"}`} />
             <div className="cr-grid cr-grid-3">
-              {items.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} />)}
+              {items.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} forcePurchase={tab === "recomprar"} />)}
             </div>
           </div>
         ))
       )}
 
-      {editing && <ShoppingModal item={editing === "new" ? null : editing} defaultKind={tab} onSave={save} onClose={() => setEditing(null)} />}
+      {editing && <ShoppingModal item={editing === "new" ? null : editing} defaultKind={tab === "recomprar" ? "rotina" : tab} onSave={save} onClose={() => setEditing(null)} />}
       {purchasing && <SourceExpenseModal item={purchasing} title={`Confirmar compra: ${purchasing.name}`} amount={purchasing.price} allowNoAmount
         onSave={(entry) => registerPurchase(purchasing, entry)} onClose={() => setPurchasing(null)} />}
     </div>
   );
 }
 
-function ShoppingCard({ s, onEdit, onRemove, onPurchase }) {
+function ShoppingCard({ s, onEdit, onRemove, onPurchase, forcePurchase }) {
   const isRoutine = s._kind === "rotina";
   const st = s._status || s.status;
-  const chipStyle = isRoutine
-    ? (isClosedItem("productStatus", st) ? { background: "#F6DEDA", color: "#A1493C" } : { background: "#E3EBDF", color: "#4F6B49" })
-    : { background: isClosedItem("wishStatus", st) ? "#E3EBDF" : undefined };
   return (
     <div className="cr-card">
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
@@ -6737,11 +7033,8 @@ function ShoppingCard({ s, onEdit, onRemove, onPurchase }) {
       </div>
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
         <PriorityChip id={s.priority} />
-        <span className="cr-chip" style={chipStyle}>{listName(isRoutine ? "productStatus" : "wishStatus", st)}</span>
       </div>
-      {isRoutine && s.notes && <p className="cr-sub" style={{ margin: "4px 0" }}>{s.notes}</p>}
       {s.price > 0 && <p style={{ fontSize: 15, fontWeight: 600, margin: "4px 0" }}>{fmtBRL(s.price)}</p>}
-      {s.purchaseFrequency && <p className="cr-sub" style={{ margin: "4px 0" }}>Frequência: {s.purchaseFrequency}</p>}
       {s.nextPurchaseDate && <p className="cr-sub" style={{ margin: "4px 0" }}>Próxima compra prevista: {fmtDateShort(s.nextPurchaseDate)}</p>}
       {(s.purchaseHistory || []).length > 0 && (
         <p className="cr-sub" style={{ margin: "4px 0" }}>
@@ -6752,9 +7045,9 @@ function ShoppingCard({ s, onEdit, onRemove, onPurchase }) {
         <span className="cr-sub" style={{ margin: 0 }}>{s.store}</span>
         {s.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(s.link)}>abrir loja</button>}
       </div>
-      {onPurchase && !isClosedItem(isRoutine ? "productStatus" : "wishStatus", st) && (
+      {onPurchase && (forcePurchase || !isClosedItem(isRoutine ? "productStatus" : "wishStatus", st)) && (
         <button className="cr-btn primary" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={onPurchase}>
-          Confirmar compra
+          {forcePurchase ? "Registrar recompra" : "Confirmar compra"}
         </button>
       )}
     </div>
@@ -6834,9 +7127,9 @@ function ShoppingModal({ item, defaultKind, onSave, onClose }) {
           <option value="mensal">Mensal</option><option value="trimestral">Trimestral</option>
           <option value="semestral">Semestral</option><option value="anual">Anual</option><option value="pontual">Pontual</option>
         </select></div>
-      {isRoutine && <div className="cr-field"><label className="cr-label">Duração do produto (dias, opcional)</label>
+      <div className="cr-field"><label className="cr-label">Duração estimada do produto (dias, opcional)</label>
         <input type="number" min="1" className="cr-input" value={form.productDurationDays || ""}
-          onChange={(event) => setForm({ ...form, productDurationDays: Number(event.target.value) || "" })} /></div>}
+          onChange={(event) => setForm({ ...form, productDurationDays: Number(event.target.value) || "" })} /></div>
       <div className="cr-field"><label className="cr-label">Data da compra / reposição prevista</label>
         <input type="date" className="cr-input" value={form.nextPurchaseDate || form.desiredDate || ""}
           onChange={(event) => setForm({ ...form, nextPurchaseDate: event.target.value, desiredDate: event.target.value })} /></div>
@@ -6851,13 +7144,20 @@ function ShoppingModal({ item, defaultKind, onSave, onClose }) {
 /* HOBBIES                                                                 */
 /* ---------------------------------------------------------------------- */
 
-function HobbiesView({ hobbies, setHobbies }) {
+function HobbiesView({ hobbies, setHobbies, originTarget, clearOriginTarget }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [recording, setRecording] = useState(null);
   const [filterCategory, setFilterCategory] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
+  useEffect(() => {
+    if (originTarget?.type !== "hobbies") return;
+    const item = hobbies.find((entry) => entry.id === originTarget.sourceId);
+    if (item) setViewing(item);
+    clearOriginTarget();
+  }, [originTarget, hobbies, clearOriginTarget]);
+
   const save = (data) => { setHobbies(upsertById(hobbies, data)); };
   const remove = (id) => setHobbies(hobbies.flatMap((item) => {
     if (item.id !== id) return [item];
@@ -6997,8 +7297,6 @@ function HobbyCard({ h, onView, onEdit, onRemove }) {
         {h.frequency && <span className="cr-chip">{h.frequency}</span>}
         {h.level && <span className="cr-chip">nível: {h.level}</span>}
       </div>
-      {h.description && <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "4px 0" }}>{h.description}</p>}
-      {h.goal && <p style={{ fontSize: 13, margin: "4px 0" }}><strong>Objetivo:</strong> {h.goal}</p>}
       {typeof h.progress === "number" && (
         <>
           <div className="cr-progress-track" style={{ marginTop: 6 }}><div className="cr-progress-fill" style={{ width: `${h.progress}%`, background: progressColor(h.progress) }} /></div>
@@ -7202,9 +7500,7 @@ function SelfCareView({ selfcare, setSelfcare }) {
         {s.category && <span className="cr-chip">{s.category}</span>}
       </div>
       {(s.content || "").trim() ? (
-        <p style={{ fontSize: 13.5, color: "var(--ink-soft)", margin: "10px 0", flex: 1 }}>
-          {(s.content || "").length > 160 ? s.content.slice(0, 160) + "…" : s.content}
-        </p>
+        <div style={{ flex: 1, minHeight: 8 }} />
       ) : <div style={{ flex: 1, minHeight: 8 }} />}
       <button className="cr-btn ghost" style={{ alignSelf: "flex-start" }} onClick={() => setViewing(s)}>Ver detalhes</button>
     </div>
@@ -7554,6 +7850,15 @@ export default function App({ onSignOut }) {
     const nextHash = hashForTab(nextTab);
     if (window.location.hash !== nextHash) window.history.pushState(null, "", nextHash);
   }, []);
+  const [originTarget, setOriginTarget] = useState(null);
+  const clearOriginTarget = useCallback(() => setOriginTarget(null), []);
+  const navigateToOrigin = useCallback((sourceRef) => {
+    const sourceTabs = { shopping: "shopping", beauty: "beauty", hobbies: "hobbies", receiptSchedule: "finance" };
+    const destination = sourceTabs[sourceRef.type];
+    if (!destination) return;
+    setOriginTarget(sourceRef);
+    setTab(destination);
+  }, [setTab]);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
 
@@ -8042,7 +8347,7 @@ export default function App({ onSignOut }) {
       <GlobalStyle />
       <div className="cr-sidebar">
         <button className="cr-brand cr-serif" title="Ir para o Dashboard" onClick={() => setTab(navItems.some((n) => n.id === "dashboard") ? "dashboard" : firstVisible())}
-          style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", textAlign: "left", width: "100%" }}>✦ Central</button>
+          style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", textAlign: "left", width: "100%" }}>MyWorld</button>
         <div className="cr-navtools">
           <button className="cr-btn ghost" onClick={() => setPageModal("new")} title="Criar uma nova página"><Plus size={13} /> Página</button>
           <button className="cr-btn ghost" onClick={() => setNavEdit(!navEdit)} title="Renomear ou excluir páginas"><Pencil size={12} /> {navEdit ? "Pronto" : "Editar"}</button>
@@ -8052,7 +8357,7 @@ export default function App({ onSignOut }) {
           <Download size={14} /> {refreshing ? "Atualizando…" : "Atualizar dados"}
         </button>
         <button className="cr-navitem" style={{ fontSize: 12 }} onClick={onSignOut}>Sair da conta Google</button>
-        <p className="cr-sub" style={{ margin: "4px 10px 0", fontSize: 11, opacity: 0.8 }}>Central, {APP_BUILD}</p>
+        <p className="cr-sub" style={{ margin: "4px 10px 0", fontSize: 11, opacity: 0.8 }}>MyWorld, {APP_BUILD}</p>
       </div>
       <nav className="cr-mobile-nav" aria-label="Navegação principal">
         {mobileShortcuts.map((item) => {
@@ -8074,7 +8379,7 @@ export default function App({ onSignOut }) {
           <section className="cr-mobile-drawer" role="dialog" aria-modal="true" aria-label="Mais páginas"
             onClick={(event) => event.stopPropagation()}>
             <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-              <h2 className="cr-serif" style={{ margin: 0, fontSize: 20 }}>✦ Central</h2>
+              <h2 className="cr-serif" style={{ margin: 0, fontSize: 20 }}>MyWorld</h2>
               <button className="cr-btn ghost" type="button" onClick={() => setMobileMore(false)} aria-label="Fechar menu"><X size={18} /></button>
             </div>
             <div className="cr-mobile-drawer-actions">
@@ -8097,15 +8402,15 @@ export default function App({ onSignOut }) {
         {currentPage && <CustomPageView key={currentPage.id} page={currentPage} setPage={(updated) => setPages(pages.map((pg) => pg.id === updated.id ? updated : pg))} />}
         {tab === "goals" && <GoalsView goals={goals} setGoals={setGoals} areas={areas} />}
         {tab === "habits" && <HabitsView habits={habits} setHabits={setHabits} areas={areas} />}
-        {tab === "finance" && <FinanceView finance={finance} setFinance={setFinance} shopping={shopping} setShopping={setShopping} beauty={beauty} setBeauty={setBeauty} hobbies={hobbies} setHobbies={setHobbies} accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} investments={investments} setInvestments={setInvestments} goTo={setTab} />}
+        {tab === "finance" && <FinanceView finance={finance} setFinance={setFinance} shopping={shopping} setShopping={setShopping} beauty={beauty} setBeauty={setBeauty} hobbies={hobbies} setHobbies={setHobbies} accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} investments={investments} setInvestments={setInvestments} goTo={setTab} onOrigin={navigateToOrigin} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "study" && <StudyView study={study} setStudy={setStudy} studyAreas={studyAreas} setStudyAreas={setStudyAreas} />}
         {tab === "career" && <CareerView career={career} setCareer={setCareer} />}
-        {tab === "beauty" && <BeautyView beauty={beauty} setBeauty={setBeauty} places={places} setPlaces={setPlaces} settings={settings} setSettings={setSettings} />}
+        {tab === "beauty" && <BeautyView beauty={beauty} setBeauty={setBeauty} places={places} setPlaces={setPlaces} settings={settings} setSettings={setSettings} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "selfcare" && <SelfCareView selfcare={selfcare} setSelfcare={setSelfcare} />}
-        {tab === "hobbies" && <HobbiesView hobbies={hobbies} setHobbies={setHobbies} />}
+        {tab === "hobbies" && <HobbiesView hobbies={hobbies} setHobbies={setHobbies} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "personaldev" && <PersonalDevView personaldev={personaldev} setPersonaldev={setPersonaldev} settings={settings} setSettings={setSettings} />}
         {tab === "house" && <HouseView house={house} setHouse={setHouse} />}
-        {tab === "shopping" && <ShoppingView shopping={shopping} setShopping={setShopping} />}
+        {tab === "shopping" && <ShoppingView shopping={shopping} setShopping={setShopping} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "notes" && <NotesView notes={notes} setNotes={setNotes} areas={areas} />}
         {tab === "journal" && <JournalView journal={journal} setJournal={setJournal} />}
         {tab === "vision" && <VisionView vision={vision} setVision={setVision} />}

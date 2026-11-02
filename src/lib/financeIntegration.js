@@ -41,6 +41,11 @@ function positiveAmount(value) {
   return Number.isFinite(amount) && amount > 0 ? amount : 0;
 }
 
+function deductionsTotal(value) {
+  if (!Array.isArray(value)) return positiveAmount(value);
+  return value.reduce((total, deduction) => total + positiveAmount(deduction.amount), 0);
+}
+
 function formatBRL(amount) {
   return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
@@ -343,7 +348,7 @@ function scheduledIncomeForMonth(transactions, plan, month) {
 
 export function buildFinanceForecast(transactions, plan, fromMonth, horizonMonths = 12) {
   const expectedIncome = positiveAmount(plan?.netSalary)
-    || Math.max(0, positiveAmount(plan?.grossSalary) + positiveAmount(plan?.extraIncome) - positiveAmount(plan?.deductions));
+    || Math.max(0, positiveAmount(plan?.grossSalary) + positiveAmount(plan?.extraIncome) - deductionsTotal(plan?.deductions));
   const hasReceiptSchedules = Array.isArray(plan?.receipts) && plan.receipts.length > 0;
   const priorities = (transaction) => String(transaction.sourcePriority || "").toLowerCase();
   return Array.from({ length: horizonMonths }, (_, offset) => {
@@ -400,7 +405,7 @@ export function buildFinanceAlerts(transactions, plan, month, today) {
   const expectedMonthlyIncome = receipts.length
     ? receipts.reduce((sum, receipt) => sum + (receiptDateForMonth(receipt, month) ? positiveAmount(receipt.amount) : 0), 0)
     : positiveAmount(plan?.netSalary)
-      || Math.max(0, positiveAmount(plan?.grossSalary) + positiveAmount(plan?.extraIncome) - positiveAmount(plan?.deductions));
+      || Math.max(0, positiveAmount(plan?.grossSalary) + positiveAmount(plan?.extraIncome) - deductionsTotal(plan?.deductions));
   monthEntries.forEach((transaction) => plannedByCategory.set(transaction.category || "Sem categoria",
     (plannedByCategory.get(transaction.category || "Sem categoria") || 0) + positiveAmount(transaction.amount)));
   const alerts = [];
