@@ -7382,7 +7382,7 @@ function ManuallyResizableImage({ item, onResize, alt }) {
       <button type="button" aria-label="Redimensionar imagem arrastando" title="Arraste para redimensionar"
         onPointerDown={beginResize}
         style={{
-          position: "absolute", right: `calc(${100 - size.width}% / 2)`, bottom: 0,
+          position: "absolute", right: `calc(50% - ${size.width / 2}%)`, bottom: 0, zIndex: 1,
           width: 22, height: 22, padding: 0, border: "2px solid #fff", borderRadius: 6,
           background: "var(--clay)", cursor: "nwse-resize", touchAction: "none",
         }}>
