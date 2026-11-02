@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback, useRef, createContext, useContext } from "react";
+import React, { useEffect, useLayoutEffect, useState, useMemo, useCallback, useRef, createContext, useContext } from "react";
 import { reloadUserData, storageDelete, storageGet, storageSet } from "./src/lib/userData.js";
 import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
@@ -396,131 +396,156 @@ function personalizedCardClass(item) {
   return item?.cardSize === "wide" ? "cr-personal-card-wide" : "";
 }
 
-function cardImageValues(item, defaultHeight = 160) {
+function cardImageValues(item) {
   const bounded = (value, fallback, min, max) => {
     const number = Number(value);
     return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
   };
+  const legacyPosition = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? number + 50 : 50;
+  };
   return {
-    width: bounded(item?.cardImageWidth, 100, 30, 100),
-    height: bounded(item?.cardImageHeight, defaultHeight, 80, 600),
-    zoom: bounded(item?.cardImageZoom, 1, 0.5, 4),
-    x: bounded(item?.cardImageX, 0, -50, 50),
-    y: bounded(item?.cardImageY, 0, -50, 50),
-    fit: item?.cardImageFit === "cover" ? "cover" : "contain",
+    zoom: bounded(item?.cardImageZoom, 1, 1, 3),
+    x: bounded(item?.cardImagePositionX, legacyPosition(item?.cardImageX), 0, 100),
+    y: bounded(item?.cardImagePositionY, legacyPosition(item?.cardImageY), 0, 100),
   };
 }
 
-function CardImage({ item, src, alt = "", defaultHeight = 160, style = {}, onClick }) {
-  if (!src) return null;
-  const image = cardImageValues(item, defaultHeight);
-  const bleed = image.width * 0.2;
+function CardImageFrame({ src, alt = "", image, frameStyle = {}, onClick, onPointerDown, onPointerMove, onPointerUp, onPointerCancel, frameRef }) {
   return (
-    <div onClick={onClick} style={{
+    <div ref={frameRef} onClick={onClick} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} style={{
+      ...frameStyle,
       position: "relative",
       display: "block",
-      width: `calc(${image.width}% + ${bleed * 2}px)`,
-      height: image.height,
-      marginLeft: "auto",
-      marginRight: "auto",
+      width: frameStyle.width || "100%",
+      aspectRatio: "16 / 9",
       overflow: "hidden",
-      ...style,
+      borderRadius: frameStyle.borderRadius ?? 10,
     }}>
       <img src={src} alt={alt} draggable="false" style={{
-        display: "block",
+        position: "absolute",
+        inset: 0,
         width: "100%",
         height: "100%",
-        objectFit: image.fit,
-        objectPosition: "center",
-        transform: `translate(${image.x}%, ${image.y}%) scale(${image.zoom})`,
+        objectFit: "cover",
+        objectPosition: `${image.x}% ${image.y}%`,
+        transform: `scale(${image.zoom})`,
         transformOrigin: "center",
         userSelect: "none",
+        pointerEvents: "none",
       }} />
     </div>
   );
 }
 
-function CardImagePreviewEditor({ src, form, setForm, defaultHeight = 160 }) {
+function CardImage({ item, src, alt = "", style = {}, onClick }) {
+  const image = cardImageValues(item);
+  const { borderRadius = 10, marginTop, marginBottom } = style;
+  const frame = useRef(null);
+  const [insets, setInsets] = useState({ left: 0, right: 0 });
+  useLayoutEffect(() => {
+    const card = frame.current?.closest(".cr-card");
+    if (!card) return undefined;
+    const updateInsets = () => {
+      const cardStyle = window.getComputedStyle(card);
+      const left = parseFloat(cardStyle.paddingLeft) || 0;
+      const right = parseFloat(cardStyle.paddingRight) || 0;
+      setInsets((current) => current.left === left && current.right === right ? current : { left, right });
+    };
+    updateInsets();
+    const observer = new ResizeObserver(updateInsets);
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, []);
+  if (!src) return null;
+  return (
+    <CardImageFrame frameRef={frame} src={src} alt={alt} image={image} onClick={onClick} frameStyle={{
+      width: `calc(100% + ${insets.left + insets.right}px)`,
+      marginLeft: -insets.left,
+      marginRight: -insets.right,
+      marginTop,
+      marginBottom,
+      borderRadius,
+    }} />
+  );
+}
+
+function CardImagePreviewEditor({ src, form, setForm }) {
   const frame = useRef(null);
   const drag = useRef(null);
-  const image = cardImageValues(form, defaultHeight);
+  const image = cardImageValues(form);
+  const [editing, setEditing] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [draftPosition, setDraftPosition] = useState({ x: image.x, y: image.y });
+  const previewImage = { ...image, ...(editing ? draftPosition : {}) };
   const move = (event) => {
     const start = drag.current;
     if (!start || start.pointerId !== event.pointerId) return;
-    setForm((current) => ({
-      ...current,
-      cardImageX: Math.max(-50, Math.min(50, start.xOffset + ((event.clientX - start.x) / start.width) * 100)),
-      cardImageY: Math.max(-50, Math.min(50, start.yOffset + ((event.clientY - start.y) / start.height) * 100)),
-    }));
+    setDraftPosition({
+      x: Math.max(0, Math.min(100, start.xOffset - ((event.clientX - start.x) / start.width) * 100)),
+      y: Math.max(0, Math.min(100, start.yOffset - ((event.clientY - start.y) / start.height) * 100)),
+    });
   };
   const startMove = (event) => {
     const bounds = frame.current?.getBoundingClientRect();
     if (!bounds) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (!editing) {
+      setEditing(true);
+      setDraftPosition({ x: image.x, y: image.y });
+    }
     drag.current = {
       pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
       width: bounds.width || 1,
       height: bounds.height || 1,
-      xOffset: image.x,
-      yOffset: image.y,
+      xOffset: editing ? draftPosition.x : image.x,
+      yOffset: editing ? draftPosition.y : image.y,
     };
+    setDragging(true);
   };
   const finishMove = (event) => {
-    if (drag.current?.pointerId === event.pointerId) drag.current = null;
+    if (drag.current?.pointerId !== event.pointerId) return;
+    drag.current = null;
+    setDragging(false);
+  };
+  const savePosition = () => {
+    setForm((current) => ({
+      ...current,
+      cardImagePositionX: draftPosition.x,
+      cardImagePositionY: draftPosition.y,
+    }));
+    setEditing(false);
+  };
+  const cancelPosition = () => {
+    setDraftPosition({ x: image.x, y: image.y });
+    setEditing(false);
   };
   return (
     <div className="cr-field">
-      <label className="cr-label">Prévia — arraste a imagem para reposicionar</label>
+      <label className="cr-label">Prévia do card</label>
       {src ? (
-        <div ref={frame} onPointerDown={startMove} onPointerMove={move} onPointerUp={finishMove} onPointerCancel={finishMove}
-          style={{ width: `${image.width}%`, height: Math.min(image.height, 320), margin: "0 auto 12px", overflow: "hidden", borderRadius: 10, background: "#eee7db", touchAction: "none", cursor: "move" }}>
-          <img src={src} alt="Prévia da imagem do card" draggable="false" style={{
-            display: "block",
-            width: "100%",
-            height: "100%",
-            objectFit: image.fit,
-            objectPosition: "center",
-            transform: `translate(${image.x}%, ${image.y}%) scale(${image.zoom})`,
-            transformOrigin: "center",
-            userSelect: "none",
-            pointerEvents: "none",
-          }} />
-        </div>
+        <CardImageFrame frameRef={frame} src={src} alt="Prévia da imagem do card" image={previewImage}
+          onPointerDown={startMove} onPointerMove={move} onPointerUp={finishMove} onPointerCancel={finishMove}
+          frameStyle={{ margin: "0 auto 12px", background: "#eee7db", touchAction: "none", cursor: dragging ? "grabbing" : "grab" }} />
       ) : <p className="cr-sub">Adicione a imagem na edição do item para visualizar o ajuste.</p>}
       <div className="cr-field">
-        <label className="cr-label">Enquadramento</label>
-        <select className="cr-select" value={image.fit} onChange={(event) => setForm({ ...form, cardImageFit: event.target.value })}>
-          <option value="contain">Imagem completa (sem cortes)</option>
-          <option value="cover">Preencher o espaço (pode cortar)</option>
-        </select>
-      </div>
-      <div className="cr-field">
-        <label className="cr-label">Largura: {image.width}%</label>
-        <input type="range" aria-label="Largura da imagem" min="30" max="100" step="1" value={image.width}
-          onChange={(event) => setForm({ ...form, cardImageWidth: Number(event.target.value) })} style={{ width: "100%" }} />
-      </div>
-      <div className="cr-field">
-        <label className="cr-label">Altura: {image.height}px</label>
-        <input type="range" aria-label="Altura da imagem" min="80" max="600" step="5" value={image.height}
-          onChange={(event) => setForm({ ...form, cardImageHeight: Number(event.target.value) })} style={{ width: "100%" }} />
-      </div>
-      <div className="cr-field">
         <label className="cr-label">Zoom: {image.zoom.toFixed(1)}×</label>
-        <input type="range" aria-label="Zoom da imagem" min="0.5" max="4" step="0.1" value={image.zoom}
+        <input type="range" aria-label="Zoom da imagem" min="1" max="3" step="0.1" value={image.zoom}
           onChange={(event) => setForm({ ...form, cardImageZoom: Number(event.target.value) })} style={{ width: "100%" }} />
       </div>
-      <div className="cr-field">
-        <label className="cr-label">Posição horizontal: {Math.round(image.x)}</label>
-        <input type="range" aria-label="Posição horizontal da imagem" min="-50" max="50" step="1" value={image.x}
-          onChange={(event) => setForm({ ...form, cardImageX: Number(event.target.value) })} style={{ width: "100%" }} />
-      </div>
-      <div className="cr-field">
-        <label className="cr-label">Posição vertical: {Math.round(image.y)}</label>
-        <input type="range" aria-label="Posição vertical da imagem" min="-50" max="50" step="1" value={image.y}
-          onChange={(event) => setForm({ ...form, cardImageY: Number(event.target.value) })} style={{ width: "100%" }} />
+      <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 10 }}>
+        <button type="button" className="cr-btn" onClick={() => {
+          setDraftPosition({ x: image.x, y: image.y });
+          setEditing(true);
+        }}>{editing ? `Posição: ${Math.round(draftPosition.x)}% / ${Math.round(draftPosition.y)}%` : "Reposicionar"}</button>
+        {editing && <div className="cr-row">
+          <button type="button" className="cr-btn" onClick={cancelPosition}>Cancelar</button>
+          <button type="button" className="cr-btn primary" onClick={savePosition}>Salvar</button>
+        </div>}
       </div>
     </div>
   );
@@ -534,7 +559,7 @@ function CardExtraText({ item }) {
   return item?.cardNote ? <p style={{ fontSize: 13, margin: "8px 0", whiteSpace: "pre-wrap" }}>{item.cardNote}</p> : null;
 }
 
-function CardPersonalizationButton({ item, onSave, hasImage = false, imageSrc = item.image, defaultImageHeight = 160 }) {
+function CardPersonalizationButton({ item, onSave, hasImage = false, imageSrc = item.image }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -542,28 +567,27 @@ function CardPersonalizationButton({ item, onSave, hasImage = false, imageSrc = 
         onClick={(event) => { event.stopPropagation(); setOpen(true); }}>
         <Palette size={13} /> Personalizar
       </button>
-      {open && <CardPersonalizationModal item={item} imageSrc={imageSrc} onSave={onSave} hasImage={hasImage} defaultImageHeight={defaultImageHeight} onClose={() => setOpen(false)} />}
+      {open && <CardPersonalizationModal item={item} imageSrc={imageSrc} onSave={onSave} hasImage={hasImage} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function CardPersonalizationModal({ item, imageSrc, onSave, hasImage, defaultImageHeight, onClose }) {
+function CardPersonalizationModal({ item, imageSrc, onSave, hasImage, onClose }) {
   const ctx = useContext(ListsContext);
+  const imageValues = cardImageValues(item);
   const [form, setForm] = useState({
     topic: item.topic || "",
     cardColor: item.cardColor || "",
     cardSize: item.cardSize || "standard",
     cardNote: item.cardNote || "",
-    cardImageHeight: Number(item.cardImageHeight) || defaultImageHeight,
-    cardImageWidth: Number(item.cardImageWidth) || 100,
-    cardImageFit: item.cardImageFit || "contain",
-    cardImageZoom: Number(item.cardImageZoom) || 1,
-    cardImageX: Number(item.cardImageX) || 0,
-    cardImageY: Number(item.cardImageY) || 0,
+    cardImageZoom: imageValues.zoom,
+    cardImagePositionX: imageValues.x,
+    cardImagePositionY: imageValues.y,
   });
   const imageIsAvailable = hasImage || !!imageSrc || item.type === "image";
   const save = () => {
-    onSave({ ...form, cardImageHeight: Number(form.cardImageHeight), cardImageWidth: Number(form.cardImageWidth) });
+    const image = cardImageValues(form);
+    onSave({ ...form, cardImageZoom: image.zoom, cardImagePositionX: image.x, cardImagePositionY: image.y });
     onClose();
   };
   return (
@@ -592,7 +616,7 @@ function CardPersonalizationModal({ item, imageSrc, onSave, hasImage, defaultIma
         </select>
       </div>
       {imageIsAvailable && (
-        <CardImagePreviewEditor src={imageSrc} form={form} setForm={setForm} defaultHeight={defaultImageHeight} />
+        <CardImagePreviewEditor src={imageSrc} form={form} setForm={setForm} />
       )}
       <div className="cr-field">
         <label className="cr-label">Texto complementar exibido no card</label>
@@ -2072,7 +2096,7 @@ function GoalCard({ g, areas, onView, onEdit, onRemove, onCustomize, dimmed }) {
       onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onView(); } }}
       style={{ cursor: "pointer", ...(dimmed ? { opacity: 0.75 } : {}), ...personalizedCardStyle(g) }}>
       {g.image ? (
-        <CardImage item={g} src={g.image} defaultHeight={110} style={{ borderRadius: 10, marginBottom: 8 }} />
+        <CardImage item={g} src={g.image} style={{ borderRadius: 10, marginBottom: 8 }} />
       ) : (
         <div style={{
           width: "100%", height: 76, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
@@ -2086,7 +2110,7 @@ function GoalCard({ g, areas, onView, onEdit, onRemove, onCustomize, dimmed }) {
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{g.name}</h3>
         <div className="cr-row" style={{ gap: 4 }}>
-          <CardPersonalizationButton item={g} onSave={onCustomize} hasImage defaultImageHeight={110} />
+          <CardPersonalizationButton item={g} onSave={onCustomize} hasImage />
           <button className="cr-btn ghost" aria-label="Editar meta" onClick={(event) => { event.stopPropagation(); onEdit(); }}><Pencil size={14} /></button>
           <button className="cr-btn ghost danger" aria-label="Excluir meta" onClick={(event) => { event.stopPropagation(); onRemove(); }}><Trash2 size={14} /></button>
         </div>
@@ -2128,7 +2152,7 @@ function GoalDetailsModal({ goal, areas, onChange, onEdit, onClose }) {
       </div>
       {tab === "detalhes" ? (
         <div style={{ marginTop: 12 }}>
-          {goal.image && <CardImage item={goal} src={goal.image} defaultHeight={280} style={{ borderRadius: 10, maxHeight: 420 }} />}
+          {goal.image && <CardImage item={goal} src={goal.image} style={{ borderRadius: 10 }} />}
           <div className="cr-row" style={{ margin: "10px 0", flexWrap: "wrap" }}>
             <AreaBadge area={goal.area} areas={areas} />
             <span className="cr-chip">{listName("goalStatus", goal.status)}</span>
@@ -3751,7 +3775,7 @@ function NotesView({ notes, setNotes, areas }) {
         {filtered.length === 0 && <p className="cr-empty">Nenhuma nota encontrada.</p>}
         {filtered.map((n) => (
           <div className={`cr-card ${personalizedCardClass(n)}`} key={n.id} style={personalizedCardStyle(n)}>
-            {n.image && <CardImage item={n} src={n.image} alt="" defaultHeight={140} style={{ borderRadius: 10, marginBottom: 8 }} />}
+            {n.image && <CardImage item={n} src={n.image} alt="" style={{ borderRadius: 10, marginBottom: 8 }} />}
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
               <h3 style={{ margin: 0, fontSize: 15 }} className="cr-serif">{n.title}</h3>
               <div className="cr-row" style={{ gap: 2 }}>
@@ -3830,7 +3854,7 @@ function AppsView({ apps, setApps }) {
           const AppIcon = iconForApp(a.name);
           return (
           <div className={`cr-card ${personalizedCardClass(a)}`} key={a.id} style={{ textAlign: "center", ...personalizedCardStyle(a) }}>
-            {a.image && <CardImage item={a} src={a.image} alt="" defaultHeight={120} style={{ borderRadius: 10, marginBottom: 8 }} />}
+            {a.image && <CardImage item={a} src={a.image} alt="" style={{ borderRadius: 10, marginBottom: 8 }} />}
             <button style={{
               textDecoration: "none", color: "inherit", border: "none", background: "none",
               padding: 0, cursor: "pointer", width: "100%", font: "inherit",
@@ -6366,7 +6390,7 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
   return (
     <div className={`cr-card ${personalizedCardClass(b)}`} style={{ cursor: "pointer", ...personalizedCardStyle(b) }} onClick={onEdit} title="Clique para abrir o procedimento completo">
       {on("image") && (b.image ? (
-        <CardImage item={b} src={b.image} defaultHeight={120} style={{ borderRadius: 10, marginBottom: 8 }} />
+        <CardImage item={b} src={b.image} style={{ borderRadius: 10, marginBottom: 8 }} />
       ) : (
         <div style={{
           width: "100%", height: 70, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
@@ -6379,7 +6403,7 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
       ))}
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{m && on("maintenance") ? `${statusEmoji(m.level)} ` : ""}{b.name}</h3>
-        <CardPersonalizationButton item={b} onSave={onCustomize} hasImage defaultImageHeight={120} />
+        <CardPersonalizationButton item={b} onSave={onCustomize} hasImage />
         <button className="cr-btn ghost danger" title="Excluir" onClick={stop(onRemove)}><Trash2 size={13} /></button>
       </div>
       <div className="cr-row" role="group" aria-label={`Avaliação de ${b.name}`} style={{ gap: 2, marginTop: 6 }}>
@@ -6792,7 +6816,7 @@ function VisionView({ vision, setVision }) {
         {vision.map((v, i) => (
           <div className={`cr-card ${personalizedCardClass(v)}`} key={v.id} style={{ padding: 12, ...personalizedCardStyle(v) }}>
             {v.type === "image" && v.content && (
-              <CardImage item={v} src={v.content} alt="" defaultHeight={420} onClick={() => setZoom(v.content)}
+              <CardImage item={v} src={v.content} alt="" onClick={() => setZoom(v.content)}
                 style={{ maxHeight: "60vh", borderRadius: 12, marginBottom: 10, cursor: "zoom-in" }} />
             )}
             {v.type === "quote" && (
@@ -6802,7 +6826,7 @@ function VisionView({ vision, setVision }) {
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
               <div className="cr-row"><span className="cr-chip">{v.category}</span><CardTopicChip item={v} /></div>
               <div className="cr-row" style={{ gap: 2 }}>
-                <CardPersonalizationButton item={v} onSave={(patch) => save({ ...v, ...patch })} hasImage={v.type === "image"} imageSrc={v.type === "image" ? v.content : ""} defaultImageHeight={420} />
+                <CardPersonalizationButton item={v} onSave={(patch) => save({ ...v, ...patch })} hasImage={v.type === "image"} imageSrc={v.type === "image" ? v.content : ""} />
                 <button className="cr-btn ghost" disabled={i === 0} onClick={() => move(v.id, -1)}>↑</button>
                 <button className="cr-btn ghost" disabled={i === vision.length - 1} onClick={() => move(v.id, 1)}>↓</button>
                 <button className="cr-btn ghost" onClick={() => setEditing(v)}><Pencil size={13} /></button>
@@ -7410,7 +7434,7 @@ function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onCustomize, 
           <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
       </div>
-      {show("image") && s.image && <CardImage item={s} src={s.image} alt={s.name} defaultHeight={160} style={{ marginTop: 8, marginBottom: 8, borderRadius: 10 }} />}
+      {show("image") && s.image && <CardImage item={s} src={s.image} alt={s.name} style={{ marginTop: 8, marginBottom: 8, borderRadius: 10 }} />}
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
         {show("category") && s.category && <span className="cr-chip">{s.category}</span>}
         {show("priority") && <PriorityChip id={s.priority} />}
@@ -7613,7 +7637,7 @@ function HobbiesView({ hobbies, setHobbies, originTarget, clearOriginTarget }) {
       {editing && <HobbyModal item={editing === "new" ? null : editing} onSave={save} onClose={() => setEditing(null)} />}
       {viewing && (
         <Modal title={viewing.name} onClose={() => setViewing(null)}>
-          {viewing.image && <CardImage item={viewing} src={viewing.image} defaultHeight={300} style={{ maxHeight: 420, borderRadius: 12, marginBottom: 12 }} />}
+          {viewing.image && <CardImage item={viewing} src={viewing.image} style={{ borderRadius: 12, marginBottom: 12 }} />}
           {viewing.description && <p style={{ whiteSpace: "pre-wrap" }}>{viewing.description}</p>}
           {viewing.goal && <p><strong>Objetivo:</strong> {viewing.goal}</p>}
           <div className="cr-row" style={{ flexWrap: "wrap" }}>
@@ -7664,7 +7688,7 @@ function HobbyCard({ h, onView, onEdit, onRemove, onCustomize }) {
   return (
     <div className={`cr-card ${personalizedCardClass(h)}`} style={personalizedCardStyle(h)}>
       {h.image ? (
-        <CardImage item={h} src={h.image} defaultHeight={130} style={{ borderRadius: 10, marginBottom: 8 }} />
+        <CardImage item={h} src={h.image} style={{ borderRadius: 10, marginBottom: 8 }} />
       ) : (
         <button onClick={onEdit} style={{
           width: "100%", height: 90, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
@@ -7678,7 +7702,7 @@ function HobbyCard({ h, onView, onEdit, onRemove, onCustomize }) {
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{h.name}</h3>
         <div className="cr-row" style={{ gap: 2 }}>
-          <CardPersonalizationButton item={h} onSave={onCustomize} hasImage defaultImageHeight={130} />
+          <CardPersonalizationButton item={h} onSave={onCustomize} hasImage />
           <button className="cr-btn ghost" onClick={onEdit}><Pencil size={13} /></button>
           <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
@@ -7865,7 +7889,7 @@ function SelfCareView({ selfcare, setSelfcare }) {
     <div className={`cr-card ${personalizedCardClass(s)}`} key={s.id} style={{ display: "flex", flexDirection: "column", ...personalizedCardStyle(s) }}>
       {s.image ? (
         <div style={{ marginBottom: 10 }}>
-          <CardImage item={s} src={s.image} defaultHeight={150} style={{ borderRadius: 10 }} />
+          <CardImage item={s} src={s.image} style={{ borderRadius: 10 }} />
           <div className="cr-row" style={{ gap: 4, marginTop: 4 }}>
             <button className="cr-btn ghost" style={{ padding: "2px 8px", fontSize: 11.5 }} onClick={() => setEditing(s)}>Trocar imagem</button>
             <button className="cr-btn ghost danger" style={{ padding: "2px 8px", fontSize: 11.5 }} onClick={() => save({ ...s, image: "" })}>Remover imagem</button>
@@ -7884,7 +7908,7 @@ function SelfCareView({ selfcare, setSelfcare }) {
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{s.title}</h3>
         <div className="cr-row" style={{ gap: 2 }}>
-          <CardPersonalizationButton item={s} onSave={(patch) => save({ ...(selfcare.find((item) => item.id === s.id) || s), ...patch })} hasImage defaultImageHeight={150} />
+          <CardPersonalizationButton item={s} onSave={(patch) => save({ ...(selfcare.find((item) => item.id === s.id) || s), ...patch })} hasImage />
           <button className="cr-btn ghost" onClick={() => setEditing(s)}><Pencil size={13} /></button>
           <button className="cr-btn ghost danger" onClick={() => remove(s.id)}><Trash2 size={13} /></button>
         </div>
@@ -7929,7 +7953,7 @@ function SelfCareView({ selfcare, setSelfcare }) {
       {editing && <SelfCareModal item={editing === "new" ? null : editing} onSave={save} onClose={() => setEditing(null)} />}
       {viewing && (
         <Modal title={viewing.title} onClose={() => setViewing(null)}>
-          {viewing.image && <CardImage item={viewing} src={viewing.image} defaultHeight={340} style={{ maxHeight: 420, borderRadius: 12, marginBottom: 12 }} />}
+          {viewing.image && <CardImage item={viewing} src={viewing.image} style={{ borderRadius: 12, marginBottom: 12 }} />}
           <div className="cr-row" style={{ marginBottom: 10 }}>
             {viewing.status && <span className="cr-chip" style={{ background: "var(--clay)", color: "#fff" }}>{listName("selfcareStatus", viewing.status)}</span>}
             {viewing.category && <span className="cr-chip">{viewing.category}</span>}
