@@ -217,6 +217,8 @@ async function verifyStorageWrite(content) {
 /* LISTAS EDITÁVEIS (status, categorias, tipos): criar, renomear, excluir, reordenar */
 /* ---------------------------------------------------------------------- */
 
+const WISHLIST_CATEGORIES = ["Lazer", "Skincare", "Haircare", "Quarto", "Utensílios", "Higiene", "Maquiagem", "Roupas", "Acessórios", "Saúde", "Casa", "Estudos", "Tecnologia", "Presentes", "Outros"];
+
 const LIST_REGISTRY = {
   cardTopic: {
     label: "Tópicos dos cards",
@@ -306,7 +308,7 @@ const LIST_REGISTRY = {
     defaults: [{ id: "diario", name: "Diário" }, { id: "semanal", name: "Semanal" }, { id: "mensal", name: "Mensal" }],
   },
   wishCategory: { label: "Categorias da Wishlist", kind: "strings", settingsKey: "wishCategories", usedBy: [["shopping", "category"]],
-    defaults: ["Casa", "Roupas", "Beleza", "Tecnologia", "Outros"].map((n) => ({ id: n, name: n })) },
+    defaults: WISHLIST_CATEGORIES.map((n) => ({ id: n, name: n })) },
   visionCategory: { label: "Categorias do Vision Board", kind: "strings", settingsKey: "visionCategories", usedBy: [["vision", "category"]],
     defaults: ["pessoal", "carreira", "saúde", "viagens"].map((n) => ({ id: n, name: n })) },
   selfcareCategory: { label: "Categorias do Self-care", kind: "strings", settingsKey: "selfcareCategories", usedBy: [["selfcare", "category"]],
@@ -333,7 +335,7 @@ const LIST_REGISTRY = {
     label: "Prioridades dos cursos", kind: "strings", settingsKey: "coursePriorities", usedBy: [["study", "priority"]],
     defaults: ["Importante fazer", "Quero muito fazer", "Pode esperar"].map((name) => ({ id: name, name })),
   },
-  productStatus: { label: "Status dos produtos de rotina", closedFlag: true, flagLabel: "precisa recomprar", usedBy: [["shopping", "status", (it) => inferShoppingKind(it) === "rotina"]],
+  productStatus: { label: "Status dos produtos de rotina", closedFlag: true, flagLabel: "precisa recomprar", usedBy: [["shopping", "status", (it) => ["rotina", "produto"].includes(inferShoppingKind(it))]],
     defaults: [{ id: "ainda tem", name: "Ainda tem" }, { id: "acabou", name: "Acabou", closed: true }, { id: "quero recomprar", name: "Quero recomprar", closed: true }, { id: "comprado", name: "Comprado" }, { id: "cancelado", name: "Cancelado", closed: true }] },
   workoutStatus: {
     label: "Status dos exercícios",
@@ -370,6 +372,21 @@ function getList(key) {
   }
   const l = ACTIVE_SETTINGS.lists && ACTIVE_SETTINGS.lists[key];
   return Array.isArray(l) ? l : reg.defaults;
+}
+function wishlistCategoryOptions(extra = []) {
+  return Array.from(new Set([
+    ...WISHLIST_CATEGORIES,
+    ...getList("wishCategory").map((category) => category.name),
+    ...extra.filter(Boolean),
+  ]));
+}
+function WishlistCategorySelect({ value, onChange, emptyLabel = "Sem categoria", extra = [] }) {
+  return (
+    <select className="cr-select" value={value || ""} onChange={(event) => onChange(event.target.value)}>
+      <option value="">{emptyLabel}</option>
+      {wishlistCategoryOptions(extra).map((category) => <option key={category} value={category}>{category}</option>)}
+    </select>
+  );
 }
 function listName(key, id) {
   const it = getList(key).find((i) => i.id === id);
@@ -443,7 +460,7 @@ function CardImage({ item, src, alt = "", style = {}, onClick }) {
   const image = cardImageValues(item);
   const { borderRadius = 10, marginTop, marginBottom } = style;
   const frame = useRef(null);
-  const [insets, setInsets] = useState({ left: 0, right: 0 });
+  const [insets, setInsets] = useState({ left: 0, right: 0, top: 0 });
   useLayoutEffect(() => {
     const card = frame.current?.closest(".cr-card");
     if (!card) return undefined;
@@ -451,7 +468,9 @@ function CardImage({ item, src, alt = "", style = {}, onClick }) {
       const cardStyle = window.getComputedStyle(card);
       const left = parseFloat(cardStyle.paddingLeft) || 0;
       const right = parseFloat(cardStyle.paddingRight) || 0;
-      setInsets((current) => current.left === left && current.right === right ? current : { left, right });
+      const top = parseFloat(cardStyle.paddingTop) || 0;
+      setInsets((current) => current.left === left && current.right === right && current.top === top
+        ? current : { left, right, top });
     };
     updateInsets();
     const observer = new ResizeObserver(updateInsets);
@@ -464,11 +483,20 @@ function CardImage({ item, src, alt = "", style = {}, onClick }) {
       width: `calc(100% + ${insets.left + insets.right}px)`,
       marginLeft: -insets.left,
       marginRight: -insets.right,
-      marginTop,
+      marginTop: marginTop ?? -insets.top,
       marginBottom,
-      borderRadius,
+      borderRadius: insets.top ? "15px 15px 10px 10px" : borderRadius,
     }} />
   );
+}
+
+function CardImagePlaceholder({ label = "Adicionar imagem", onClick }) {
+    const content = <><ImageIcon size={18} /><span>{label}</span></>;
+    return onClick ? (
+      <button type="button" className="cr-card-image-placeholder" onClick={onClick}>{content}</button>
+    ) : (
+      <div className="cr-card-image-placeholder">{content}</div>
+    );
 }
 
 function CardImagePreviewEditor({ src, form, setForm }) {
@@ -565,7 +593,7 @@ function CardPersonalizationButton({ item, onSave, hasImage = false, imageSrc = 
     <>
       <button type="button" className="cr-btn ghost" title="Personalizar card" aria-label="Personalizar card"
         onClick={(event) => { event.stopPropagation(); setOpen(true); }}>
-        <Palette size={13} /> Personalizar
+        <Palette size={13} /> <span className="cr-card-customize-label">Personalizar</span>
       </button>
       {open && <CardPersonalizationModal item={item} imageSrc={imageSrc} onSave={onSave} hasImage={hasImage} onClose={() => setOpen(false)} />}
     </>
@@ -1150,9 +1178,19 @@ const GlobalStyle = () => (
     .cr-grid { display: grid; gap: 16px; }
     .cr-grid > * { min-width: 0; }
     .cr-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .cr-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .cr-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .cr-grid-3, .cr-grid-4 { grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); }
     .cr-row { display: flex; align-items: center; gap: 10px; }
+    .cr-card .cr-row { min-width: 0; max-width: 100%; }
+    .cr-card-heading { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; max-width: 100%; }
+    .cr-card-heading h3 { width: 100%; min-width: 0; overflow-wrap: break-word; word-break: normal; }
+    .cr-card-heading-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 2px; min-width: 0; max-width: 100%; }
+    .cr-card-heading-actions .cr-btn { flex: 0 0 auto; }
+    .cr-card-image-placeholder {
+      width: calc(100% + 40px); aspect-ratio: 16 / 9; margin: -18px -20px 8px;
+      border: 1.5px dashed var(--line); border-radius: 15px 15px 10px 10px;
+      background: #FBF8F4; color: var(--ink-soft); display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 4px; cursor: pointer; font: inherit;
+    }
     .cr-btn {
       display: inline-flex; align-items: center; gap: 6px; border-radius: 10px;
       padding: 8px 14px; font-size: 13.5px; font-weight: 600; cursor: pointer;
@@ -1214,7 +1252,6 @@ const GlobalStyle = () => (
     .cr-mobile-nav, .cr-mobile-drawer-backdrop { display: none; }
     @media (min-width: 861px) and (max-width: 1100px) {
       .cr-main { padding-right: 24px; padding-left: 24px; }
-      .cr-grid-3, .cr-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 860px) {
       .central-root { flex-direction: column; height: 100dvh; min-height: 100dvh; overflow: hidden; }
@@ -1224,7 +1261,7 @@ const GlobalStyle = () => (
       .cr-fullpage-head { flex-wrap: wrap; padding: calc(12px + env(safe-area-inset-top)) 16px 12px; }
       .cr-fullpage-body { padding: 16px 16px calc(80px + env(safe-area-inset-bottom)); }
       .cr-main { width: 100%; max-width: none; min-height: 0; height: auto; overflow-y: auto; padding: calc(18px + env(safe-area-inset-top)) 16px calc(92px + env(safe-area-inset-bottom)); }
-      .cr-grid-2, .cr-grid-3, .cr-grid-4 { grid-template-columns: minmax(0, 1fr); }
+      .cr-grid-2 { grid-template-columns: minmax(0, 1fr); }
       .cr-personal-card-wide { grid-column: span 1; }
       .cr-row { flex-wrap: wrap; }
       .cr-row > .cr-field { flex: 1 1 220px !important; min-width: 0; }
@@ -1264,6 +1301,10 @@ const GlobalStyle = () => (
       .central-root .cr-input, .central-root .cr-select, .central-root .cr-textarea,
       .central-root input, .central-root select, .central-root textarea { min-height: 44px; font-size: 16px; }
       .central-root .cr-textarea { min-height: 90px; }
+    }
+    @media (max-width: 520px) {
+      .cr-card-heading-actions .cr-card-customize-label { display: none; }
+      .cr-card-image-placeholder { width: calc(100% + 40px); }
     }
   `}</style>
 );
@@ -1614,7 +1655,7 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
         );
       }
       case "weekCalendar": {
-        return <GoogleAgendaView gcal={gcal} setGcal={setGcal} />;
+        return <GoogleAgendaView gcal={gcal} setGcal={setGcal} compactHeader />;
       }
       case "financeCategory": {
         const catData = expenseCategoryData(finance, todayStr().slice(0, 7));
@@ -1669,7 +1710,7 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
               <div aria-hidden="true" style={{ width: 112, height: 112, flexShrink: 0, borderRadius: 10, background: "linear-gradient(145deg, #F0D9CF, #C77B6C)", color: "#68100D", display: "grid", placeItems: "center" }}>
                 <Music2 size={42} strokeWidth={1.8} />
               </div>
-              <p style={{ margin: 0, lineHeight: 1.7 }}>“Hoje estou feliz, acordei com o pé direito<br />
+              <p style={{ margin: 0, lineHeight: 1.7, fontWeight: 700 }}>“Hoje estou feliz, acordei com o pé direito<br />
                 E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
             </div>
           </section>
@@ -2098,21 +2139,14 @@ function GoalCard({ g, areas, onView, onEdit, onRemove, onCustomize, dimmed }) {
       {g.image ? (
         <CardImage item={g} src={g.image} style={{ borderRadius: 10, marginBottom: 8 }} />
       ) : (
-        <div style={{
-          width: "100%", height: 76, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
-          background: "#FBF8F4", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          gap: 3, color: "var(--ink-soft)",
-        }}>
-          <ImageIcon size={16} />
-          <span style={{ fontSize: 11 }}>Sem imagem</span>
-        </div>
+        <CardImagePlaceholder label="Sem imagem" />
       )}
-      <div className="cr-row" style={{ justifyContent: "space-between" }}>
+      <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{g.name}</h3>
-        <div className="cr-row" style={{ gap: 4 }}>
+        <div className="cr-card-heading-actions">
           <CardPersonalizationButton item={g} onSave={onCustomize} hasImage />
-          <button className="cr-btn ghost" aria-label="Editar meta" onClick={(event) => { event.stopPropagation(); onEdit(); }}><Pencil size={14} /></button>
-          <button className="cr-btn ghost danger" aria-label="Excluir meta" onClick={(event) => { event.stopPropagation(); onRemove(); }}><Trash2 size={14} /></button>
+          <button className="cr-btn ghost" aria-label="Editar meta" title="Editar" onClick={(event) => { event.stopPropagation(); onEdit(); }}><Pencil size={14} /></button>
+          <button className="cr-btn ghost danger" aria-label="Excluir meta" title="Excluir" onClick={(event) => { event.stopPropagation(); onRemove(); }}><Trash2 size={14} /></button>
         </div>
       </div>
       <div className="cr-row" style={{ margin: "8px 0" }}>
@@ -3776,12 +3810,12 @@ function NotesView({ notes, setNotes, areas }) {
         {filtered.map((n) => (
           <div className={`cr-card ${personalizedCardClass(n)}`} key={n.id} style={personalizedCardStyle(n)}>
             {n.image && <CardImage item={n} src={n.image} alt="" style={{ borderRadius: 10, marginBottom: 8 }} />}
-            <div className="cr-row" style={{ justifyContent: "space-between" }}>
+            <div className="cr-row cr-card-heading">
               <h3 style={{ margin: 0, fontSize: 15 }} className="cr-serif">{n.title}</h3>
-              <div className="cr-row" style={{ gap: 2 }}>
+              <div className="cr-card-heading-actions">
                 <CardPersonalizationButton item={n} onSave={(patch) => save({ ...n, ...patch })} />
-                <button className="cr-btn ghost" onClick={() => setEditing(n)}><Pencil size={13} /></button>
-                <button className="cr-btn ghost danger" onClick={() => remove(n.id)}><Trash2 size={13} /></button>
+                <button className="cr-btn ghost" aria-label="Editar nota" title="Editar" onClick={() => setEditing(n)}><Pencil size={13} /></button>
+                <button className="cr-btn ghost danger" aria-label="Excluir nota" title="Excluir" onClick={() => remove(n.id)}><Trash2 size={13} /></button>
               </div>
             </div>
             <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "8px 0" }}>{n.content}</p>
@@ -4776,7 +4810,7 @@ function gcalMergedEvents(gcal) {
     (c.events || []).map((e) => ({ ...e, id: `${c.id}:${e.id}`, calId: c.id, calName: c.name, color: c.color })));
 }
 
-function GoogleAgendaView({ gcal, setGcal }) {
+function GoogleAgendaView({ gcal, setGcal, compactHeader = false }) {
   const [mode, setMode] = useState("mes");
   const [offset, setOffset] = useState(0);
   const [showBreaks, setShowBreaks] = useState(false);
@@ -4888,12 +4922,14 @@ function GoogleAgendaView({ gcal, setGcal }) {
       <div className="cr-card" style={{ borderLeft: `5px solid ${GCAL_BLUE}`, marginTop: 14 }}>
         <div className="cr-row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
           <div>
-            <p className="cr-serif" style={{ margin: 0, fontSize: 17, color: TITLE_INK, fontWeight: 700 }}><span style={{ color: TITLE_WINE }}>GOOGLE AGENDA:</span> o que realmente está agendado</p>
-            <p className="cr-sub" style={{ margin: "2px 0 0" }}>
-              {gcal.calendars.length === 0
-                ? "Nenhuma agenda conectada ainda. Em \"Gerenciar agendas\", cole os links secretos .ics das suas agendas para ver todas aqui. Esta visão não mistura com as Rotinas."
-                : `${gcal.calendars.filter((c) => c.enabled).length} de ${gcal.calendars.length} agenda(s) ativa(s), ${merged.length} evento(s)${updated ? `, atualizado em ${updated.toLocaleDateString("pt-BR")} às ${updated.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}. Esta visão não mistura com as Rotinas.`}
-            </p>
+            {!compactHeader && <>
+              <p className="cr-serif" style={{ margin: 0, fontSize: 17, color: TITLE_INK, fontWeight: 700 }}><span style={{ color: TITLE_WINE }}>GOOGLE AGENDA:</span> o que realmente está agendado</p>
+              <p className="cr-sub" style={{ margin: "2px 0 0" }}>
+                {gcal.calendars.length === 0
+                  ? "Nenhuma agenda conectada ainda. Em \"Gerenciar agendas\", cole os links secretos .ics das suas agendas para ver todas aqui. Esta visão não mistura com as Rotinas."
+                  : `${gcal.calendars.filter((c) => c.enabled).length} de ${gcal.calendars.length} agenda(s) ativa(s), ${merged.length} evento(s)${updated ? `, atualizado em ${updated.toLocaleDateString("pt-BR")} às ${updated.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}. Esta visão não mistura com as Rotinas.`}
+              </p>
+            </>}
             {gcal.calendars.filter((c) => c.lastError).map((c) => (
               <p key={c.id} className="cr-sub" role="alert" style={{ color: "#7A1712", margin: "8px 0 0" }}>{c.name}: {c.lastError} Abra "Gerenciar agendas" para tentar de novo.</p>
             ))}
@@ -6392,19 +6428,14 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
       {on("image") && (b.image ? (
         <CardImage item={b} src={b.image} style={{ borderRadius: 10, marginBottom: 8 }} />
       ) : (
-        <div style={{
-          width: "100%", height: 70, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
-          background: "#FBF8F4", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          gap: 3, color: "var(--ink-soft)",
-        }}>
-          <ImageIcon size={16} />
-          <span style={{ fontSize: 11 }}>Adicionar imagem</span>
-        </div>
+        <CardImagePlaceholder label="Adicionar imagem" onClick={stop(onEdit)} />
       ))}
-      <div className="cr-row" style={{ justifyContent: "space-between" }}>
+      <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{m && on("maintenance") ? `${statusEmoji(m.level)} ` : ""}{b.name}</h3>
-        <CardPersonalizationButton item={b} onSave={onCustomize} hasImage />
-        <button className="cr-btn ghost danger" title="Excluir" onClick={stop(onRemove)}><Trash2 size={13} /></button>
+        <div className="cr-card-heading-actions">
+          <CardPersonalizationButton item={b} onSave={onCustomize} hasImage />
+          <button className="cr-btn ghost danger" aria-label="Excluir procedimento" title="Excluir" onClick={stop(onRemove)}><Trash2 size={13} /></button>
+        </div>
       </div>
       <div className="cr-row" role="group" aria-label={`Avaliação de ${b.name}`} style={{ gap: 2, marginTop: 6 }}>
         {Array.from({ length: 5 }, (_, index) => {
@@ -7090,7 +7121,14 @@ function parseProductStatus(notes) {
 }
 
 function inferShoppingKind(s) {
-  if (s.kind) return s.kind;
+  if (s.kind) {
+    const storedKind = String(s.kind).trim().toLowerCase();
+    if (storedKind === "desejos") return "desejo";
+    if (storedKind === "produtos") return "produto";
+    if (storedKind === "rotinas") return "rotina";
+    if (storedKind === "recomprar") return "produto";
+    return storedKind;
+  }
   const cat = (s.category || "").trim().toLowerCase();
   if (cat === "skin care" || cat === "hair care" || cat === "skincare" || cat === "haircare") return "rotina";
   if ((s.notes || "").toLowerCase().includes("status:") && looksLikeProductName(s.name)) return "rotina";
@@ -7118,8 +7156,10 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
   const [purchasing, setPurchasing] = useState(null);
+  const [editingPurchase, setEditingPurchase] = useState(null);
   const [tab, setTab] = useState("desejo");
   const [filter, setFilter] = useState("todos");
+  const [filterKind, setFilterKind] = useState("todos");
   const [filterCategory, setFilterCategory] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
   const [customizingCards, setCustomizingCards] = useState(false);
@@ -7129,7 +7169,8 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     if (!["shopping"].includes(originTarget?.type)) return;
     const item = shopping.find((entry) => entry.id === originTarget.sourceId);
     if (item) {
-      setTab(inferShoppingKind(item));
+      setTab("desejo");
+      setFilterKind("todos");
       setFilter("todos");
       setFilterCategory("todas");
       setEditing(item);
@@ -7163,26 +7204,47 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     }));
     setPurchasing(null);
   };
+  const updatePurchase = (item, updatedPurchase, purchaseIndex) => {
+    const purchaseHistory = (Array.isArray(item.purchaseHistory) ? item.purchaseHistory : [])
+      .map((purchase, index) => index === purchaseIndex ? updatedPurchase : purchase);
+    const latest = latestHistoryEntry(purchaseHistory);
+    setShopping(upsertById(shopping, {
+      ...item,
+      purchaseHistory,
+      lastPurchaseDate: latest?.date || "",
+      nextPurchaseDate: latest ? nextFinanceDate(latest.date, item.purchaseFrequency, item.productDurationDays) : "",
+    }));
+    setEditingPurchase(null);
+  };
 
   const withKind = shopping.filter((s) => !s.archived).map((s) => {
     const kind = inferShoppingKind(s);
-    return { ...s, _kind: kind, _status: kind === "rotina" ? productStatus(s) : s.status };
+    const isProduct = kind === "rotina" || kind === "produto";
+    return { ...s, _kind: kind, _status: isProduct ? productStatus(s) : (s.status || "desejado") };
   });
-  const inTab = tab === "recomprar"
-    ? withKind.filter((item) => item._status === "comprado" || item._status === "quero recomprar")
-    : withKind.filter((s) => s._kind === tab);
-  const filtered = inTab.filter((s) => (filter === "todos" || s._status === filter) && (filterCategory === "todas" || s.category === filterCategory));
-  const categories = Array.from(new Set([
-    ...getList("wishCategory").map((category) => category.name),
-    ...shopping.map((item) => item.category).filter(Boolean),
-  ]));
+  const shouldRebuy = (item) => item._status === "comprado" || item._status === "quero recomprar" || item._status === "acabou";
+  const inTab = withKind.filter((item) => {
+    if (filterKind === "desejos") return item._kind === "desejo";
+    if (filterKind === "produtos") return item._kind === "produto";
+    if (filterKind === "rotinas") return item._kind === "rotina";
+    if (filterKind === "recomprar") return shouldRebuy(item);
+    return true;
+  });
+  const filtered = inTab.filter((item) =>
+    (filter === "todos" || (filter === "recomprar" ? shouldRebuy(item) : item._status === filter))
+    && (filterCategory === "todas" || item.category === filterCategory));
+  const categories = wishlistCategoryOptions(shopping.map((item) => item.category));
   const purchaseRows = shopping.flatMap((item) => (Array.isArray(item.purchaseHistory) ? item.purchaseHistory : [])
     .map((purchase, index) => ({
       id: `${item.id}:${purchase.id || `${purchase.date}-${index}`}`,
+      itemId: item.id,
+      purchaseId: purchase.id,
+      purchaseIndex: index,
+      sourcePurchase: purchase,
       itemName: item.name,
       date: purchase.date,
       amount: Number(purchase.amount) || 0,
-      category: item.category || "",
+      category: purchase.category || item.category || "",
       purchaseClass: item.purchaseClass || (item.purchaseFrequency === "pontual" ? "unico" : "periodico"),
       description: purchase.description || "",
     }))
@@ -7206,9 +7268,18 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     totals.set(purchase.itemName, current);
     return totals;
   }, new Map()).values()).sort((a, b) => b.total - a.total);
-  const purchaseCategories = Array.from(new Set(purchaseRows.map((purchase) => purchase.category).filter(Boolean)));
+  const purchaseCategories = wishlistCategoryOptions([...purchaseRows.map((purchase) => purchase.category), ...shopping.map((item) => item.category)]);
+  const editPurchaseRow = (row) => {
+    const item = shopping.find((entry) => entry.id === row.itemId);
+    if (!item) return;
+    setEditingPurchase({
+      item,
+      purchase: { ...row.sourcePurchase, id: row.purchaseId || uid() },
+      index: row.purchaseIndex,
+    });
+  };
   const totalDesejado = withKind.filter((s) => s._kind === "desejo" && !isClosedItem("wishStatus", s.status)).reduce((sum, s) => sum + Number(s.price || 0), 0);
-  const toRebuy = withKind.filter((s) => s._kind === "rotina" && isClosedItem("productStatus", s._status)).length;
+  const toRebuy = withKind.filter((s) => (s._kind === "rotina" || s._kind === "produto") && isClosedItem("productStatus", s._status)).length;
   const originalOf = (s) => shopping.find((x) => x.id === s.id);
 
   const byCategory = () => {
@@ -7221,7 +7292,6 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     return Object.entries(map);
   };
 
-  const statusKey = tab === "rotina" ? "productStatus" : "wishStatus";
   const restockDue = inTab.filter((item) => {
     const lastPurchase = item.lastPurchaseDate || item.purchaseHistory?.[0]?.date;
     if (!lastPurchase) return false;
@@ -7232,12 +7302,6 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     const daysUntil = Math.ceil((Date.parse(`${due}T00:00:00Z`) - Date.parse(`${todayStr()}T00:00:00Z`)) / 86400000);
     return daysUntil <= 7;
   });
-  const statusOptions = tab === "recomprar"
-    ? Array.from(new Map(inTab.map((item) => [
-      item._status,
-      { id: item._status, name: listName(item._kind === "rotina" ? "productStatus" : "wishStatus", item._status) },
-    ])).values())
-    : getList(statusKey);
 
   return (
     <div>
@@ -7245,7 +7309,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
         <div>
           <h1 className="cr-h1 cr-serif">Wishlist</h1>
           <p className="cr-sub">
-            {tab === "desejo" ? `${fmtBRL(totalDesejado)} em itens desejados.` : tab === "recomprar" ? `${inTab.length} produto(s) na lista de recompra.` : tab === "finance" ? `${purchaseRows.length} compra(s) registrada(s), somando ${fmtBRL(purchaseRows.reduce((sum, purchase) => sum + purchase.amount, 0))}.` : `${inTab.length} produtos na rotina${toRebuy ? `, ${toRebuy} para recomprar` : ""}.`}
+            {tab === "desejo" ? `${fmtBRL(totalDesejado)} em itens desejados.` : `${purchaseRows.length} compra(s) registrada(s), somando ${fmtBRL(purchaseRows.reduce((sum, purchase) => sum + purchase.amount, 0))}.`}
           </p>
         </div>
         {tab !== "finance" && (
@@ -7258,8 +7322,6 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
 
       <div className="cr-tabbar" style={{ marginTop: 14 }}>
         <button className={`cr-tabbtn ${tab === "desejo" ? "active" : ""}`} onClick={() => { setTab("desejo"); setFilter("todos"); setFilterCategory("todas"); }}>Desejos</button>
-        <button className={`cr-tabbtn ${tab === "rotina" ? "active" : ""}`} onClick={() => { setTab("rotina"); setFilter("todos"); setFilterCategory("todas"); }}>Produtos e rotina</button>
-        <button className={`cr-tabbtn ${tab === "recomprar" ? "active" : ""}`} onClick={() => { setTab("recomprar"); setFilter("todos"); setFilterCategory("todas"); }}>Recomprar</button>
         <button className={`cr-tabbtn ${tab === "finance" ? "active" : ""}`} onClick={() => setTab("finance")}>Financeiro</button>
       </div>
 
@@ -7326,6 +7388,8 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
                   <span className="cr-chip">{purchase.category || "Sem categoria"}</span>
                   <span className="cr-chip">{purchaseClassLabel(purchase.purchaseClass)}</span>
                   <strong>{fmtBRL(purchase.amount)}</strong>
+                  <button type="button" className="cr-btn ghost" aria-label={`Editar gasto de ${purchase.itemName}`}
+                    title="Editar gasto" onClick={() => editPurchaseRow(purchase)}><Pencil size={13} /></button>
                 </div>
               ))}
             </div>}
@@ -7333,11 +7397,20 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
       ) : (
       <>
       <div className="cr-row" style={{ margin: "14px 0", flexWrap: "wrap" }}>
-        <select className="cr-select" style={{ maxWidth: 190 }} value={filter} onChange={(e) => setFilter(e.target.value)}>
-          <option value="todos">Todos os status</option>
-          {statusOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        <select className="cr-select" aria-label="Filtrar por tipo" style={{ maxWidth: 190 }} value={filterKind} onChange={(e) => setFilterKind(e.target.value)}>
+          <option value="todos">Todos</option>
+          <option value="desejos">Desejos</option>
+          <option value="produtos">Produtos</option>
+          <option value="rotinas">Rotinas</option>
+          <option value="recomprar">Recomprar</option>
         </select>
-        {tab !== "recomprar" && <button className="cr-btn" title="Gerenciar opções (criar, renomear, excluir, reordenar)" onClick={() => ctx.openManager(statusKey)}><SettingsIcon size={13} /> Gerenciar status</button>}
+        <select className="cr-select" aria-label="Filtrar por status" style={{ maxWidth: 190 }} value={filter} onChange={(e) => setFilter(e.target.value)}>
+          <option value="todos">Todos os status</option>
+          <option value="desejado">Desejado</option>
+          <option value="comprado">Comprado</option>
+          <option value="ganhei">Ganhei</option>
+          <option value="recomprar">Recomprar</option>
+        </select>
         <select className="cr-select" style={{ maxWidth: 200 }} value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
           <option value="todas">Todas as categorias</option>
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -7350,14 +7423,14 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
 
       {viewAll || filterCategory !== "todas" ? (
         <div className="cr-grid cr-grid-3">
-          {filtered.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
+          {filtered.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={filterKind === "recomprar"} />)}
         </div>
       ) : (
         byCategory().map(([cat, items]) => (
           <div key={cat} style={{ marginBottom: 22 }}>
             <SectionTitle title={cat} count={`${items.length} ${items.length === 1 ? "item" : "itens"}`} />
             <div className="cr-grid cr-grid-3">
-              {items.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
+              {items.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={filterKind === "recomprar"} />)}
             </div>
           </div>
         ))
@@ -7365,10 +7438,17 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
       </>
       )}
 
-      {editing && <ShoppingModal item={editing === "new" ? null : editing} defaultKind={tab === "recomprar" ? "rotina" : tab} onSave={save} onClose={() => setEditing(null)} />}
+      {editing && <ShoppingModal item={editing === "new" ? null : editing}
+        defaultKind={filterKind === "produtos" ? "produto" : filterKind === "rotinas" || filterKind === "recomprar" ? "rotina" : "desejo"}
+        onSave={save} onClose={() => setEditing(null)} />}
       {customizingCards && <WishlistCardFieldsModal settings={settings || {}} setSettings={setSettings} onClose={() => setCustomizingCards(false)} />}
-      {purchasing && <SourceExpenseModal item={purchasing} title={`Confirmar compra: ${purchasing.name}`} amount={purchasing.price} allowNoAmount
+      {purchasing && <SourceExpenseModal item={purchasing} title={`Confirmar compra: ${purchasing.name}`} amount={purchasing.price}
+        allowNoAmount categoryOptions={purchaseCategories}
         onSave={(entry) => registerPurchase(purchasing, entry)} onClose={() => setPurchasing(null)} />}
+      {editingPurchase && <SourceExpenseModal item={editingPurchase.item} purchase={editingPurchase.purchase}
+        categoryOptions={purchaseCategories}
+        title={`Editar gasto: ${editingPurchase.item.name}`}
+        onSave={(entry) => updatePurchase(editingPurchase.item, entry, editingPurchase.index)} onClose={() => setEditingPurchase(null)} />}
     </div>
   );
 }
@@ -7421,20 +7501,22 @@ function WishlistCardFieldsModal({ settings, setSettings, onClose }) {
 }
 
 function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onCustomize, forcePurchase }) {
-  const isRoutine = s._kind === "rotina";
+  const isRoutine = s._kind === "rotina" || s._kind === "produto";
   const st = s._status || s.status;
   const show = (key) => wishlistCardFieldOn(settings || {}, key);
   return (
     <div className={`cr-card ${personalizedCardClass(s)}`} style={personalizedCardStyle(s)}>
-      <div className="cr-row" style={{ justifyContent: "space-between" }}>
+      {show("image") && (s.image
+        ? <CardImage item={s} src={s.image} alt={s.name} style={{ marginBottom: 8, borderRadius: 10 }} />
+        : <CardImagePlaceholder onClick={onEdit} />)}
+      <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{s.name}</h3>
-        <div className="cr-row" style={{ gap: 2 }}>
+        <div className="cr-card-heading-actions">
           <CardPersonalizationButton item={s} onSave={onCustomize} />
-          <button className="cr-btn ghost" onClick={onEdit}><Pencil size={13} /></button>
-          <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={13} /></button>
+          <button className="cr-btn ghost" aria-label={`Editar ${s.name}`} title="Editar" onClick={onEdit}><Pencil size={13} /></button>
+          <button className="cr-btn ghost danger" aria-label={`Excluir ${s.name}`} title="Excluir" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
       </div>
-      {show("image") && s.image && <CardImage item={s} src={s.image} alt={s.name} style={{ marginTop: 8, marginBottom: 8, borderRadius: 10 }} />}
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
         {show("category") && s.category && <span className="cr-chip">{s.category}</span>}
         {show("priority") && <PriorityChip id={s.priority} />}
@@ -7461,8 +7543,13 @@ function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onCustomize, 
   );
 }
 
-function SourceExpenseModal({ item, title, amount, onSave, onClose, allowNoAmount = false }) {
-  const [form, setForm] = useState({ date: todayStr(), amount: Number(amount) || "", description: "" });
+function SourceExpenseModal({ item, title, amount, onSave, onClose, allowNoAmount = false, purchase, categoryOptions }) {
+  const [form, setForm] = useState({
+    date: purchase?.date || todayStr(),
+    amount: purchase?.amount ?? (Number(amount) || ""),
+    description: purchase?.description || "",
+    category: purchase?.category || item.category || "",
+  });
   const [saving, setSaving] = useState(false);
   const save = () => {
     const hasAmount = String(form.amount).trim() !== "";
@@ -7470,8 +7557,8 @@ function SourceExpenseModal({ item, title, amount, onSave, onClose, allowNoAmoun
       || (allowNoAmount && hasAmount && !(Number(form.amount) > 0)) || saving) return;
     setSaving(true);
     onSave({
-      id: uid(), date: form.date, amount: hasAmount ? Number(form.amount) : null,
-      description: form.description.trim(), category: item.category || "",
+      id: purchase?.id || uid(), date: form.date, amount: hasAmount ? Number(form.amount) : null,
+      description: form.description.trim(), category: categoryOptions ? form.category : item.category || "",
       priority: item.priority || "media",
     });
   };
@@ -7484,28 +7571,31 @@ function SourceExpenseModal({ item, title, amount, onSave, onClose, allowNoAmoun
           onChange={(event) => setForm({ ...form, amount: event.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Observação (opcional)</label>
         <input className="cr-input" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></div>
+      {categoryOptions && <div className="cr-field"><label className="cr-label">Categoria</label>
+        <WishlistCategorySelect value={form.category} extra={[form.category]} onChange={(category) => setForm({ ...form, category })} /></div>}
       <button className="cr-btn primary" disabled={saving || !form.date || form.date > todayStr() || (!allowNoAmount && !(Number(form.amount) > 0)) || (allowNoAmount && String(form.amount).trim() !== "" && !(Number(form.amount) > 0))}
-        style={{ width: "100%", justifyContent: "center" }} onClick={save}>Registrar despesa real</button>
+        style={{ width: "100%", justifyContent: "center" }} onClick={save}>{purchase ? "Salvar alterações" : "Registrar despesa real"}</button>
     </Modal>
   );
 }
 
 function ShoppingModal({ item, defaultKind, onSave, onClose }) {
   const [form, setForm] = useState(item
-    ? { ...item, kind: inferShoppingKind(item), purchaseClass: item.purchaseClass || (item.purchaseFrequency === "pontual" ? "unico" : "periodico"), status: inferShoppingKind(item) === "rotina" ? productStatus(item) : item.status }
-    : { name: "", category: "", store: "", price: "", priority: "media", link: "", image: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" ? "ainda tem" : "desejado"), desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
+    ? { ...item, kind: inferShoppingKind(item), purchaseClass: item.purchaseClass || (item.purchaseFrequency === "pontual" ? "unico" : "periodico"), status: inferShoppingKind(item) === "rotina" || inferShoppingKind(item) === "produto" ? productStatus(item) : item.status }
+    : { name: "", category: "", store: "", price: "", priority: "media", link: "", image: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" || defaultKind === "produto" ? "ainda tem" : "desejado"), desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
   const autoStatus = useAutoSave(form, onSave, (form) => ({
     ...form,
     price: Number(form.price) || 0,
     productDurationDays: Number(form.productDurationDays) || 0,
   }));
-  const isRoutine = form.kind === "rotina";
-  const changeKind = (k) => setForm({ ...form, kind: k, status: k === "rotina" ? "ainda tem" : "desejado" });
+  const isRoutine = form.kind === "rotina" || form.kind === "produto";
+  const changeKind = (k) => setForm({ ...form, kind: k, status: k === "rotina" || k === "produto" ? "ainda tem" : "desejado" });
   return (
     <Modal title={item ? "Editar item" : "Novo item"} onClose={onClose}>
       <div className="cr-field"><label className="cr-label">Tipo</label>
         <select className="cr-select" value={form.kind} onChange={(e) => changeKind(e.target.value)}>
           <option value="desejo">Desejo (quero comprar)</option>
+          <option value="produto">Produto</option>
           <option value="rotina">Produto de rotina (uso ou quero usar)</option>
         </select></div>
       <div className="cr-field"><label className="cr-label">Produto</label>
@@ -7517,7 +7607,7 @@ function ShoppingModal({ item, defaultKind, onSave, onClose }) {
         </select></div>
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Categoria</label>
-          <ManagedSelect listKey="wishCategory" value={form.category} emptyLabel="Sem categoria" onChange={(v) => setForm({ ...form, category: v })} /></div>
+          <WishlistCategorySelect value={form.category} extra={[form.category]} onChange={(category) => setForm({ ...form, category })} /></div>
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Loja</label>
           <input className="cr-input" value={form.store} onChange={(e) => setForm({ ...form, store: e.target.value })} placeholder="ex: Amazon, Shopee…" /></div>
       </div>
@@ -7687,24 +7777,14 @@ function HobbiesView({ hobbies, setHobbies, originTarget, clearOriginTarget }) {
 function HobbyCard({ h, onView, onEdit, onRemove, onCustomize }) {
   return (
     <div className={`cr-card ${personalizedCardClass(h)}`} style={personalizedCardStyle(h)}>
-      {h.image ? (
-        <CardImage item={h} src={h.image} style={{ borderRadius: 10, marginBottom: 8 }} />
-      ) : (
-        <button onClick={onEdit} style={{
-          width: "100%", height: 90, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
-          background: "#FBF8F4", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          gap: 4, cursor: "pointer", color: "var(--ink-soft)",
-        }}>
-          <ImageIcon size={18} />
-          <span style={{ fontSize: 11.5 }}>Adicionar imagem</span>
-        </button>
-      )}
-      <div className="cr-row" style={{ justifyContent: "space-between" }}>
+      {h.image ? <CardImage item={h} src={h.image} style={{ borderRadius: 10, marginBottom: 8 }} />
+        : <CardImagePlaceholder onClick={onEdit} />}
+      <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{h.name}</h3>
-        <div className="cr-row" style={{ gap: 2 }}>
+        <div className="cr-card-heading-actions">
           <CardPersonalizationButton item={h} onSave={onCustomize} hasImage />
-          <button className="cr-btn ghost" onClick={onEdit}><Pencil size={13} /></button>
-          <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={13} /></button>
+          <button className="cr-btn ghost" aria-label={`Editar ${h.name}`} title="Editar" onClick={onEdit}><Pencil size={13} /></button>
+          <button className="cr-btn ghost danger" aria-label={`Excluir ${h.name}`} title="Excluir" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
       </div>
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
@@ -7896,21 +7976,14 @@ function SelfCareView({ selfcare, setSelfcare }) {
           </div>
         </div>
       ) : (
-        <button onClick={() => setEditing(s)} style={{
-          width: "100%", height: 90, borderRadius: 10, marginBottom: 10, border: "1.5px dashed var(--line)",
-          background: "#FBF8F4", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          gap: 3, cursor: "pointer", color: "var(--ink-soft)",
-        }}>
-          <ImageIcon size={18} />
-          <span style={{ fontSize: 11.5 }}>Adicionar imagem</span>
-        </button>
+        <CardImagePlaceholder onClick={() => setEditing(s)} />
       )}
-      <div className="cr-row" style={{ justifyContent: "space-between" }}>
+      <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{s.title}</h3>
-        <div className="cr-row" style={{ gap: 2 }}>
+        <div className="cr-card-heading-actions">
           <CardPersonalizationButton item={s} onSave={(patch) => save({ ...(selfcare.find((item) => item.id === s.id) || s), ...patch })} hasImage />
-          <button className="cr-btn ghost" onClick={() => setEditing(s)}><Pencil size={13} /></button>
-          <button className="cr-btn ghost danger" onClick={() => remove(s.id)}><Trash2 size={13} /></button>
+          <button className="cr-btn ghost" aria-label={`Editar ${s.title}`} title="Editar" onClick={() => setEditing(s)}><Pencil size={13} /></button>
+          <button className="cr-btn ghost danger" aria-label={`Excluir ${s.title}`} title="Excluir" onClick={() => remove(s.id)}><Trash2 size={13} /></button>
         </div>
       </div>
       <div className="cr-row" style={{ marginTop: 6, flexWrap: "wrap" }}>
