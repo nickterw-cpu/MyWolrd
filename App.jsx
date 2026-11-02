@@ -1410,27 +1410,11 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
               <div aria-hidden="true" style={{ width: 112, height: 112, flexShrink: 0, borderRadius: 10, background: "linear-gradient(145deg, #F0D9CF, #C77B6C)", color: "#68100D", display: "grid", placeItems: "center" }}>
                 <Music2 size={42} strokeWidth={1.8} />
               </div>
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <div className="cr-row" style={{ justifyContent: "center", gap: 16, margin: "12px 0 4px" }}>
-                  <button className="cr-btn ghost" aria-label="Voltar na simulação" onClick={() => setMusicProgress((value) => Math.max(0, value - 10))} style={{ color: "#FFFDF8" }}><SkipBack size={18} /></button>
-                  <button className="cr-btn" aria-label={musicPlaying ? "Pausar simulação" : "Reproduzir simulação"}
-                    onClick={() => setMusicPlaying((value) => !value)}
-                    style={{ borderRadius: "50%", width: 42, height: 42, justifyContent: "center", background: "#FFFDF8", color: "#8F1111", borderColor: "#FFFDF8" }}>
-                    {musicPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
-                  </button>
-                  <button className="cr-btn ghost" aria-label="Avançar na simulação" onClick={() => setMusicProgress((value) => Math.min(songDuration, value + 10))} style={{ color: "#FFFDF8" }}><SkipForward size={18} /></button>
-                </div>
-                <input aria-label="Progresso da simulação" type="range" min="0" max={songDuration} value={musicProgress}
-                  onChange={(event) => setMusicProgress(Number(event.target.value))} style={{ width: "100%", accentColor: "#FFFDF8" }} />
-                <div className="cr-row" style={{ justifyContent: "space-between", color: "#FFF2ED", fontSize: 11 }}>
-                  <span>{formatPlayerTime(musicProgress)}</span><span>{formatPlayerTime(songDuration)}</span>
-                </div>
-              </div>
             </div>
             <div className="cr-field" style={{ margin: "14px 0 0" }}>
               <label className="cr-label" htmlFor="dashboard-music-lyrics" style={{ color: "#FFF2ED" }}>Letra</label>
-              <p>“Hoje estou feliz, acordei com o pé direito 
-E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
+              <p>“Hoje estou feliz, acordei com o pé direito
+              E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
             </div>
           </section>
         );
