@@ -426,6 +426,7 @@ function CardPersonalizationModal({ item, onSave, hasImage, defaultImageHeight, 
     cardNote: item.cardNote || "",
     cardImageHeight: Number(item.cardImageHeight) || defaultImageHeight,
     cardImageWidth: Number(item.cardImageWidth) || 100,
+    cardImageFit: item.cardImageFit || "contain",
   });
   const imageIsAvailable = hasImage || !!item.image || item.type === "image";
   const save = () => {
@@ -460,6 +461,13 @@ function CardPersonalizationModal({ item, onSave, hasImage, defaultImageHeight, 
       {imageIsAvailable && (
         <>
           <div className="cr-field">
+            <label className="cr-label">Enquadramento</label>
+            <select className="cr-select" value={form.cardImageFit} onChange={(event) => setForm({ ...form, cardImageFit: event.target.value })}>
+              <option value="contain">Imagem completa (sem cortes)</option>
+              <option value="cover">Preencher o espaço (pode cortar)</option>
+            </select>
+          </div>
+          <div className="cr-field">
             <label className="cr-label">Largura da imagem: {form.cardImageWidth}%</label>
             <input type="range" min="40" max="100" step="5" value={form.cardImageWidth}
               onChange={(event) => setForm({ ...form, cardImageWidth: Number(event.target.value) })}
@@ -490,7 +498,7 @@ function personalizedImageStyle(item, defaultHeight, extra = {}) {
   return {
     width: `${Number(item?.cardImageWidth) || 100}%`,
     height: Number(item?.cardImageHeight) || defaultHeight,
-    objectFit: "cover",
+    objectFit: item?.cardImageFit || "contain",
     marginLeft: "auto",
     marginRight: "auto",
     ...extra,
@@ -6984,6 +6992,7 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
   const [filter, setFilter] = useState("todos");
   const [filterCategory, setFilterCategory] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
+  const [customizingCards, setCustomizingCards] = useState(false);
   const [financeFilters, setFinanceFilters] = useState({ query: "", category: "todas", purchaseClass: "todas", month: "", year: "" });
 
   useEffect(() => {
@@ -7033,7 +7042,10 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
     ? withKind.filter((item) => item._status === "comprado" || item._status === "quero recomprar")
     : withKind.filter((s) => s._kind === tab);
   const filtered = inTab.filter((s) => (filter === "todos" || s._status === filter) && (filterCategory === "todas" || s.category === filterCategory));
-  const categories = Array.from(new Set(inTab.map((s) => s.category).filter(Boolean)));
+  const categories = Array.from(new Set([
+    ...getList("wishCategory").map((category) => category.name),
+    ...shopping.map((item) => item.category).filter(Boolean),
+  ]));
   const purchaseRows = shopping.flatMap((item) => (Array.isArray(item.purchaseHistory) ? item.purchaseHistory : [])
     .map((purchase, index) => ({
       id: `${item.id}:${purchase.id || `${purchase.date}-${index}`}`,
@@ -7106,7 +7118,12 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
             {tab === "desejo" ? `${fmtBRL(totalDesejado)} em itens desejados.` : tab === "recomprar" ? `${inTab.length} produto(s) na lista de recompra.` : tab === "finance" ? `${purchaseRows.length} compra(s) registrada(s), somando ${fmtBRL(purchaseRows.reduce((sum, purchase) => sum + purchase.amount, 0))}.` : `${inTab.length} produtos na rotina${toRebuy ? `, ${toRebuy} para recomprar` : ""}.`}
           </p>
         </div>
-        {tab !== "finance" && <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>}
+        {tab !== "finance" && (
+          <div className="cr-row">
+            <button className="cr-btn" onClick={() => setCustomizingCards(true)}><Palette size={13} /> Personalizar card</button>
+            <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
+          </div>
+        )}
       </div>
 
       <div className="cr-tabbar" style={{ marginTop: 14 }}>
@@ -7203,14 +7220,14 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
 
       {viewAll || filterCategory !== "todas" ? (
         <div className="cr-grid cr-grid-3">
-          {filtered.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
+          {filtered.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} forcePurchase={tab === "recomprar"} />)}
         </div>
       ) : (
         byCategory().map(([cat, items]) => (
           <div key={cat} style={{ marginBottom: 22 }}>
             <SectionTitle title={cat} count={`${items.length} ${items.length === 1 ? "item" : "itens"}`} />
             <div className="cr-grid cr-grid-3">
-              {items.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
+              {items.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} forcePurchase={tab === "recomprar"} />)}
             </div>
           </div>
         ))
@@ -7219,13 +7236,15 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
       )}
 
       {editing && <ShoppingModal item={editing === "new" ? null : editing} defaultKind={tab === "recomprar" ? "rotina" : tab} onSave={save} onClose={() => setEditing(null)} />}
+      {customizingCards && <ShoppingCardPersonalization items={inTab} onSave={(item, patch) => save({ ...originalOf(item), ...patch })}
+        onClose={() => setCustomizingCards(false)} />}
       {purchasing && <SourceExpenseModal item={purchasing} title={`Confirmar compra: ${purchasing.name}`} amount={purchasing.price} allowNoAmount
         onSave={(entry) => registerPurchase(purchasing, entry)} onClose={() => setPurchasing(null)} />}
     </div>
   );
 }
 
-function ShoppingCard({ s, onEdit, onRemove, onPurchase, onCustomize, forcePurchase }) {
+function ShoppingCard({ s, onEdit, onRemove, onPurchase, forcePurchase }) {
   const isRoutine = s._kind === "rotina";
   const st = s._status || s.status;
   return (
@@ -7233,7 +7252,6 @@ function ShoppingCard({ s, onEdit, onRemove, onPurchase, onCustomize, forcePurch
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{s.name}</h3>
         <div className="cr-row" style={{ gap: 2 }}>
-          <CardPersonalizationButton item={s} onSave={onCustomize} />
           <button className="cr-btn ghost" onClick={onEdit}><Pencil size={13} /></button>
           <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
@@ -7260,6 +7278,32 @@ function ShoppingCard({ s, onEdit, onRemove, onPurchase, onCustomize, forcePurch
         </button>
       )}
     </div>
+  );
+}
+
+function ShoppingCardPersonalization({ items, onSave, onClose }) {
+  const [selectedId, setSelectedId] = useState(items[0]?.id || "");
+  const [editing, setEditing] = useState(false);
+  const selected = items.find((item) => item.id === selectedId);
+  if (editing && selected) {
+    return <CardPersonalizationModal item={selected} onSave={(patch) => onSave(selected, patch)} onClose={onClose} />;
+  }
+  return (
+    <Modal size="small" title="Personalizar card da Wishlist" onClose={onClose}>
+      {items.length === 0 ? <p className="cr-empty">Não há itens nesta aba para personalizar.</p> : (
+        <>
+          <div className="cr-field">
+            <label className="cr-label">Escolha o item</label>
+            <select className="cr-select" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
+              {items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </div>
+          <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
+            <button type="button" className="cr-btn primary" disabled={!selected} onClick={() => setEditing(true)}>Continuar</button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
