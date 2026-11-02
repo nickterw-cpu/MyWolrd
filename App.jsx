@@ -414,11 +414,12 @@ function cardImageValues(item, defaultHeight = 160) {
 function CardImage({ item, src, alt = "", defaultHeight = 160, style = {}, onClick }) {
   if (!src) return null;
   const image = cardImageValues(item, defaultHeight);
+  const bleed = image.width * 0.2;
   return (
     <div onClick={onClick} style={{
       position: "relative",
       display: "block",
-      width: `${image.width}%`,
+      width: `calc(${image.width}% + ${bleed * 2}px)`,
       height: image.height,
       marginLeft: "auto",
       marginRight: "auto",
