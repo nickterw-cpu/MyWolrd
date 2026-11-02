@@ -6984,7 +6984,7 @@ function purchaseClassLabel(value) {
   return PURCHASE_CLASS_OPTIONS.find((option) => option.value === value)?.label || "Não informado";
 }
 
-function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }) {
+function ShoppingView({ shopping, setShopping, settings, setSettings, originTarget, clearOriginTarget }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
   const [purchasing, setPurchasing] = useState(null);
@@ -7120,7 +7120,7 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
         </div>
         {tab !== "finance" && (
           <div className="cr-row">
-            <button className="cr-btn" onClick={() => setCustomizingCards(true)}><Palette size={13} /> Personalizar card</button>
+            <button className="cr-btn" onClick={() => setCustomizingCards(true)}><Palette size={13} /> Personalizar cards</button>
             <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
           </div>
         )}
@@ -7220,14 +7220,14 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
 
       {viewAll || filterCategory !== "todas" ? (
         <div className="cr-grid cr-grid-3">
-          {filtered.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} forcePurchase={tab === "recomprar"} />)}
+          {filtered.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onImageResize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
         </div>
       ) : (
         byCategory().map(([cat, items]) => (
           <div key={cat} style={{ marginBottom: 22 }}>
             <SectionTitle title={cat} count={`${items.length} ${items.length === 1 ? "item" : "itens"}`} />
             <div className="cr-grid cr-grid-3">
-              {items.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} forcePurchase={tab === "recomprar"} />)}
+              {items.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onImageResize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
             </div>
           </div>
         ))
@@ -7236,17 +7236,64 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
       )}
 
       {editing && <ShoppingModal item={editing === "new" ? null : editing} defaultKind={tab === "recomprar" ? "rotina" : tab} onSave={save} onClose={() => setEditing(null)} />}
-      {customizingCards && <ShoppingCardPersonalization items={inTab} onSave={(item, patch) => save({ ...originalOf(item), ...patch })}
-        onClose={() => setCustomizingCards(false)} />}
+      {customizingCards && <WishlistCardFieldsModal settings={settings || {}} setSettings={setSettings} onClose={() => setCustomizingCards(false)} />}
       {purchasing && <SourceExpenseModal item={purchasing} title={`Confirmar compra: ${purchasing.name}`} amount={purchasing.price} allowNoAmount
         onSave={(entry) => registerPurchase(purchasing, entry)} onClose={() => setPurchasing(null)} />}
     </div>
   );
 }
 
-function ShoppingCard({ s, onEdit, onRemove, onPurchase, forcePurchase }) {
+const WISHLIST_CARD_FIELDS = [
+  { key: "image", label: "Imagem", def: true },
+  { key: "category", label: "Categoria", def: true },
+  { key: "topic", label: "Tópico", def: true },
+  { key: "priority", label: "Prioridade", def: true },
+  { key: "price", label: "Preço", def: true },
+  { key: "nextPurchase", label: "Próxima compra prevista", def: true },
+  { key: "history", label: "Histórico de compras", def: true },
+  { key: "store", label: "Loja", def: true },
+  { key: "link", label: "Link da loja", def: true },
+  { key: "notes", label: "Texto complementar", def: true },
+  { key: "actions", label: "Botão de confirmar compra/recompra", def: true },
+];
+
+function wishlistCardFieldOn(settings, key) {
+  const value = (settings.wishlistCardFields || {})[key];
+  if (value !== undefined) return value;
+  return WISHLIST_CARD_FIELDS.find((field) => field.key === key)?.def ?? true;
+}
+
+function WishlistCardFieldsModal({ settings, setSettings, onClose }) {
+  const toggle = (key) => setSettings({
+    ...settings,
+    wishlistCardFields: { ...(settings.wishlistCardFields || {}), [key]: !wishlistCardFieldOn(settings, key) },
+  });
+  const restore = () => setSettings({ ...settings, wishlistCardFields: {} });
+  const showAll = () => setSettings({ ...settings, wishlistCardFields: Object.fromEntries(WISHLIST_CARD_FIELDS.map((field) => [field.key, true])) });
+  return (
+    <Modal size="small" title="Personalizar cards da Wishlist" onClose={onClose}>
+      <p className="cr-sub" style={{ marginTop: 0 }}>Escolha o que será exibido em todos os cards da Wishlist.</p>
+      {WISHLIST_CARD_FIELDS.map((field) => (
+        <label key={field.key} className="cr-row" style={{ cursor: "pointer", marginBottom: 6, flexWrap: "nowrap" }}>
+          <input type="checkbox" checked={wishlistCardFieldOn(settings, field.key)} onChange={() => toggle(field.key)} />
+          <span style={{ fontSize: 14 }}>{field.label}</span>
+        </label>
+      ))}
+      <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 14 }}>
+        <div className="cr-row">
+          <button className="cr-btn" onClick={showAll}>Mostrar tudo</button>
+          <button className="cr-btn" onClick={restore}>Restaurar padrão</button>
+        </div>
+        <button className="cr-btn primary" onClick={onClose}>Concluir</button>
+      </div>
+    </Modal>
+  );
+}
+
+function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onImageResize, forcePurchase }) {
   const isRoutine = s._kind === "rotina";
   const st = s._status || s.status;
+  const show = (key) => wishlistCardFieldOn(settings || {}, key);
   return (
     <div className={`cr-card ${personalizedCardClass(s)}`} style={personalizedCardStyle(s)}>
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
@@ -7256,23 +7303,25 @@ function ShoppingCard({ s, onEdit, onRemove, onPurchase, forcePurchase }) {
           <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
       </div>
+      {show("image") && s.image && <ManuallyResizableImage item={s} onResize={onImageResize} alt={s.name} />}
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
-        <PriorityChip id={s.priority} />
-        <CardTopicChip item={s} />
+        {show("category") && s.category && <span className="cr-chip">{s.category}</span>}
+        {show("priority") && <PriorityChip id={s.priority} />}
+        {show("topic") && <CardTopicChip item={s} />}
       </div>
-      <CardExtraText item={s} />
-      {s.price > 0 && <p style={{ fontSize: 15, fontWeight: 600, margin: "4px 0" }}>{fmtBRL(s.price)}</p>}
-      {s.nextPurchaseDate && <p className="cr-sub" style={{ margin: "4px 0" }}>Próxima compra prevista: {fmtDateShort(s.nextPurchaseDate)}</p>}
-      {(s.purchaseHistory || []).length > 0 && (
+      {show("notes") && <CardExtraText item={s} />}
+      {show("price") && s.price > 0 && <p style={{ fontSize: 15, fontWeight: 600, margin: "4px 0" }}>{fmtBRL(s.price)}</p>}
+      {show("nextPurchase") && s.nextPurchaseDate && <p className="cr-sub" style={{ margin: "4px 0" }}>Próxima compra prevista: {fmtDateShort(s.nextPurchaseDate)}</p>}
+      {show("history") && (s.purchaseHistory || []).length > 0 && (
         <p className="cr-sub" style={{ margin: "4px 0" }}>
           Compras reais: {s.purchaseHistory.length} · última em {fmtDateShort(s.purchaseHistory[0].date)}
         </p>
       )}
       <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 6 }}>
-        <span className="cr-sub" style={{ margin: 0 }}>{s.store}</span>
-        {s.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(s.link)}>abrir loja</button>}
+        {show("store") && <span className="cr-sub" style={{ margin: 0 }}>{s.store}</span>}
+        {show("link") && s.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(s.link)}>abrir loja</button>}
       </div>
-      {onPurchase && (forcePurchase || !isClosedItem(isRoutine ? "productStatus" : "wishStatus", st)) && (
+      {show("actions") && onPurchase && (forcePurchase || !isClosedItem(isRoutine ? "productStatus" : "wishStatus", st)) && (
         <button className="cr-btn primary" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={onPurchase}>
           {forcePurchase ? "Registrar recompra" : "Confirmar compra"}
         </button>
@@ -7281,29 +7330,65 @@ function ShoppingCard({ s, onEdit, onRemove, onPurchase, forcePurchase }) {
   );
 }
 
-function ShoppingCardPersonalization({ items, onSave, onClose }) {
-  const [selectedId, setSelectedId] = useState(items[0]?.id || "");
-  const [editing, setEditing] = useState(false);
-  const selected = items.find((item) => item.id === selectedId);
-  if (editing && selected) {
-    return <CardPersonalizationModal item={selected} onSave={(patch) => onSave(selected, patch)} onClose={onClose} />;
-  }
+function ManuallyResizableImage({ item, onResize, alt }) {
+  const [size, setSize] = useState(() => ({
+    width: Number(item.cardImageWidth) || 100,
+    height: Number(item.cardImageHeight) || 160,
+  }));
+  const drag = useRef(null);
+  const container = useRef(null);
+  useEffect(() => {
+    setSize({ width: Number(item.cardImageWidth) || 100, height: Number(item.cardImageHeight) || 160 });
+  }, [item.cardImageWidth, item.cardImageHeight]);
+  const beginResize = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      width: size.width,
+      height: size.height,
+      containerWidth: container.current?.getBoundingClientRect().width || 1,
+    };
+  };
+  const resize = (event) => {
+    if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+    const start = drag.current;
+    setSize({
+      width: Math.max(30, Math.min(100, start.width + ((event.clientX - start.x) / start.containerWidth) * 100)),
+      height: Math.max(80, Math.min(600, start.height + event.clientY - start.y)),
+    });
+  };
+  const finishResize = (event) => {
+    if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+    const start = drag.current;
+    const nextSize = {
+      width: Math.max(30, Math.min(100, start.width + ((event.clientX - start.x) / start.containerWidth) * 100)),
+      height: Math.max(80, Math.min(600, start.height + event.clientY - start.y)),
+    };
+    drag.current = null;
+    setSize(nextSize);
+    onResize({ cardImageWidth: Math.round(nextSize.width), cardImageHeight: Math.round(nextSize.height), cardImageFit: "contain" });
+  };
   return (
-    <Modal size="small" title="Personalizar card da Wishlist" onClose={onClose}>
-      {items.length === 0 ? <p className="cr-empty">Não há itens nesta aba para personalizar.</p> : (
-        <>
-          <div className="cr-field">
-            <label className="cr-label">Escolha o item</label>
-            <select className="cr-select" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
-              {items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </div>
-          <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
-            <button type="button" className="cr-btn primary" disabled={!selected} onClick={() => setEditing(true)}>Continuar</button>
-          </div>
-        </>
-      )}
-    </Modal>
+    <div ref={container} style={{ position: "relative", width: "100%", margin: "8px 0" }}
+      onPointerMove={resize} onPointerUp={finishResize} onPointerCancel={finishResize}>
+      <img src={item.image} alt={alt} style={{
+        display: "block", width: `${size.width}%`, height: size.height, margin: "0 auto",
+        objectFit: "contain", borderRadius: 10,
+      }} />
+      <button type="button" aria-label="Redimensionar imagem arrastando" title="Arraste para redimensionar"
+        onPointerDown={beginResize}
+        style={{
+          position: "absolute", right: `calc(${100 - size.width}% / 2)`, bottom: 0,
+          width: 22, height: 22, padding: 0, border: "2px solid #fff", borderRadius: 6,
+          background: "var(--clay)", cursor: "nwse-resize", touchAction: "none",
+        }}>
+        <span style={{ display: "block", width: 8, height: 8, margin: "auto", borderRight: "2px solid #fff", borderBottom: "2px solid #fff" }} />
+      </button>
+    </div>
   );
 }
 
@@ -7339,7 +7424,7 @@ function SourceExpenseModal({ item, title, amount, onSave, onClose, allowNoAmoun
 function ShoppingModal({ item, defaultKind, onSave, onClose }) {
   const [form, setForm] = useState(item
     ? { ...item, kind: inferShoppingKind(item), purchaseClass: item.purchaseClass || (item.purchaseFrequency === "pontual" ? "unico" : "periodico"), status: inferShoppingKind(item) === "rotina" ? productStatus(item) : item.status }
-    : { name: "", category: "", store: "", price: "", priority: "media", link: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" ? "ainda tem" : "desejado"), desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
+    : { name: "", category: "", store: "", price: "", priority: "media", link: "", image: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" ? "ainda tem" : "desejado"), desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
   const autoStatus = useAutoSave(form, onSave, (form) => ({
     ...form,
     price: Number(form.price) || 0,
@@ -7367,6 +7452,7 @@ function ShoppingModal({ item, defaultKind, onSave, onClose }) {
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Loja</label>
           <input className="cr-input" value={form.store} onChange={(e) => setForm({ ...form, store: e.target.value })} placeholder="ex: Amazon, Shopee…" /></div>
       </div>
+      <ImagePickerField label="Imagem do produto (opcional)" value={form.image || ""} onChange={(image) => setForm({ ...form, image })} />
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Preço (R$)</label>
           <input type="number" className="cr-input" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></div>
@@ -8676,7 +8762,7 @@ export default function App({ onSignOut }) {
         {tab === "hobbies" && <HobbiesView hobbies={hobbies} setHobbies={setHobbies} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "personaldev" && <PersonalDevView personaldev={personaldev} setPersonaldev={setPersonaldev} settings={settings} setSettings={setSettings} />}
         {tab === "house" && <HouseView house={house} setHouse={setHouse} />}
-        {tab === "shopping" && <ShoppingView shopping={shopping} setShopping={setShopping} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
+        {tab === "shopping" && <ShoppingView shopping={shopping} setShopping={setShopping} settings={settings} setSettings={setSettings} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "notes" && <NotesView notes={notes} setNotes={setNotes} areas={areas} />}
         {tab === "journal" && <JournalView journal={journal} setJournal={setJournal} />}
         {tab === "vision" && <VisionView vision={vision} setVision={setVision} />}
