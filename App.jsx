@@ -1404,10 +1404,6 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
         return (
           <section className="cr-card" key="musicPlayer" style={{ marginBottom: 16, background: "#8F1111", color: "#FFFDF8", borderColor: "#8F1111" }}>
             <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
-              <div>
-                <p className="cr-label" style={{ color: "#FFF2ED", marginBottom: 4 }}>MYWORLD · PLAYER</p>
-                <h2 className="cr-serif" style={{ margin: 0, fontSize: 20 }}>Sua música, suas palavras</h2>
-              </div>
               <Music2 size={22} aria-hidden="true" />
             </div>
             <div className="cr-row" style={{ alignItems: "stretch", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
