@@ -218,6 +218,11 @@ async function verifyStorageWrite(content) {
 /* ---------------------------------------------------------------------- */
 
 const LIST_REGISTRY = {
+  cardTopic: {
+    label: "Tópicos dos cards",
+    usedBy: [["goals", "topic"], ["notes", "topic"], ["beauty", "topic"], ["vision", "topic"], ["shopping", "topic"], ["hobbies", "topic"], ["selfcare", "topic"], ["apps", "topic"]],
+    defaults: [{ id: "quero fazer", name: "Quero fazer" }, { id: "cuidando", name: "Cuidando" }],
+  },
   goalStatus: {
     label: "Status das metas", closedFlag: true, flagLabel: "encerra a meta", usedBy: [["goals", "status"]],
     defaults: [
@@ -371,6 +376,125 @@ function listName(key, id) {
   if (it) return it.name;
   const reg = LIST_REGISTRY[key];
   return (reg && reg.legacy && reg.legacy[id]) || prettifyId(id);
+}
+
+function personalizedCardStyle(item) {
+  const channels = item?.cardColor?.match(/^#([0-9a-f]{6})$/i)?.[1];
+  const luminance = channels
+    ? [0, 2, 4].reduce((sum, index) => {
+      const channel = parseInt(channels.slice(index, index + 2), 16) / 255;
+      return sum + (channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4) * [0.2126, 0.7152, 0.0722][index / 2];
+    }, 0)
+    : 1;
+  return {
+    ...(item?.cardColor ? { background: item.cardColor } : {}),
+    ...(luminance < 0.25 ? { color: "#FBF8F2" } : {}),
+  };
+}
+
+function personalizedCardClass(item) {
+  return item?.cardSize === "wide" ? "cr-personal-card-wide" : "";
+}
+
+function CardTopicChip({ item }) {
+  return item?.topic ? <span className="cr-chip">{listName("cardTopic", item.topic)}</span> : null;
+}
+
+function CardExtraText({ item }) {
+  return item?.cardNote ? <p style={{ fontSize: 13, margin: "8px 0", whiteSpace: "pre-wrap" }}>{item.cardNote}</p> : null;
+}
+
+function CardPersonalizationButton({ item, onSave, hasImage = false, defaultImageHeight = 160 }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className="cr-btn ghost" title="Personalizar card" aria-label="Personalizar card"
+        onClick={(event) => { event.stopPropagation(); setOpen(true); }}>
+        <Palette size={13} /> Personalizar
+      </button>
+      {open && <CardPersonalizationModal item={item} onSave={onSave} hasImage={hasImage} defaultImageHeight={defaultImageHeight} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function CardPersonalizationModal({ item, onSave, hasImage, defaultImageHeight, onClose }) {
+  const ctx = useContext(ListsContext);
+  const [form, setForm] = useState({
+    topic: item.topic || "",
+    cardColor: item.cardColor || "",
+    cardSize: item.cardSize || "standard",
+    cardNote: item.cardNote || "",
+    cardImageHeight: Number(item.cardImageHeight) || defaultImageHeight,
+    cardImageWidth: Number(item.cardImageWidth) || 100,
+  });
+  const imageIsAvailable = hasImage || !!item.image || item.type === "image";
+  const save = () => {
+    onSave({ ...form, cardImageHeight: Number(form.cardImageHeight), cardImageWidth: Number(form.cardImageWidth) });
+    onClose();
+  };
+  return (
+    <Modal size="small" title="Personalizar card" onClose={onClose}>
+      <div className="cr-field">
+        <label className="cr-label">Tópico</label>
+        <div className="cr-row">
+          <ManagedSelect listKey="cardTopic" value={form.topic} emptyLabel="Sem tópico" onChange={(value) => setForm({ ...form, topic: value })} />
+          <button type="button" className="cr-btn" onClick={() => ctx.openManager("cardTopic")}><SettingsIcon size={13} /> Criar tópico</button>
+        </div>
+      </div>
+      <div className="cr-field">
+        <label className="cr-label">Cor do card</label>
+        <div className="cr-row">
+          <input type="color" aria-label="Cor do card" value={form.cardColor || "#FBF8F2"}
+            onChange={(event) => setForm({ ...form, cardColor: event.target.value })}
+            style={{ width: 48, height: 38, border: "1px solid var(--line)", borderRadius: 8, padding: 3 }} />
+          <button type="button" className="cr-btn" onClick={() => setForm({ ...form, cardColor: "" })}>Cor padrão</button>
+        </div>
+      </div>
+      <div className="cr-field">
+        <label className="cr-label">Largura do card</label>
+        <select className="cr-select" value={form.cardSize} onChange={(event) => setForm({ ...form, cardSize: event.target.value })}>
+          <option value="standard">Padrão</option>
+          <option value="wide">Largo (ocupa duas colunas)</option>
+        </select>
+      </div>
+      {imageIsAvailable && (
+        <>
+          <div className="cr-field">
+            <label className="cr-label">Largura da imagem: {form.cardImageWidth}%</label>
+            <input type="range" min="40" max="100" step="5" value={form.cardImageWidth}
+              onChange={(event) => setForm({ ...form, cardImageWidth: Number(event.target.value) })}
+              style={{ width: "100%" }} />
+          </div>
+          <div className="cr-field">
+            <label className="cr-label">Altura da imagem: {form.cardImageHeight}px</label>
+            <input type="range" min="80" max="420" step="10" value={form.cardImageHeight}
+              onChange={(event) => setForm({ ...form, cardImageHeight: Number(event.target.value) })}
+              style={{ width: "100%" }} />
+          </div>
+        </>
+      )}
+      <div className="cr-field">
+        <label className="cr-label">Texto complementar exibido no card</label>
+        <textarea className="cr-textarea" value={form.cardNote}
+          onChange={(event) => setForm({ ...form, cardNote: event.target.value })} />
+      </div>
+      <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
+        <button type="button" className="cr-btn" onClick={onClose}>Cancelar</button>
+        <button type="button" className="cr-btn primary" onClick={save}>Salvar</button>
+      </div>
+    </Modal>
+  );
+}
+
+function personalizedImageStyle(item, defaultHeight, extra = {}) {
+  return {
+    width: `${Number(item?.cardImageWidth) || 100}%`,
+    height: Number(item?.cardImageHeight) || defaultHeight,
+    objectFit: "cover",
+    marginLeft: "auto",
+    marginRight: "auto",
+    ...extra,
+  };
 }
 function isClosedItem(key, id) {
   const it = getList(key).find((i) => i.id === id);
@@ -887,6 +1011,7 @@ const GlobalStyle = () => (
       background: var(--card); border: 1px solid var(--line); border-radius: 16px;
       padding: 18px 20px; min-width: 0;
     }
+    .cr-personal-card-wide { grid-column: span 2; }
     .cr-grid { display: grid; gap: 16px; }
     .cr-grid > * { min-width: 0; }
     .cr-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -900,6 +1025,7 @@ const GlobalStyle = () => (
     }
     .cr-btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
     .cr-btn.ghost { border-color: transparent; background: transparent; padding: 6px 8px; }
+    .cr-card .cr-btn.ghost { color: inherit; }
     .cr-btn.danger { color: #a1493c; }
     .cr-btn:hover { opacity: 0.85; }
     .cr-input, .cr-select, .cr-textarea {
@@ -964,6 +1090,7 @@ const GlobalStyle = () => (
       .cr-fullpage-body { padding: 16px 16px calc(80px + env(safe-area-inset-bottom)); }
       .cr-main { width: 100%; max-width: none; min-height: 0; height: auto; overflow-y: auto; padding: calc(18px + env(safe-area-inset-top)) 16px calc(92px + env(safe-area-inset-bottom)); }
       .cr-grid-2, .cr-grid-3, .cr-grid-4 { grid-template-columns: minmax(0, 1fr); }
+      .cr-personal-card-wide { grid-column: span 1; }
       .cr-row { flex-wrap: wrap; }
       .cr-row > .cr-field { flex: 1 1 220px !important; min-width: 0; }
       .cr-list-row { flex-wrap: wrap; gap: 8px; }
@@ -1403,12 +1530,12 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
         const formatPlayerTime = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
         return (
           <section className="cr-card" key="musicPlayer" style={{ marginBottom: 16, background: "#8F1111", color: "#FFFDF8", borderColor: "#8F1111" }}>
-            <div className="cr-row" style={{ alignItems: "stretch", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
+            <div className="cr-row" style={{ alignItems: "center", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
               <div aria-hidden="true" style={{ width: 112, height: 112, flexShrink: 0, borderRadius: 10, background: "linear-gradient(145deg, #F0D9CF, #C77B6C)", color: "#68100D", display: "grid", placeItems: "center" }}>
                 <Music2 size={42} strokeWidth={1.8} />
-                <p>“Hoje estou feliz, acordei com o pé direito
-              E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
               </div>
+              <p style={{ margin: 0, lineHeight: 1.7 }}>“Hoje estou feliz, acordei com o pé direito<br />
+                E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
             </div>
           </section>
         );
@@ -1799,7 +1926,7 @@ function GoalsView({ goals, setGoals, areas }) {
 
       {viewAll ? (
         <div className="cr-grid cr-grid-2">
-          {filtered.map((g) => <GoalCard key={g.id} g={g} areas={areas} onView={() => setViewing(g)} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} />)}
+          {filtered.map((g) => <GoalCard key={g.id} g={g} areas={areas} onView={() => setViewing(g)} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} onCustomize={(patch) => save({ ...g, ...patch })} />)}
         </div>
       ) : (
         <div>
@@ -1807,7 +1934,7 @@ function GoalsView({ goals, setGoals, areas }) {
             <div key={area.id} style={{ marginBottom: 22 }}>
               <SectionTitle title={area.name} count={`${items.length} ${items.length === 1 ? "meta" : "metas"}`} />
               <div className="cr-grid cr-grid-2">
-                {items.map((g) => <GoalCard key={g.id} g={g} areas={areas} onView={() => setViewing(g)} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} />)}
+                {items.map((g) => <GoalCard key={g.id} g={g} areas={areas} onView={() => setViewing(g)} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} onCustomize={(patch) => save({ ...g, ...patch })} />)}
               </div>
             </div>
           ))}
@@ -1815,7 +1942,7 @@ function GoalsView({ goals, setGoals, areas }) {
             <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
               <SectionTitle title="Concluídas" count={`${finished.length}`} />
               <div className="cr-grid cr-grid-2">
-                {finished.map((g) => <GoalCard key={g.id} g={g} areas={areas} onView={() => setViewing(g)} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} dimmed />)}
+                {finished.map((g) => <GoalCard key={g.id} g={g} areas={areas} onView={() => setViewing(g)} onEdit={() => setEditing(g)} onRemove={() => remove(g.id)} onCustomize={(patch) => save({ ...g, ...patch })} dimmed />)}
               </div>
             </div>
           )}
@@ -1829,13 +1956,13 @@ function GoalsView({ goals, setGoals, areas }) {
   );
 }
 
-function GoalCard({ g, areas, onView, onEdit, onRemove, dimmed }) {
+function GoalCard({ g, areas, onView, onEdit, onRemove, onCustomize, dimmed }) {
   return (
-    <div className="cr-card" role="button" tabIndex={0} onClick={onView}
+    <div className={`cr-card ${personalizedCardClass(g)}`} role="button" tabIndex={0} onClick={onView}
       onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onView(); } }}
-      style={{ cursor: "pointer", ...(dimmed ? { opacity: 0.75 } : {}) }}>
+      style={{ cursor: "pointer", ...(dimmed ? { opacity: 0.75 } : {}), ...personalizedCardStyle(g) }}>
       {g.image ? (
-        <img src={g.image} alt="" style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 10, marginBottom: 8 }} />
+        <img src={g.image} alt="" style={personalizedImageStyle(g, 110, { borderRadius: 10, marginBottom: 8 })} />
       ) : (
         <div style={{
           width: "100%", height: 76, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
@@ -1849,6 +1976,7 @@ function GoalCard({ g, areas, onView, onEdit, onRemove, dimmed }) {
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{g.name}</h3>
         <div className="cr-row" style={{ gap: 4 }}>
+          <CardPersonalizationButton item={g} onSave={onCustomize} hasImage defaultImageHeight={110} />
           <button className="cr-btn ghost" aria-label="Editar meta" onClick={(event) => { event.stopPropagation(); onEdit(); }}><Pencil size={14} /></button>
           <button className="cr-btn ghost danger" aria-label="Excluir meta" onClick={(event) => { event.stopPropagation(); onRemove(); }}><Trash2 size={14} /></button>
         </div>
@@ -1856,8 +1984,10 @@ function GoalCard({ g, areas, onView, onEdit, onRemove, dimmed }) {
       <div className="cr-row" style={{ margin: "8px 0" }}>
         <AreaBadge area={g.area} areas={areas} />
         <span className="cr-chip">{listName("goalStatus", g.status)}</span>
+        <CardTopicChip item={g} />
         {g.deadline && <span className="cr-chip">até {fmtDateShort(g.deadline)}</span>}
       </div>
+      <CardExtraText item={g} />
       <div className="cr-progress-track"><div className="cr-progress-fill" style={{ width: `${g.progress}%`, background: progressColor(g.progress) }} /></div>
       <p className="cr-sub" style={{ marginTop: 6 }}>{g.progress}% concluído</p>
       <p className="cr-sub" style={{ marginTop: 6 }}>Abrir detalhes da meta</p>
@@ -1888,10 +2018,11 @@ function GoalDetailsModal({ goal, areas, onChange, onEdit, onClose }) {
       </div>
       {tab === "detalhes" ? (
         <div style={{ marginTop: 12 }}>
-          {goal.image && <img src={goal.image} alt="" style={{ width: "100%", maxHeight: 280, objectFit: "cover", borderRadius: 10 }} />}
+          {goal.image && <img src={goal.image} alt="" style={personalizedImageStyle(goal, 280, { borderRadius: 10, maxHeight: 420 })} />}
           <div className="cr-row" style={{ margin: "10px 0", flexWrap: "wrap" }}>
             <AreaBadge area={goal.area} areas={areas} />
             <span className="cr-chip">{listName("goalStatus", goal.status)}</span>
+            <CardTopicChip item={goal} />
             {goal.deadline && <span className="cr-chip">até {fmtDateShort(goal.deadline)}</span>}
           </div>
           <div className="cr-progress-track"><div className="cr-progress-fill" style={{ width: `${goal.progress}%`, background: progressColor(goal.progress) }} /></div>
@@ -3509,17 +3640,19 @@ function NotesView({ notes, setNotes, areas }) {
       <div className="cr-grid cr-grid-3">
         {filtered.length === 0 && <p className="cr-empty">Nenhuma nota encontrada.</p>}
         {filtered.map((n) => (
-          <div className="cr-card" key={n.id}>
+          <div className={`cr-card ${personalizedCardClass(n)}`} key={n.id} style={personalizedCardStyle(n)}>
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
               <h3 style={{ margin: 0, fontSize: 15 }} className="cr-serif">{n.title}</h3>
               <div className="cr-row" style={{ gap: 2 }}>
+                <CardPersonalizationButton item={n} onSave={(patch) => save({ ...n, ...patch })} />
                 <button className="cr-btn ghost" onClick={() => setEditing(n)}><Pencil size={13} /></button>
                 <button className="cr-btn ghost danger" onClick={() => remove(n.id)}><Trash2 size={13} /></button>
               </div>
             </div>
             <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "8px 0" }}>{n.content}</p>
+            <CardExtraText item={n} />
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
-              <AreaBadge area={n.area} areas={areas} />
+              <div className="cr-row"><AreaBadge area={n.area} areas={areas} /><CardTopicChip item={n} /></div>
               {n.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(n.link)}><Link2 size={12} /> Abrir link</button>}
             </div>
           </div>
@@ -3584,7 +3717,7 @@ function AppsView({ apps, setApps }) {
         {apps.map((a) => {
           const AppIcon = iconForApp(a.name);
           return (
-          <div className="cr-card" key={a.id} style={{ textAlign: "center" }}>
+          <div className={`cr-card ${personalizedCardClass(a)}`} key={a.id} style={{ textAlign: "center", ...personalizedCardStyle(a) }}>
             <button style={{
               textDecoration: "none", color: "inherit", border: "none", background: "none",
               padding: 0, cursor: "pointer", width: "100%", font: "inherit",
@@ -3597,7 +3730,10 @@ function AppsView({ apps, setApps }) {
               </div>
               <div style={{ fontSize: 13.5, marginTop: 8 }}>{a.name}</div>
             </button>
+            <CardTopicChip item={a} />
+            <CardExtraText item={a} />
             <div className="cr-row" style={{ justifyContent: "center", marginTop: 8 }}>
+              <CardPersonalizationButton item={a} onSave={(patch) => save({ ...a, ...patch })} />
               <button className="cr-btn ghost" onClick={() => setEditing(a)}><Pencil size={13} /></button>
               <button className="cr-btn ghost danger" onClick={() => remove(a.id)}><Trash2 size={13} /></button>
             </div>
@@ -4503,7 +4639,7 @@ function gcalMergedEvents(gcal) {
 }
 
 function GoogleAgendaView({ gcal, setGcal }) {
-  const [mode, setMode] = useState(() => (gcal.calendars || []).length > 0 ? "lista" : "mes");
+  const [mode, setMode] = useState("mes");
   const [offset, setOffset] = useState(0);
   const [showBreaks, setShowBreaks] = useState(false);
   const [query, setQuery] = useState("");
@@ -6026,6 +6162,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
                 <div className="cr-grid cr-grid-3">
                   {items.map((b) => (
                     <BeautyCard key={b.id} b={b} on={on} onEdit={() => setEditing(originalOf(b))} onRemove={() => remove(b.id)}
+                      onCustomize={(patch) => save({ ...originalOf(b), ...patch })}
                       onRegister={() => setRegistering(originalOf(b))}
                       onRate={(rating) => setBeauty(beauty.map((item) => item.id === b.id ? { ...item, rating } : item))} />
                   ))}
@@ -6096,7 +6233,7 @@ function FormSection({ title }) {
   );
 }
 
-function BeautyCard({ b, on, onEdit, onRemove, onRegister, onRate }) {
+function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }) {
   const [showHistory, setShowHistory] = useState(false);
   const stop = (fn) => (e) => { if (e && e.stopPropagation) e.stopPropagation(); fn(e); };
   const m = maintenanceStatus(b);
@@ -6113,9 +6250,9 @@ function BeautyCard({ b, on, onEdit, onRemove, onRegister, onRate }) {
     on("cost") && b.cost > 0 && <span className="cr-chip" key="c">{fmtBRL(b.cost)}</span>,
   ].filter(Boolean);
   return (
-    <div className="cr-card" style={{ cursor: "pointer" }} onClick={onEdit} title="Clique para abrir o procedimento completo">
+    <div className={`cr-card ${personalizedCardClass(b)}`} style={{ cursor: "pointer", ...personalizedCardStyle(b) }} onClick={onEdit} title="Clique para abrir o procedimento completo">
       {on("image") && (b.image ? (
-        <img src={b.image} alt="" style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 10, marginBottom: 8 }} />
+        <img src={b.image} alt="" style={personalizedImageStyle(b, 120, { borderRadius: 10, marginBottom: 8 })} />
       ) : (
         <div style={{
           width: "100%", height: 70, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
@@ -6128,6 +6265,7 @@ function BeautyCard({ b, on, onEdit, onRemove, onRegister, onRate }) {
       ))}
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{m && on("maintenance") ? `${statusEmoji(m.level)} ` : ""}{b.name}</h3>
+        <CardPersonalizationButton item={b} onSave={onCustomize} hasImage defaultImageHeight={120} />
         <button className="cr-btn ghost danger" title="Excluir" onClick={stop(onRemove)}><Trash2 size={13} /></button>
       </div>
       <div className="cr-row" role="group" aria-label={`Avaliação de ${b.name}`} style={{ gap: 2, marginTop: 6 }}>
@@ -6143,7 +6281,9 @@ function BeautyCard({ b, on, onEdit, onRemove, onRegister, onRate }) {
           );
         })}
       </div>
-      {chips.length > 0 && <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>{chips}</div>}
+      {chips.length > 0 && <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>{chips}<CardTopicChip item={b} /></div>}
+      {chips.length === 0 && b.topic && <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}><CardTopicChip item={b} /></div>}
+      <CardExtraText item={b} />
       {on("goal") && b.goal && <p style={{ fontSize: 13, margin: "4px 0" }}><strong>Objetivo:</strong> {b.goal}</p>}
       {on("place") && b.professional && <p className="cr-sub" style={{ margin: "4px 0" }}>{b.professional}</p>}
       {on("result") && b.result && <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>{b.result}</p>}
@@ -6536,17 +6676,19 @@ function VisionView({ vision, setVision }) {
       {vision.length === 0 && <p className="cr-empty">Seu quadro de inspiração está vazio. Clique em "Adicionar imagem ou frase" para começar.</p>}
       <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 380px), 1fr))", gap: 20 }}>
         {vision.map((v, i) => (
-          <div className="cr-card" key={v.id} style={{ padding: 12 }}>
+          <div className={`cr-card ${personalizedCardClass(v)}`} key={v.id} style={{ padding: 12, ...personalizedCardStyle(v) }}>
             {v.type === "image" && v.content && (
               <img src={v.content} alt="" onClick={() => setZoom(v.content)}
-                style={{ width: "100%", height: 420, maxHeight: "60vh", objectFit: "cover", borderRadius: 12, marginBottom: 10, cursor: "zoom-in", display: "block" }} />
+                style={personalizedImageStyle(v, 420, { maxHeight: "60vh", borderRadius: 12, marginBottom: 10, cursor: "zoom-in", display: "block" })} />
             )}
             {v.type === "quote" && (
               <p className="cr-serif" style={{ fontSize: 22, lineHeight: 1.35, fontStyle: "italic", margin: "18px 8px 22px", textAlign: "center" }}>"{v.content}"</p>
             )}
+            <CardExtraText item={v} />
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
-              <span className="cr-chip">{v.category}</span>
+              <div className="cr-row"><span className="cr-chip">{v.category}</span><CardTopicChip item={v} /></div>
               <div className="cr-row" style={{ gap: 2 }}>
+                <CardPersonalizationButton item={v} onSave={(patch) => save({ ...v, ...patch })} hasImage={v.type === "image"} defaultImageHeight={420} />
                 <button className="cr-btn ghost" disabled={i === 0} onClick={() => move(v.id, -1)}>↑</button>
                 <button className="cr-btn ghost" disabled={i === vision.length - 1} onClick={() => move(v.id, 1)}>↓</button>
                 <button className="cr-btn ghost" onClick={() => setEditing(v)}><Pencil size={13} /></button>
@@ -6842,7 +6984,7 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
   const [filter, setFilter] = useState("todos");
   const [filterCategory, setFilterCategory] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
-  const [financeFilters, setFinanceFilters] = useState({ query: "", category: "todas", purchaseClass: "todas", from: "", to: "" });
+  const [financeFilters, setFinanceFilters] = useState({ query: "", category: "todas", purchaseClass: "todas", month: "", year: "" });
 
   useEffect(() => {
     if (!["shopping"].includes(originTarget?.type)) return;
@@ -6903,12 +7045,16 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
       description: purchase.description || "",
     }))
     .filter((purchase) => purchase.amount > 0 && typeof purchase.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(purchase.date)));
+  const purchaseYears = Array.from(new Set([
+    String(new Date().getFullYear()),
+    ...purchaseRows.map((purchase) => purchase.date.slice(0, 4)),
+  ])).sort((a, b) => b.localeCompare(a));
   const filteredPurchaseRows = purchaseRows.filter((purchase) =>
     (!financeFilters.query || `${purchase.itemName} ${purchase.description}`.toLowerCase().includes(financeFilters.query.toLowerCase()))
     && (financeFilters.category === "todas" || purchase.category === financeFilters.category)
     && (financeFilters.purchaseClass === "todas" || purchase.purchaseClass === financeFilters.purchaseClass)
-    && (!financeFilters.from || purchase.date >= financeFilters.from)
-    && (!financeFilters.to || purchase.date <= financeFilters.to))
+    && (!financeFilters.month || purchase.date.slice(5, 7) === financeFilters.month)
+    && (!financeFilters.year || purchase.date.slice(0, 4) === financeFilters.year))
     .sort((a, b) => b.date.localeCompare(a.date));
   const filteredPurchaseTotal = filteredPurchaseRows.reduce((sum, purchase) => sum + purchase.amount, 0);
   const totalByProduct = Array.from(filteredPurchaseRows.reduce((totals, purchase) => {
@@ -6998,10 +7144,17 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
                 <option value="todas">Todas as classes</option>
                 {PURCHASE_CLASS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
-              <label className="cr-label" style={{ margin: 0 }}>De <input type="date" className="cr-input" aria-label="Data inicial das compras"
-                value={financeFilters.from} onChange={(event) => setFinanceFilters({ ...financeFilters, from: event.target.value })} /></label>
-              <label className="cr-label" style={{ margin: 0 }}>Até <input type="date" className="cr-input" aria-label="Data final das compras"
-                value={financeFilters.to} onChange={(event) => setFinanceFilters({ ...financeFilters, to: event.target.value })} /></label>
+              <select className="cr-select" aria-label="Filtrar compras por mês" value={financeFilters.month}
+                onChange={(event) => setFinanceFilters({ ...financeFilters, month: event.target.value })}>
+                <option value="">Todos os meses</option>
+                {["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+                  .map((month, index) => <option key={index} value={String(index + 1).padStart(2, "0")}>{month}</option>)}
+              </select>
+              <select className="cr-select" aria-label="Filtrar compras por ano" value={financeFilters.year}
+                onChange={(event) => setFinanceFilters({ ...financeFilters, year: event.target.value })}>
+                <option value="">Todos os anos</option>
+                {purchaseYears.map((year) => <option key={year} value={year}>{year}</option>)}
+              </select>
             </div>
           </div>
           {totalByProduct.length > 0 && (
@@ -7050,14 +7203,14 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
 
       {viewAll || filterCategory !== "todas" ? (
         <div className="cr-grid cr-grid-3">
-          {filtered.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} forcePurchase={tab === "recomprar"} />)}
+          {filtered.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
         </div>
       ) : (
         byCategory().map(([cat, items]) => (
           <div key={cat} style={{ marginBottom: 22 }}>
             <SectionTitle title={cat} count={`${items.length} ${items.length === 1 ? "item" : "itens"}`} />
             <div className="cr-grid cr-grid-3">
-              {items.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} forcePurchase={tab === "recomprar"} />)}
+              {items.map((s) => <ShoppingCard key={s.id} s={s} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
             </div>
           </div>
         ))
@@ -7072,21 +7225,24 @@ function ShoppingView({ shopping, setShopping, originTarget, clearOriginTarget }
   );
 }
 
-function ShoppingCard({ s, onEdit, onRemove, onPurchase, forcePurchase }) {
+function ShoppingCard({ s, onEdit, onRemove, onPurchase, onCustomize, forcePurchase }) {
   const isRoutine = s._kind === "rotina";
   const st = s._status || s.status;
   return (
-    <div className="cr-card">
+    <div className={`cr-card ${personalizedCardClass(s)}`} style={personalizedCardStyle(s)}>
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{s.name}</h3>
         <div className="cr-row" style={{ gap: 2 }}>
+          <CardPersonalizationButton item={s} onSave={onCustomize} />
           <button className="cr-btn ghost" onClick={onEdit}><Pencil size={13} /></button>
           <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
       </div>
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
         <PriorityChip id={s.priority} />
+        <CardTopicChip item={s} />
       </div>
+      <CardExtraText item={s} />
       {s.price > 0 && <p style={{ fontSize: 15, fontWeight: 600, margin: "4px 0" }}>{fmtBRL(s.price)}</p>}
       {s.nextPurchaseDate && <p className="cr-sub" style={{ margin: "4px 0" }}>Próxima compra prevista: {fmtDateShort(s.nextPurchaseDate)}</p>}
       {(s.purchaseHistory || []).length > 0 && (
@@ -7262,7 +7418,7 @@ function HobbiesView({ hobbies, setHobbies, originTarget, clearOriginTarget }) {
 
       {viewAll || filterCategory !== "todas" ? (
         <div className="cr-grid cr-grid-3">
-          {filtered.map((h) => <HobbyCard key={h.id} h={h} onView={() => setViewing(h)} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} />)}
+          {filtered.map((h) => <HobbyCard key={h.id} h={h} onView={() => setViewing(h)} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} onCustomize={(patch) => save({ ...h, ...patch })} />)}
         </div>
       ) : (
         [...order, ""].map((cat) => {
@@ -7272,7 +7428,7 @@ function HobbiesView({ hobbies, setHobbies, originTarget, clearOriginTarget }) {
             <div key={cat || "sem"} style={{ marginBottom: 36 }}>
               <SectionTitle title={cat ? listName("hobbyCategory", cat) : "Sem categoria"} count={`${items.length} ${items.length === 1 ? "hobby" : "hobbies"}`} />
               <div className="cr-grid cr-grid-3">
-                {items.map((h) => <HobbyCard key={h.id} h={h} onView={() => setViewing(h)} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} />)}
+                {items.map((h) => <HobbyCard key={h.id} h={h} onView={() => setViewing(h)} onEdit={() => setEditing(h)} onRemove={() => remove(h.id)} onCustomize={(patch) => save({ ...h, ...patch })} />)}
               </div>
             </div>
           );
@@ -7282,11 +7438,12 @@ function HobbiesView({ hobbies, setHobbies, originTarget, clearOriginTarget }) {
       {editing && <HobbyModal item={editing === "new" ? null : editing} onSave={save} onClose={() => setEditing(null)} />}
       {viewing && (
         <Modal title={viewing.name} onClose={() => setViewing(null)}>
-          {viewing.image && <img src={viewing.image} alt="" style={{ width: "100%", maxHeight: 300, objectFit: "cover", borderRadius: 12, marginBottom: 12 }} />}
+          {viewing.image && <img src={viewing.image} alt="" style={personalizedImageStyle(viewing, 300, { maxHeight: 420, borderRadius: 12, marginBottom: 12 })} />}
           {viewing.description && <p style={{ whiteSpace: "pre-wrap" }}>{viewing.description}</p>}
           {viewing.goal && <p><strong>Objetivo:</strong> {viewing.goal}</p>}
           <div className="cr-row" style={{ flexWrap: "wrap" }}>
             <span className="cr-chip">{listName("hobbyStatus", viewing.status || "quero experimentar")}</span>
+            <CardTopicChip item={viewing} />
             {viewing.frequency && <span className="cr-chip">{viewing.frequency}</span>}
             {viewing.level && <span className="cr-chip">Nível: {viewing.level}</span>}
             {viewing.timeSpent > 0 && <span className="cr-chip">{viewing.timeSpent}h dedicadas</span>}
@@ -7328,11 +7485,11 @@ function HobbiesView({ hobbies, setHobbies, originTarget, clearOriginTarget }) {
   );
 }
 
-function HobbyCard({ h, onView, onEdit, onRemove }) {
+function HobbyCard({ h, onView, onEdit, onRemove, onCustomize }) {
   return (
-    <div className="cr-card">
+    <div className={`cr-card ${personalizedCardClass(h)}`} style={personalizedCardStyle(h)}>
       {h.image ? (
-        <img src={h.image} alt="" style={{ width: "100%", height: 130, objectFit: "cover", borderRadius: 10, marginBottom: 8 }} />
+        <img src={h.image} alt="" style={personalizedImageStyle(h, 130, { borderRadius: 10, marginBottom: 8 })} />
       ) : (
         <button onClick={onEdit} style={{
           width: "100%", height: 90, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
@@ -7346,15 +7503,18 @@ function HobbyCard({ h, onView, onEdit, onRemove }) {
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{h.name}</h3>
         <div className="cr-row" style={{ gap: 2 }}>
+          <CardPersonalizationButton item={h} onSave={onCustomize} hasImage defaultImageHeight={130} />
           <button className="cr-btn ghost" onClick={onEdit}><Pencil size={13} /></button>
           <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
       </div>
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
         <span className="cr-chip">{listName("hobbyStatus", h.status || "quero experimentar")}</span>
+        <CardTopicChip item={h} />
         {h.frequency && <span className="cr-chip">{h.frequency}</span>}
         {h.level && <span className="cr-chip">nível: {h.level}</span>}
       </div>
+      <CardExtraText item={h} />
       {typeof h.progress === "number" && (
         <>
           <div className="cr-progress-track" style={{ marginTop: 6 }}><div className="cr-progress-fill" style={{ width: `${h.progress}%`, background: progressColor(h.progress) }} /></div>
@@ -7527,10 +7687,10 @@ function SelfCareView({ selfcare, setSelfcare }) {
   const sections = [...statusList.map((st) => ({ id: st.id, label: st.name })), { id: "", label: "Sem status" }];
 
   const card = (s) => (
-    <div className="cr-card" key={s.id} style={{ display: "flex", flexDirection: "column" }}>
+    <div className={`cr-card ${personalizedCardClass(s)}`} key={s.id} style={{ display: "flex", flexDirection: "column", ...personalizedCardStyle(s) }}>
       {s.image ? (
         <div style={{ marginBottom: 10 }}>
-          <img src={s.image} alt="" style={{ width: "100%", height: 150, objectFit: "cover", borderRadius: 10, display: "block" }} />
+          <img src={s.image} alt="" style={personalizedImageStyle(s, 150, { borderRadius: 10, display: "block" })} />
           <div className="cr-row" style={{ gap: 4, marginTop: 4 }}>
             <button className="cr-btn ghost" style={{ padding: "2px 8px", fontSize: 11.5 }} onClick={() => setEditing(s)}>Trocar imagem</button>
             <button className="cr-btn ghost danger" style={{ padding: "2px 8px", fontSize: 11.5 }} onClick={() => save({ ...s, image: "" })}>Remover imagem</button>
@@ -7549,6 +7709,7 @@ function SelfCareView({ selfcare, setSelfcare }) {
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{s.title}</h3>
         <div className="cr-row" style={{ gap: 2 }}>
+          <CardPersonalizationButton item={s} onSave={(patch) => save({ ...(selfcare.find((item) => item.id === s.id) || s), ...patch })} hasImage defaultImageHeight={150} />
           <button className="cr-btn ghost" onClick={() => setEditing(s)}><Pencil size={13} /></button>
           <button className="cr-btn ghost danger" onClick={() => remove(s.id)}><Trash2 size={13} /></button>
         </div>
@@ -7556,7 +7717,9 @@ function SelfCareView({ selfcare, setSelfcare }) {
       <div className="cr-row" style={{ marginTop: 6, flexWrap: "wrap" }}>
         {s._status && <span className="cr-chip" style={{ background: "var(--clay)", color: "#fff" }}>{listName("selfcareStatus", s._status)}</span>}
         {s.category && <span className="cr-chip">{s.category}</span>}
+        <CardTopicChip item={s} />
       </div>
+      <CardExtraText item={s} />
       {(s.content || "").trim() ? (
         <div style={{ flex: 1, minHeight: 8 }} />
       ) : <div style={{ flex: 1, minHeight: 8 }} />}
@@ -7591,10 +7754,11 @@ function SelfCareView({ selfcare, setSelfcare }) {
       {editing && <SelfCareModal item={editing === "new" ? null : editing} onSave={save} onClose={() => setEditing(null)} />}
       {viewing && (
         <Modal title={viewing.title} onClose={() => setViewing(null)}>
-          {viewing.image && <img src={viewing.image} alt="" style={{ width: "100%", maxHeight: 340, objectFit: "cover", borderRadius: 12, marginBottom: 12 }} />}
+          {viewing.image && <img src={viewing.image} alt="" style={personalizedImageStyle(viewing, 340, { maxHeight: 420, borderRadius: 12, marginBottom: 12 })} />}
           <div className="cr-row" style={{ marginBottom: 10 }}>
             {viewing.status && <span className="cr-chip" style={{ background: "var(--clay)", color: "#fff" }}>{listName("selfcareStatus", viewing.status)}</span>}
             {viewing.category && <span className="cr-chip">{viewing.category}</span>}
+            <CardTopicChip item={viewing} />
           </div>
           {(viewing.content || "").trim() && <p style={{ fontSize: 14.5, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{viewing.content}</p>}
           {((viewing.planSteps || []).length > 0 || (viewing.actionPlan || "").trim()) && (
@@ -8348,7 +8512,7 @@ export default function App({ onSignOut }) {
   const searchData = { ...allData };
   deletedPages.forEach((id) => (hiddenKeys[id] || []).forEach((k) => { searchData[k] = []; }));
 
-  const collectionsMap = { vision: [vision, setVision], accounts: [accounts, setAccounts], personaldev: [personaldev, setPersonaldev], tasks: [tasks, setTasks], shopping: [shopping, setShopping], habits: [habits, setHabits], goals: [goals, setGoals], beauty: [beauty, setBeauty], selfcare: [selfcare, setSelfcare], hobbies: [hobbies, setHobbies], career: [career, setCareer], study: [study, setStudy], finance: [finance, setFinance] };
+  const collectionsMap = { vision: [vision, setVision], apps: [apps, setApps], notes: [notes, setNotes], accounts: [accounts, setAccounts], personaldev: [personaldev, setPersonaldev], tasks: [tasks, setTasks], shopping: [shopping, setShopping], habits: [habits, setHabits], goals: [goals, setGoals], beauty: [beauty, setBeauty], selfcare: [selfcare, setSelfcare], hobbies: [hobbies, setHobbies], career: [career, setCareer], study: [study, setStudy], finance: [finance, setFinance] };
   const listsCtx = { openManager: (key) => setManager({ kind: "list", key }), openAreas: () => setManager({ kind: "areas" }), openPrices: () => setManager({ kind: "prices" }) };
   const renderManager = () => {
     if (!manager) return null;
