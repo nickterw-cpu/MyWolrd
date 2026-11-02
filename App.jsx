@@ -607,42 +607,6 @@ function CardPersonalizationModal({ item, imageSrc, onSave, hasImage, defaultIma
   );
 }
 
-function DashboardWidgetImageModal({ widget, value, onSave, onClose }) {
-  const [form, setForm] = useState({
-    cardImageWidth: 100,
-    cardImageHeight: 160,
-    cardImageFit: "contain",
-    cardImageZoom: 1,
-    cardImageX: 0,
-    cardImageY: 0,
-    ...value,
-    image: value?.image || "",
-  });
-  const save = () => {
-    onSave({
-      ...form,
-      cardImageWidth: Number(form.cardImageWidth) || 100,
-      cardImageHeight: Number(form.cardImageHeight) || 160,
-      cardImageZoom: Number(form.cardImageZoom) || 1,
-      cardImageX: Number(form.cardImageX) || 0,
-      cardImageY: Number(form.cardImageY) || 0,
-    });
-    onClose();
-  };
-  return (
-    <Modal title={`Imagem do widget: ${widget?.label || "Dashboard"}`} onClose={onClose}>
-      <ImagePickerField label="Imagem do card (opcional)" value={form.image}
-        onChange={(image) => setForm({ ...form, image })} />
-      {form.image
-        ? <CardImagePreviewEditor src={form.image} form={form} setForm={setForm} defaultHeight={160} />
-        : <p className="cr-sub">Adicione uma imagem para ajustar tamanho, enquadramento, posição e zoom.</p>}
-      <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
-        <button type="button" className="cr-btn" onClick={onClose}>Cancelar</button>
-        <button type="button" className="cr-btn primary" onClick={save}>Salvar</button>
-      </div>
-    </Modal>
-  );
-}
 function isClosedItem(key, id) {
   const it = getList(key).find((i) => i.id === id);
   return !!(it && it.closed);
@@ -1482,7 +1446,6 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
   const [quickTitle, setQuickTitle] = useState("");
   const [musicPlaying, setMusicPlaying] = useState(false);
   const [musicProgress, setMusicProgress] = useState(0);
-  const [editingImageWidget, setEditingImageWidget] = useState(null);
   const addQuick = () => {
     if (!quickTitle.trim()) return;
     setTasks([{ id: uid(), title: quickTitle.trim(), area: areas[0]?.id, priority: "media", dueDate: today, done: false }, ...tasks]);
@@ -1708,38 +1671,6 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
     }
   };
 
-  const renderWidgetWithImage = (id) => {
-    const content = renderWidget(id);
-    if (!content) return null;
-    const imageSettings = settings.dashboardWidgetImages?.[id] || {};
-    const widget = widgets.find((entry) => entry.id === id) || DEFAULT_WIDGETS.find((entry) => entry.id === id);
-    const editButton = (
-      <div className="cr-row" style={{ justifyContent: "flex-end", marginBottom: imageSettings.image ? 8 : 0 }}>
-        <button type="button" className="cr-btn ghost" aria-label={`${imageSettings.image ? "Ajustar" : "Adicionar"} imagem em ${widget?.label || id}`}
-          onClick={(event) => { event.stopPropagation(); setEditingImageWidget(id); }}>
-          <ImageIcon size={13} /> {imageSettings.image ? "Ajustar imagem" : "Adicionar imagem"}
-        </button>
-      </div>
-    );
-    const image = imageSettings.image
-      ? <CardImage item={imageSettings} src={imageSettings.image} alt="" defaultHeight={160} style={{ borderRadius: 10, marginBottom: 10 }} />
-      : null;
-
-    if (React.isValidElement(content) && typeof content.props.className === "string"
-      && content.props.className.split(/\s+/).includes("cr-card")) {
-      return React.cloneElement(content, content.props, <>{editButton}{image}{content.props.children}</>);
-    }
-
-    if (id === "stats" && React.isValidElement(content)) {
-      return React.cloneElement(content, content.props, <>
-        <div className="cr-card" style={{ gridColumn: "1 / -1" }}>{editButton}{image}</div>
-        {content.props.children}
-      </>);
-    }
-
-    return <div key={id}>{editButton}{image}{content}</div>;
-  };
-
   // pair non-stats widgets two-by-two for a tidier layout
   const nonStats = widgets.filter((w) => w.id !== "stats" && w.id !== "panorama" && w.id !== "musicPlayer");
   return (
@@ -1749,30 +1680,15 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
       <p className="cr-sub" style={{ fontStyle: "italic" }}>{greeting.sub}</p>
       {settings.quote && <p className="cr-sub" style={{ fontStyle: "italic", opacity: 0.8 }}>{settings.quote}</p>}
 
-      {widgets.some((w) => w.id === "musicPlayer") && renderWidgetWithImage("musicPlayer")}
+      {widgets.some((w) => w.id === "musicPlayer") && renderWidget("musicPlayer")}
 
-      {widgets.some((w) => w.id === "panorama") && renderWidgetWithImage("panorama")}
+      {widgets.some((w) => w.id === "panorama") && renderWidget("panorama")}
 
-      {widgets.some((w) => w.id === "stats") && renderWidgetWithImage("stats")}
+      {widgets.some((w) => w.id === "stats") && renderWidget("stats")}
 
       {nonStats.map((w) => (
-        <div key={w.id} style={{ marginBottom: 26 }}>{renderWidgetWithImage(w.id)}</div>
+        <div key={w.id} style={{ marginBottom: 26 }}>{renderWidget(w.id)}</div>
       ))}
-
-      {editingImageWidget && (
-        <DashboardWidgetImageModal
-          widget={widgets.find((entry) => entry.id === editingImageWidget) || DEFAULT_WIDGETS.find((entry) => entry.id === editingImageWidget)}
-          value={settings.dashboardWidgetImages?.[editingImageWidget] || {}}
-          onSave={(value) => setSettings({
-            ...settings,
-            dashboardWidgetImages: {
-              ...(settings.dashboardWidgetImages || {}),
-              [editingImageWidget]: value,
-            },
-          })}
-          onClose={() => setEditingImageWidget(null)}
-        />
-      )}
     </div>
   );
 }
@@ -3965,7 +3881,6 @@ function AppModal({ app, onSave, onClose }) {
 function SettingsView({ areas, setAreas, settings, setSettings, allData, deletedPages, pageOf, onRestorePage, restoreBackup, onRefresh, refreshing }) {
   const ctx = useContext(ListsContext);
   const [editingArea, setEditingArea] = useState(null);
-  const [editingWidgetImage, setEditingWidgetImage] = useState(null);
 
   const saveArea = (data) => { setAreas(areas.some((x) => x.id === data.id) ? areas.map((x) => x.id === data.id ? { ...x, ...data } : x) : [...areas, data]); };
   const removeArea = (id) => setAreas(areas.filter((x) => x.id !== id));
@@ -4055,7 +3970,7 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
 
       <div className="cr-card" style={{ marginBottom: 16 }}>
         <h3 className="cr-serif" style={{ marginTop: 0, fontSize: 16 }}>Widgets do dashboard</h3>
-        <p className="cr-sub">Escolha o que aparece na tela inicial, em que ordem e configure uma imagem para cada widget.</p>
+        <p className="cr-sub">Escolha o que aparece na tela inicial e em que ordem.</p>
         {(settings.dashboardWidgets || DEFAULT_WIDGETS).map((w, i) => {
           const list = settings.dashboardWidgets || DEFAULT_WIDGETS;
           const move = (dir) => {
@@ -4071,7 +3986,6 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
             <div className="cr-list-row" key={w.id}>
               <div className={`cr-checkbox ${w.visible ? "checked" : ""}`} onClick={toggle}>{w.visible && <Check size={13} />}</div>
               <span className="cr-list-title" style={{ flex: 1 }}>{w.label}</span>
-              <button className="cr-btn" onClick={() => setEditingWidgetImage(w.id)}><ImageIcon size={13} /> Imagem</button>
               <button className="cr-btn ghost" disabled={i === 0} onClick={() => move(-1)}>↑</button>
               <button className="cr-btn ghost" disabled={i === list.length - 1} onClick={() => move(1)}>↓</button>
             </div>
@@ -4138,20 +4052,6 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
       )}
 
       {editingArea && <AreaModal area={editingArea === "new" ? null : editingArea} onSave={saveArea} onClose={() => setEditingArea(null)} />}
-      {editingWidgetImage && (
-        <DashboardWidgetImageModal
-          widget={DEFAULT_WIDGETS.find((widget) => widget.id === editingWidgetImage)}
-          value={settings.dashboardWidgetImages?.[editingWidgetImage] || {}}
-          onSave={(value) => setSettings({
-            ...settings,
-            dashboardWidgetImages: {
-              ...(settings.dashboardWidgetImages || {}),
-              [editingWidgetImage]: value,
-            },
-          })}
-          onClose={() => setEditingWidgetImage(null)}
-        />
-      )}
     </div>
   );
 }
