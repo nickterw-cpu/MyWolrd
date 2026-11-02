@@ -396,6 +396,135 @@ function personalizedCardClass(item) {
   return item?.cardSize === "wide" ? "cr-personal-card-wide" : "";
 }
 
+function cardImageValues(item, defaultHeight = 160) {
+  const bounded = (value, fallback, min, max) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+  };
+  return {
+    width: bounded(item?.cardImageWidth, 100, 30, 100),
+    height: bounded(item?.cardImageHeight, defaultHeight, 80, 600),
+    zoom: bounded(item?.cardImageZoom, 1, 0.5, 4),
+    x: bounded(item?.cardImageX, 0, -50, 50),
+    y: bounded(item?.cardImageY, 0, -50, 50),
+    fit: item?.cardImageFit === "cover" ? "cover" : "contain",
+  };
+}
+
+function CardImage({ item, src, alt = "", defaultHeight = 160, style = {}, onClick }) {
+  if (!src) return null;
+  const image = cardImageValues(item, defaultHeight);
+  return (
+    <div onClick={onClick} style={{
+      position: "relative",
+      display: "block",
+      width: `${image.width}%`,
+      height: image.height,
+      marginLeft: "auto",
+      marginRight: "auto",
+      overflow: "hidden",
+      ...style,
+    }}>
+      <img src={src} alt={alt} draggable="false" style={{
+        display: "block",
+        width: "100%",
+        height: "100%",
+        objectFit: image.fit,
+        objectPosition: "center",
+        transform: `translate(${image.x}%, ${image.y}%) scale(${image.zoom})`,
+        transformOrigin: "center",
+        userSelect: "none",
+      }} />
+    </div>
+  );
+}
+
+function CardImagePreviewEditor({ src, form, setForm, defaultHeight = 160 }) {
+  const frame = useRef(null);
+  const drag = useRef(null);
+  const image = cardImageValues(form, defaultHeight);
+  const move = (event) => {
+    const start = drag.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    setForm((current) => ({
+      ...current,
+      cardImageX: Math.max(-50, Math.min(50, start.xOffset + ((event.clientX - start.x) / start.width) * 100)),
+      cardImageY: Math.max(-50, Math.min(50, start.yOffset + ((event.clientY - start.y) / start.height) * 100)),
+    }));
+  };
+  const startMove = (event) => {
+    const bounds = frame.current?.getBoundingClientRect();
+    if (!bounds) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      width: bounds.width || 1,
+      height: bounds.height || 1,
+      xOffset: image.x,
+      yOffset: image.y,
+    };
+  };
+  const finishMove = (event) => {
+    if (drag.current?.pointerId === event.pointerId) drag.current = null;
+  };
+  return (
+    <div className="cr-field">
+      <label className="cr-label">Prévia — arraste a imagem para reposicionar</label>
+      {src ? (
+        <div ref={frame} onPointerDown={startMove} onPointerMove={move} onPointerUp={finishMove} onPointerCancel={finishMove}
+          style={{ width: `${image.width}%`, height: Math.min(image.height, 320), margin: "0 auto 12px", overflow: "hidden", borderRadius: 10, background: "#eee7db", touchAction: "none", cursor: "move" }}>
+          <img src={src} alt="Prévia da imagem do card" draggable="false" style={{
+            display: "block",
+            width: "100%",
+            height: "100%",
+            objectFit: image.fit,
+            objectPosition: "center",
+            transform: `translate(${image.x}%, ${image.y}%) scale(${image.zoom})`,
+            transformOrigin: "center",
+            userSelect: "none",
+            pointerEvents: "none",
+          }} />
+        </div>
+      ) : <p className="cr-sub">Adicione a imagem na edição do item para visualizar o ajuste.</p>}
+      <div className="cr-field">
+        <label className="cr-label">Enquadramento</label>
+        <select className="cr-select" value={image.fit} onChange={(event) => setForm({ ...form, cardImageFit: event.target.value })}>
+          <option value="contain">Imagem completa (sem cortes)</option>
+          <option value="cover">Preencher o espaço (pode cortar)</option>
+        </select>
+      </div>
+      <div className="cr-field">
+        <label className="cr-label">Largura: {image.width}%</label>
+        <input type="range" aria-label="Largura da imagem" min="30" max="100" step="1" value={image.width}
+          onChange={(event) => setForm({ ...form, cardImageWidth: Number(event.target.value) })} style={{ width: "100%" }} />
+      </div>
+      <div className="cr-field">
+        <label className="cr-label">Altura: {image.height}px</label>
+        <input type="range" aria-label="Altura da imagem" min="80" max="600" step="5" value={image.height}
+          onChange={(event) => setForm({ ...form, cardImageHeight: Number(event.target.value) })} style={{ width: "100%" }} />
+      </div>
+      <div className="cr-field">
+        <label className="cr-label">Zoom: {image.zoom.toFixed(1)}×</label>
+        <input type="range" aria-label="Zoom da imagem" min="0.5" max="4" step="0.1" value={image.zoom}
+          onChange={(event) => setForm({ ...form, cardImageZoom: Number(event.target.value) })} style={{ width: "100%" }} />
+      </div>
+      <div className="cr-field">
+        <label className="cr-label">Posição horizontal: {Math.round(image.x)}</label>
+        <input type="range" aria-label="Posição horizontal da imagem" min="-50" max="50" step="1" value={image.x}
+          onChange={(event) => setForm({ ...form, cardImageX: Number(event.target.value) })} style={{ width: "100%" }} />
+      </div>
+      <div className="cr-field">
+        <label className="cr-label">Posição vertical: {Math.round(image.y)}</label>
+        <input type="range" aria-label="Posição vertical da imagem" min="-50" max="50" step="1" value={image.y}
+          onChange={(event) => setForm({ ...form, cardImageY: Number(event.target.value) })} style={{ width: "100%" }} />
+      </div>
+    </div>
+  );
+}
+
 function CardTopicChip({ item }) {
   return item?.topic ? <span className="cr-chip">{listName("cardTopic", item.topic)}</span> : null;
 }
@@ -404,7 +533,7 @@ function CardExtraText({ item }) {
   return item?.cardNote ? <p style={{ fontSize: 13, margin: "8px 0", whiteSpace: "pre-wrap" }}>{item.cardNote}</p> : null;
 }
 
-function CardPersonalizationButton({ item, onSave, hasImage = false, defaultImageHeight = 160 }) {
+function CardPersonalizationButton({ item, onSave, hasImage = false, imageSrc = item.image, defaultImageHeight = 160 }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -412,12 +541,12 @@ function CardPersonalizationButton({ item, onSave, hasImage = false, defaultImag
         onClick={(event) => { event.stopPropagation(); setOpen(true); }}>
         <Palette size={13} /> Personalizar
       </button>
-      {open && <CardPersonalizationModal item={item} onSave={onSave} hasImage={hasImage} defaultImageHeight={defaultImageHeight} onClose={() => setOpen(false)} />}
+      {open && <CardPersonalizationModal item={item} imageSrc={imageSrc} onSave={onSave} hasImage={hasImage} defaultImageHeight={defaultImageHeight} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function CardPersonalizationModal({ item, onSave, hasImage, defaultImageHeight, onClose }) {
+function CardPersonalizationModal({ item, imageSrc, onSave, hasImage, defaultImageHeight, onClose }) {
   const ctx = useContext(ListsContext);
   const [form, setForm] = useState({
     topic: item.topic || "",
@@ -427,8 +556,11 @@ function CardPersonalizationModal({ item, onSave, hasImage, defaultImageHeight, 
     cardImageHeight: Number(item.cardImageHeight) || defaultImageHeight,
     cardImageWidth: Number(item.cardImageWidth) || 100,
     cardImageFit: item.cardImageFit || "contain",
+    cardImageZoom: Number(item.cardImageZoom) || 1,
+    cardImageX: Number(item.cardImageX) || 0,
+    cardImageY: Number(item.cardImageY) || 0,
   });
-  const imageIsAvailable = hasImage || !!item.image || item.type === "image";
+  const imageIsAvailable = hasImage || !!imageSrc || item.type === "image";
   const save = () => {
     onSave({ ...form, cardImageHeight: Number(form.cardImageHeight), cardImageWidth: Number(form.cardImageWidth) });
     onClose();
@@ -459,27 +591,7 @@ function CardPersonalizationModal({ item, onSave, hasImage, defaultImageHeight, 
         </select>
       </div>
       {imageIsAvailable && (
-        <>
-          <div className="cr-field">
-            <label className="cr-label">Enquadramento</label>
-            <select className="cr-select" value={form.cardImageFit} onChange={(event) => setForm({ ...form, cardImageFit: event.target.value })}>
-              <option value="contain">Imagem completa (sem cortes)</option>
-              <option value="cover">Preencher o espaço (pode cortar)</option>
-            </select>
-          </div>
-          <div className="cr-field">
-            <label className="cr-label">Largura da imagem: {form.cardImageWidth}%</label>
-            <input type="range" min="40" max="100" step="5" value={form.cardImageWidth}
-              onChange={(event) => setForm({ ...form, cardImageWidth: Number(event.target.value) })}
-              style={{ width: "100%" }} />
-          </div>
-          <div className="cr-field">
-            <label className="cr-label">Altura da imagem: {form.cardImageHeight}px</label>
-            <input type="range" min="80" max="420" step="10" value={form.cardImageHeight}
-              onChange={(event) => setForm({ ...form, cardImageHeight: Number(event.target.value) })}
-              style={{ width: "100%" }} />
-          </div>
-        </>
+        <CardImagePreviewEditor src={imageSrc} form={form} setForm={setForm} defaultHeight={defaultImageHeight} />
       )}
       <div className="cr-field">
         <label className="cr-label">Texto complementar exibido no card</label>
@@ -494,15 +606,41 @@ function CardPersonalizationModal({ item, onSave, hasImage, defaultImageHeight, 
   );
 }
 
-function personalizedImageStyle(item, defaultHeight, extra = {}) {
-  return {
-    width: `${Number(item?.cardImageWidth) || 100}%`,
-    height: Number(item?.cardImageHeight) || defaultHeight,
-    objectFit: item?.cardImageFit || "contain",
-    marginLeft: "auto",
-    marginRight: "auto",
-    ...extra,
+function DashboardWidgetImageModal({ widget, value, onSave, onClose }) {
+  const [form, setForm] = useState({
+    cardImageWidth: 100,
+    cardImageHeight: 160,
+    cardImageFit: "contain",
+    cardImageZoom: 1,
+    cardImageX: 0,
+    cardImageY: 0,
+    ...value,
+    image: value?.image || "",
+  });
+  const save = () => {
+    onSave({
+      ...form,
+      cardImageWidth: Number(form.cardImageWidth) || 100,
+      cardImageHeight: Number(form.cardImageHeight) || 160,
+      cardImageZoom: Number(form.cardImageZoom) || 1,
+      cardImageX: Number(form.cardImageX) || 0,
+      cardImageY: Number(form.cardImageY) || 0,
+    });
+    onClose();
   };
+  return (
+    <Modal title={`Imagem do widget: ${widget?.label || "Dashboard"}`} onClose={onClose}>
+      <ImagePickerField label="Imagem do card (opcional)" value={form.image}
+        onChange={(image) => setForm({ ...form, image })} />
+      {form.image
+        ? <CardImagePreviewEditor src={form.image} form={form} setForm={setForm} defaultHeight={160} />
+        : <p className="cr-sub">Adicione uma imagem para ajustar tamanho, enquadramento, posição e zoom.</p>}
+      <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
+        <button type="button" className="cr-btn" onClick={onClose}>Cancelar</button>
+        <button type="button" className="cr-btn primary" onClick={save}>Salvar</button>
+      </div>
+    </Modal>
+  );
 }
 function isClosedItem(key, id) {
   const it = getList(key).find((i) => i.id === id);
@@ -1343,6 +1481,7 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
   const [quickTitle, setQuickTitle] = useState("");
   const [musicPlaying, setMusicPlaying] = useState(false);
   const [musicProgress, setMusicProgress] = useState(0);
+  const [editingImageWidget, setEditingImageWidget] = useState(null);
   const addQuick = () => {
     if (!quickTitle.trim()) return;
     setTasks([{ id: uid(), title: quickTitle.trim(), area: areas[0]?.id, priority: "media", dueDate: today, done: false }, ...tasks]);
@@ -1568,6 +1707,38 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
     }
   };
 
+  const renderWidgetWithImage = (id) => {
+    const content = renderWidget(id);
+    if (!content) return null;
+    const imageSettings = settings.dashboardWidgetImages?.[id] || {};
+    const widget = widgets.find((entry) => entry.id === id) || DEFAULT_WIDGETS.find((entry) => entry.id === id);
+    const editButton = (
+      <div className="cr-row" style={{ justifyContent: "flex-end", marginBottom: imageSettings.image ? 8 : 0 }}>
+        <button type="button" className="cr-btn ghost" aria-label={`${imageSettings.image ? "Ajustar" : "Adicionar"} imagem em ${widget?.label || id}`}
+          onClick={(event) => { event.stopPropagation(); setEditingImageWidget(id); }}>
+          <ImageIcon size={13} /> {imageSettings.image ? "Ajustar imagem" : "Adicionar imagem"}
+        </button>
+      </div>
+    );
+    const image = imageSettings.image
+      ? <CardImage item={imageSettings} src={imageSettings.image} alt="" defaultHeight={160} style={{ borderRadius: 10, marginBottom: 10 }} />
+      : null;
+
+    if (React.isValidElement(content) && typeof content.props.className === "string"
+      && content.props.className.split(/\s+/).includes("cr-card")) {
+      return React.cloneElement(content, content.props, <>{editButton}{image}{content.props.children}</>);
+    }
+
+    if (id === "stats" && React.isValidElement(content)) {
+      return React.cloneElement(content, content.props, <>
+        <div className="cr-card" style={{ gridColumn: "1 / -1" }}>{editButton}{image}</div>
+        {content.props.children}
+      </>);
+    }
+
+    return <div key={id}>{editButton}{image}{content}</div>;
+  };
+
   // pair non-stats widgets two-by-two for a tidier layout
   const nonStats = widgets.filter((w) => w.id !== "stats" && w.id !== "panorama" && w.id !== "musicPlayer");
   return (
@@ -1577,16 +1748,30 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
       <p className="cr-sub" style={{ fontStyle: "italic" }}>{greeting.sub}</p>
       {settings.quote && <p className="cr-sub" style={{ fontStyle: "italic", opacity: 0.8 }}>{settings.quote}</p>}
 
-      {widgets.some((w) => w.id === "musicPlayer") && renderWidget("musicPlayer")}
+      {widgets.some((w) => w.id === "musicPlayer") && renderWidgetWithImage("musicPlayer")}
 
-      {widgets.some((w) => w.id === "panorama") && renderWidget("panorama")}
+      {widgets.some((w) => w.id === "panorama") && renderWidgetWithImage("panorama")}
 
-      {widgets.some((w) => w.id === "stats") && renderWidget("stats")}
+      {widgets.some((w) => w.id === "stats") && renderWidgetWithImage("stats")}
 
       {nonStats.map((w) => (
-        <div key={w.id} style={{ marginBottom: 26 }}>{renderWidget(w.id)}</div>
+        <div key={w.id} style={{ marginBottom: 26 }}>{renderWidgetWithImage(w.id)}</div>
       ))}
 
+      {editingImageWidget && (
+        <DashboardWidgetImageModal
+          widget={widgets.find((entry) => entry.id === editingImageWidget) || DEFAULT_WIDGETS.find((entry) => entry.id === editingImageWidget)}
+          value={settings.dashboardWidgetImages?.[editingImageWidget] || {}}
+          onSave={(value) => setSettings({
+            ...settings,
+            dashboardWidgetImages: {
+              ...(settings.dashboardWidgetImages || {}),
+              [editingImageWidget]: value,
+            },
+          })}
+          onClose={() => setEditingImageWidget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1970,7 +2155,7 @@ function GoalCard({ g, areas, onView, onEdit, onRemove, onCustomize, dimmed }) {
       onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onView(); } }}
       style={{ cursor: "pointer", ...(dimmed ? { opacity: 0.75 } : {}), ...personalizedCardStyle(g) }}>
       {g.image ? (
-        <img src={g.image} alt="" style={personalizedImageStyle(g, 110, { borderRadius: 10, marginBottom: 8 })} />
+        <CardImage item={g} src={g.image} defaultHeight={110} style={{ borderRadius: 10, marginBottom: 8 }} />
       ) : (
         <div style={{
           width: "100%", height: 76, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
@@ -2026,7 +2211,7 @@ function GoalDetailsModal({ goal, areas, onChange, onEdit, onClose }) {
       </div>
       {tab === "detalhes" ? (
         <div style={{ marginTop: 12 }}>
-          {goal.image && <img src={goal.image} alt="" style={personalizedImageStyle(goal, 280, { borderRadius: 10, maxHeight: 420 })} />}
+          {goal.image && <CardImage item={goal} src={goal.image} defaultHeight={280} style={{ borderRadius: 10, maxHeight: 420 }} />}
           <div className="cr-row" style={{ margin: "10px 0", flexWrap: "wrap" }}>
             <AreaBadge area={goal.area} areas={areas} />
             <span className="cr-chip">{listName("goalStatus", goal.status)}</span>
@@ -3649,6 +3834,7 @@ function NotesView({ notes, setNotes, areas }) {
         {filtered.length === 0 && <p className="cr-empty">Nenhuma nota encontrada.</p>}
         {filtered.map((n) => (
           <div className={`cr-card ${personalizedCardClass(n)}`} key={n.id} style={personalizedCardStyle(n)}>
+            {n.image && <CardImage item={n} src={n.image} alt="" defaultHeight={140} style={{ borderRadius: 10, marginBottom: 8 }} />}
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
               <h3 style={{ margin: 0, fontSize: 15 }} className="cr-serif">{n.title}</h3>
               <div className="cr-row" style={{ gap: 2 }}>
@@ -3672,7 +3858,7 @@ function NotesView({ notes, setNotes, areas }) {
 }
 
 function NoteModal({ note, areas, onSave, onClose }) {
-  const [form, setForm] = useState(note || { title: "", content: "", area: areas[0]?.id, link: "" });
+  const [form, setForm] = useState(note || { title: "", content: "", area: areas[0]?.id, link: "", image: "" });
   const autoStatus = useAutoSave(form, onSave, undefined);
   return (
     <Modal title={note ? "Editar nota" : "Nova nota"} onClose={onClose}>
@@ -3682,6 +3868,7 @@ function NoteModal({ note, areas, onSave, onClose }) {
         <textarea className="cr-textarea" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Área</label>
         <AreaSelect value={form.area} onChange={(v) => setForm({ ...form, area: v })} areas={areas} /></div>
+      <ImagePickerField label="Imagem do card (opcional)" value={form.image || ""} onChange={(image) => setForm({ ...form, image })} />
       <div className="cr-field"><label className="cr-label">Link de referência (opcional)</label>
         <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
@@ -3726,6 +3913,7 @@ function AppsView({ apps, setApps }) {
           const AppIcon = iconForApp(a.name);
           return (
           <div className={`cr-card ${personalizedCardClass(a)}`} key={a.id} style={{ textAlign: "center", ...personalizedCardStyle(a) }}>
+            {a.image && <CardImage item={a} src={a.image} alt="" defaultHeight={120} style={{ borderRadius: 10, marginBottom: 8 }} />}
             <button style={{
               textDecoration: "none", color: "inherit", border: "none", background: "none",
               padding: 0, cursor: "pointer", width: "100%", font: "inherit",
@@ -3755,7 +3943,7 @@ function AppsView({ apps, setApps }) {
 }
 
 function AppModal({ app, onSave, onClose }) {
-  const [form, setForm] = useState(app || { name: "", url: "" });
+  const [form, setForm] = useState(app || { name: "", url: "", image: "" });
   const autoStatus = useAutoSave(form, onSave, undefined);
   return (
     <Modal title={app ? "Editar atalho" : "Novo atalho"} onClose={onClose}>
@@ -3763,6 +3951,7 @@ function AppModal({ app, onSave, onClose }) {
         <input className="cr-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Link</label>
         <input className="cr-input" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} /></div>
+      <ImagePickerField label="Imagem do card (opcional)" value={form.image || ""} onChange={(image) => setForm({ ...form, image })} />
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
     </Modal>
   );
@@ -3775,6 +3964,7 @@ function AppModal({ app, onSave, onClose }) {
 function SettingsView({ areas, setAreas, settings, setSettings, allData, deletedPages, pageOf, onRestorePage, restoreBackup, onRefresh, refreshing }) {
   const ctx = useContext(ListsContext);
   const [editingArea, setEditingArea] = useState(null);
+  const [editingWidgetImage, setEditingWidgetImage] = useState(null);
 
   const saveArea = (data) => { setAreas(areas.some((x) => x.id === data.id) ? areas.map((x) => x.id === data.id ? { ...x, ...data } : x) : [...areas, data]); };
   const removeArea = (id) => setAreas(areas.filter((x) => x.id !== id));
@@ -3864,7 +4054,7 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
 
       <div className="cr-card" style={{ marginBottom: 16 }}>
         <h3 className="cr-serif" style={{ marginTop: 0, fontSize: 16 }}>Widgets do dashboard</h3>
-        <p className="cr-sub">Escolha o que aparece na tela inicial e em que ordem.</p>
+        <p className="cr-sub">Escolha o que aparece na tela inicial, em que ordem e configure uma imagem para cada widget.</p>
         {(settings.dashboardWidgets || DEFAULT_WIDGETS).map((w, i) => {
           const list = settings.dashboardWidgets || DEFAULT_WIDGETS;
           const move = (dir) => {
@@ -3880,6 +4070,7 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
             <div className="cr-list-row" key={w.id}>
               <div className={`cr-checkbox ${w.visible ? "checked" : ""}`} onClick={toggle}>{w.visible && <Check size={13} />}</div>
               <span className="cr-list-title" style={{ flex: 1 }}>{w.label}</span>
+              <button className="cr-btn" onClick={() => setEditingWidgetImage(w.id)}><ImageIcon size={13} /> Imagem</button>
               <button className="cr-btn ghost" disabled={i === 0} onClick={() => move(-1)}>↑</button>
               <button className="cr-btn ghost" disabled={i === list.length - 1} onClick={() => move(1)}>↓</button>
             </div>
@@ -3946,6 +4137,20 @@ function SettingsView({ areas, setAreas, settings, setSettings, allData, deleted
       )}
 
       {editingArea && <AreaModal area={editingArea === "new" ? null : editingArea} onSave={saveArea} onClose={() => setEditingArea(null)} />}
+      {editingWidgetImage && (
+        <DashboardWidgetImageModal
+          widget={DEFAULT_WIDGETS.find((widget) => widget.id === editingWidgetImage)}
+          value={settings.dashboardWidgetImages?.[editingWidgetImage] || {}}
+          onSave={(value) => setSettings({
+            ...settings,
+            dashboardWidgetImages: {
+              ...(settings.dashboardWidgetImages || {}),
+              [editingWidgetImage]: value,
+            },
+          })}
+          onClose={() => setEditingWidgetImage(null)}
+        />
+      )}
     </div>
   );
 }
@@ -6260,7 +6465,7 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
   return (
     <div className={`cr-card ${personalizedCardClass(b)}`} style={{ cursor: "pointer", ...personalizedCardStyle(b) }} onClick={onEdit} title="Clique para abrir o procedimento completo">
       {on("image") && (b.image ? (
-        <img src={b.image} alt="" style={personalizedImageStyle(b, 120, { borderRadius: 10, marginBottom: 8 })} />
+        <CardImage item={b} src={b.image} defaultHeight={120} style={{ borderRadius: 10, marginBottom: 8 }} />
       ) : (
         <div style={{
           width: "100%", height: 70, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
@@ -6686,8 +6891,8 @@ function VisionView({ vision, setVision }) {
         {vision.map((v, i) => (
           <div className={`cr-card ${personalizedCardClass(v)}`} key={v.id} style={{ padding: 12, ...personalizedCardStyle(v) }}>
             {v.type === "image" && v.content && (
-              <img src={v.content} alt="" onClick={() => setZoom(v.content)}
-                style={personalizedImageStyle(v, 420, { maxHeight: "60vh", borderRadius: 12, marginBottom: 10, cursor: "zoom-in", display: "block" })} />
+              <CardImage item={v} src={v.content} alt="" defaultHeight={420} onClick={() => setZoom(v.content)}
+                style={{ maxHeight: "60vh", borderRadius: 12, marginBottom: 10, cursor: "zoom-in" }} />
             )}
             {v.type === "quote" && (
               <p className="cr-serif" style={{ fontSize: 22, lineHeight: 1.35, fontStyle: "italic", margin: "18px 8px 22px", textAlign: "center" }}>"{v.content}"</p>
@@ -6696,7 +6901,7 @@ function VisionView({ vision, setVision }) {
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
               <div className="cr-row"><span className="cr-chip">{v.category}</span><CardTopicChip item={v} /></div>
               <div className="cr-row" style={{ gap: 2 }}>
-                <CardPersonalizationButton item={v} onSave={(patch) => save({ ...v, ...patch })} hasImage={v.type === "image"} defaultImageHeight={420} />
+                <CardPersonalizationButton item={v} onSave={(patch) => save({ ...v, ...patch })} hasImage={v.type === "image"} imageSrc={v.type === "image" ? v.content : ""} defaultImageHeight={420} />
                 <button className="cr-btn ghost" disabled={i === 0} onClick={() => move(v.id, -1)}>↑</button>
                 <button className="cr-btn ghost" disabled={i === vision.length - 1} onClick={() => move(v.id, 1)}>↓</button>
                 <button className="cr-btn ghost" onClick={() => setEditing(v)}><Pencil size={13} /></button>
@@ -7220,14 +7425,14 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
 
       {viewAll || filterCategory !== "todas" ? (
         <div className="cr-grid cr-grid-3">
-          {filtered.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onImageResize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
+          {filtered.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
         </div>
       ) : (
         byCategory().map(([cat, items]) => (
           <div key={cat} style={{ marginBottom: 22 }}>
             <SectionTitle title={cat} count={`${items.length} ${items.length === 1 ? "item" : "itens"}`} />
             <div className="cr-grid cr-grid-3">
-              {items.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onImageResize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
+              {items.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={tab === "recomprar"} />)}
             </div>
           </div>
         ))
@@ -7290,7 +7495,7 @@ function WishlistCardFieldsModal({ settings, setSettings, onClose }) {
   );
 }
 
-function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onImageResize, forcePurchase }) {
+function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onCustomize, forcePurchase }) {
   const isRoutine = s._kind === "rotina";
   const st = s._status || s.status;
   const show = (key) => wishlistCardFieldOn(settings || {}, key);
@@ -7299,11 +7504,12 @@ function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onImageResize
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{s.name}</h3>
         <div className="cr-row" style={{ gap: 2 }}>
+          <CardPersonalizationButton item={s} onSave={onCustomize} />
           <button className="cr-btn ghost" onClick={onEdit}><Pencil size={13} /></button>
           <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
       </div>
-      {show("image") && s.image && <ManuallyResizableImage item={s} onResize={onImageResize} alt={s.name} />}
+      {show("image") && s.image && <CardImage item={s} src={s.image} alt={s.name} defaultHeight={160} style={{ marginTop: 8, marginBottom: 8, borderRadius: 10 }} />}
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
         {show("category") && s.category && <span className="cr-chip">{s.category}</span>}
         {show("priority") && <PriorityChip id={s.priority} />}
@@ -7326,68 +7532,6 @@ function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onImageResize
           {forcePurchase ? "Registrar recompra" : "Confirmar compra"}
         </button>
       )}
-    </div>
-  );
-}
-
-function ManuallyResizableImage({ item, onResize, alt }) {
-  const [size, setSize] = useState(() => ({
-    width: Number(item.cardImageWidth) || 100,
-    height: Number(item.cardImageHeight) || 160,
-  }));
-  const drag = useRef(null);
-  const container = useRef(null);
-  useEffect(() => {
-    setSize({ width: Number(item.cardImageWidth) || 100, height: Number(item.cardImageHeight) || 160 });
-  }, [item.cardImageWidth, item.cardImageHeight]);
-  const beginResize = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = {
-      pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      width: size.width,
-      height: size.height,
-      containerWidth: container.current?.getBoundingClientRect().width || 1,
-    };
-  };
-  const resize = (event) => {
-    if (!drag.current || drag.current.pointerId !== event.pointerId) return;
-    const start = drag.current;
-    setSize({
-      width: Math.max(30, Math.min(100, start.width + ((event.clientX - start.x) / start.containerWidth) * 100)),
-      height: Math.max(80, Math.min(600, start.height + event.clientY - start.y)),
-    });
-  };
-  const finishResize = (event) => {
-    if (!drag.current || drag.current.pointerId !== event.pointerId) return;
-    const start = drag.current;
-    const nextSize = {
-      width: Math.max(30, Math.min(100, start.width + ((event.clientX - start.x) / start.containerWidth) * 100)),
-      height: Math.max(80, Math.min(600, start.height + event.clientY - start.y)),
-    };
-    drag.current = null;
-    setSize(nextSize);
-    onResize({ cardImageWidth: Math.round(nextSize.width), cardImageHeight: Math.round(nextSize.height), cardImageFit: "contain" });
-  };
-  return (
-    <div ref={container} style={{ position: "relative", width: "100%", margin: "8px 0" }}
-      onPointerMove={resize} onPointerUp={finishResize} onPointerCancel={finishResize}>
-      <img src={item.image} alt={alt} style={{
-        display: "block", width: `${size.width}%`, height: size.height, margin: "0 auto",
-        objectFit: "contain", borderRadius: 10,
-      }} />
-      <button type="button" aria-label="Redimensionar imagem arrastando" title="Arraste para redimensionar"
-        onPointerDown={beginResize}
-        style={{
-          position: "absolute", right: `calc(50% - ${size.width / 2}%)`, bottom: 0, zIndex: 1,
-          width: 22, height: 22, padding: 0, border: "2px solid #fff", borderRadius: 6,
-          background: "var(--clay)", cursor: "nwse-resize", touchAction: "none",
-        }}>
-        <span style={{ display: "block", width: 8, height: 8, margin: "auto", borderRight: "2px solid #fff", borderBottom: "2px solid #fff" }} />
-      </button>
     </div>
   );
 }
@@ -7568,7 +7712,7 @@ function HobbiesView({ hobbies, setHobbies, originTarget, clearOriginTarget }) {
       {editing && <HobbyModal item={editing === "new" ? null : editing} onSave={save} onClose={() => setEditing(null)} />}
       {viewing && (
         <Modal title={viewing.name} onClose={() => setViewing(null)}>
-          {viewing.image && <img src={viewing.image} alt="" style={personalizedImageStyle(viewing, 300, { maxHeight: 420, borderRadius: 12, marginBottom: 12 })} />}
+          {viewing.image && <CardImage item={viewing} src={viewing.image} defaultHeight={300} style={{ maxHeight: 420, borderRadius: 12, marginBottom: 12 }} />}
           {viewing.description && <p style={{ whiteSpace: "pre-wrap" }}>{viewing.description}</p>}
           {viewing.goal && <p><strong>Objetivo:</strong> {viewing.goal}</p>}
           <div className="cr-row" style={{ flexWrap: "wrap" }}>
@@ -7619,7 +7763,7 @@ function HobbyCard({ h, onView, onEdit, onRemove, onCustomize }) {
   return (
     <div className={`cr-card ${personalizedCardClass(h)}`} style={personalizedCardStyle(h)}>
       {h.image ? (
-        <img src={h.image} alt="" style={personalizedImageStyle(h, 130, { borderRadius: 10, marginBottom: 8 })} />
+        <CardImage item={h} src={h.image} defaultHeight={130} style={{ borderRadius: 10, marginBottom: 8 }} />
       ) : (
         <button onClick={onEdit} style={{
           width: "100%", height: 90, borderRadius: 10, marginBottom: 8, border: "1.5px dashed var(--line)",
@@ -7820,7 +7964,7 @@ function SelfCareView({ selfcare, setSelfcare }) {
     <div className={`cr-card ${personalizedCardClass(s)}`} key={s.id} style={{ display: "flex", flexDirection: "column", ...personalizedCardStyle(s) }}>
       {s.image ? (
         <div style={{ marginBottom: 10 }}>
-          <img src={s.image} alt="" style={personalizedImageStyle(s, 150, { borderRadius: 10, display: "block" })} />
+          <CardImage item={s} src={s.image} defaultHeight={150} style={{ borderRadius: 10 }} />
           <div className="cr-row" style={{ gap: 4, marginTop: 4 }}>
             <button className="cr-btn ghost" style={{ padding: "2px 8px", fontSize: 11.5 }} onClick={() => setEditing(s)}>Trocar imagem</button>
             <button className="cr-btn ghost danger" style={{ padding: "2px 8px", fontSize: 11.5 }} onClick={() => save({ ...s, image: "" })}>Remover imagem</button>
@@ -7884,7 +8028,7 @@ function SelfCareView({ selfcare, setSelfcare }) {
       {editing && <SelfCareModal item={editing === "new" ? null : editing} onSave={save} onClose={() => setEditing(null)} />}
       {viewing && (
         <Modal title={viewing.title} onClose={() => setViewing(null)}>
-          {viewing.image && <img src={viewing.image} alt="" style={personalizedImageStyle(viewing, 340, { maxHeight: 420, borderRadius: 12, marginBottom: 12 })} />}
+          {viewing.image && <CardImage item={viewing} src={viewing.image} defaultHeight={340} style={{ maxHeight: 420, borderRadius: 12, marginBottom: 12 }} />}
           <div className="cr-row" style={{ marginBottom: 10 }}>
             {viewing.status && <span className="cr-chip" style={{ background: "var(--clay)", color: "#fff" }}>{listName("selfcareStatus", viewing.status)}</span>}
             {viewing.category && <span className="cr-chip">{viewing.category}</span>}

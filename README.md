@@ -22,6 +22,8 @@ A aplicação web reúne:
 
 Metas incluem uma visualização completa e um plano de ação editável. Hábitos contam sequências por datas consecutivas, inclusive entre meses e ao marcar os dias em ordem cronológica. O dashboard usa a mesma agenda Google da área de planejamento e rotinas e oferece um player visual simulado com campos para música, artista e letra, sem exigir link de áudio. O gráfico financeiro compartilha o filtro de mês entre o dashboard e a aba Finanças.
 
+Nos cards que aceitam imagem, **Personalizar** permite ajustar largura, altura, enquadramento, zoom e posição; também é possível arrastar a prévia para reposicionar a imagem. Cada widget do dashboard aceita uma imagem própria, configurável pelo botão **Adicionar imagem** no widget ou por **Configurações → Widgets do dashboard**.
+
 A Wishlist mantém uma área de recompra com data de compra, duração estimada e alertas dentro do aplicativo. Os produtos têm classes de compra e uma aba Financeiro com gastos por item, filtros por classe, categoria, texto e período. Itens de compra única desaparecem da lista quando comprados, sem perder o histórico financeiro. O planejamento financeiro permite discriminar descontos e cadastrar vários recebimentos mensais; lançamentos integrados podem abrir e excluir o respectivo evento na área de origem.
 
 A interface adapta os menus, formulários, filtros e listas para celular, tablet e computador. Áreas, status e categorias podem ser gerenciados nas próprias telas ou em **Configurações → Listas, categorias e status**; objetivos de investimentos também são editáveis na área de investimentos. As mudanças atualizam os formulários e filtros sem apagar os registros associados.
