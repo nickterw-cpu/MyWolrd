@@ -787,9 +787,9 @@ function FilterGroups({ groups, defaultOpen }) {
 // Títulos de categoria: preto + vinho (texto preto, linha vinho com um trecho preto)
 const TITLE_WINE = "#6B1426";
 const TITLE_INK = "#1B1717";
-function SectionTitle({ title, count, right }) {
+function SectionTitle({ title, count, right, compact = false }) {
   return (
-    <div style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", borderBottom: `3px solid ${TITLE_WINE}`, paddingBottom: 9, margin: "34px 0 16px" }}>
+    <div style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", borderBottom: `3px solid ${TITLE_WINE}`, paddingBottom: 9, margin: compact ? "22px 0 6px" : "34px 0 16px" }}>
       <h2 className="cr-serif" style={{ margin: 0, fontSize: 30, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: TITLE_INK }}>{title}</h2>
       {count !== undefined && count !== null && <span style={{ margin: 0, fontSize: 13, fontWeight: 600, color: TITLE_WINE }}>{count}</span>}
       {right && <div style={{ marginLeft: "auto" }}>{right}</div>}
@@ -6549,7 +6549,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
             if (items.length === 0) return null;
             return (
               <div key={sec.id || "sem"} style={{ marginBottom: 22 }}>
-                <SectionTitle title={sec.label} count={`${items.length} ${items.length === 1 ? "procedimento" : "procedimentos"}`}
+                <SectionTitle compact title={sec.label} count={`${items.length} ${items.length === 1 ? "procedimento" : "procedimentos"}`}
                   right={sec.id ? (
                     <div className="cr-row" style={{ gap: 2 }}>
                       <button type="button" className="cr-btn ghost" title="Editar título" aria-label={`Editar título ${sec.label}`}
@@ -7306,7 +7306,7 @@ function HouseView({ house, setHouse }) {
     <div>
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <div><h1 className="cr-h1 cr-serif">Casa</h1><p className="cr-sub">Manutenção, organização e pendências domésticas.</p></div>
-        <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
+        <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> {showEssentials ? "Novo essencial" : "Novo item"}</button>
       </div>
       <div className="cr-card" style={{ marginTop: 16 }}>
         {house.length === 0 && <p className="cr-empty">Nada registrado ainda.</p>}
@@ -7699,7 +7699,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
       </>
       )}
 
-      {editing && <ShoppingModal item={editing === "new" ? null : editing}
+      {editing && <ShoppingModal item={editing === "new" ? null : editing} defaultEssential={editing === "new" && showEssentials}
         defaultKind={filterKind === "produtos" ? "produto" : filterKind === "rotinas" || filterKind === "recomprar" ? "rotina" : "desejo"}
         onSave={save} onClose={() => setEditing(null)} />}
       {customizingCards && <WishlistCardFieldsModal settings={settings || {}} setSettings={setSettings} onClose={() => setCustomizingCards(false)} />}
@@ -7841,10 +7841,10 @@ function SourceExpenseModal({ item, title, amount, onSave, onClose, allowNoAmoun
   );
 }
 
-function ShoppingModal({ item, defaultKind, onSave, onClose }) {
+function ShoppingModal({ item, defaultKind, defaultEssential = false, onSave, onClose }) {
   const [form, setForm] = useState(item
     ? { ...item, kind: inferShoppingKind(item), purchaseClass: item.purchaseClass || (item.purchaseFrequency === "pontual" ? "unico" : "periodico"), status: inferShoppingKind(item) === "rotina" || inferShoppingKind(item) === "produto" ? productStatus(item) : item.status }
-    : { name: "", category: "", store: "", price: "", priority: "media", link: "", image: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" || defaultKind === "produto" ? "ainda tem" : "desejado"), essential: false, desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
+    : { name: "", category: "", store: "", price: "", priority: "media", link: "", image: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" || defaultKind === "produto" ? "ainda tem" : "desejado"), essential: defaultEssential, desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
   const autoStatus = useAutoSave(form, onSave, (form) => ({
     ...form,
     price: Number(form.price) || 0,
