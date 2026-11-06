@@ -8880,13 +8880,6 @@ export default function App({ onSignOut }) {
     }
   }, [loaded, pages, settings.deletedPages, setTab, tab]);
 
-  useEffect(() => {
-    if (!loaded || settings.navigationOrderVersion === NAV_ORDER_VERSION) return;
-    const orderedPages = NAV.filter((item) => item.id !== "settings" && !(settings.deletedPages || []).includes(item.id)).map((item) => item.id);
-    orderedPages.push(...pages.map((page) => `page:${page.id}`));
-    setSettings({ ...settings, pageOrder: orderedPages, navigationOrderVersion: NAV_ORDER_VERSION });
-  }, [loaded, pages, settings, setSettings]);
-
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -8902,6 +8895,12 @@ export default function App({ onSignOut }) {
   const setAreas = useCallback((v) => { setAreasState(v); return storageSet(KEYS.areas, v); }, []);
   const setApps = useCallback((v) => { setAppsState(v); return storageSet(KEYS.apps, v); }, []);
   const setSettings = useCallback((v) => { setSettingsState(v); return storageSet(KEYS.settings, v); }, []);
+  useEffect(() => {
+    if (!loaded || settings.navigationOrderVersion === NAV_ORDER_VERSION) return;
+    const orderedPages = NAV.filter((item) => item.id !== "settings" && !(settings.deletedPages || []).includes(item.id)).map((item) => item.id);
+    orderedPages.push(...pages.map((page) => `page:${page.id}`));
+    setSettings({ ...settings, pageOrder: orderedPages, navigationOrderVersion: NAV_ORDER_VERSION });
+  }, [loaded, pages, settings, setSettings]);
   const setStudy = useCallback((v) => { setStudyState(v); return storageSet(KEYS.study, v); }, []);
   const setCareer = useCallback((v) => { setCareerState(v); return storageSet(KEYS.career, v); }, []);
   const setRoutines = useCallback((v) => { setRoutinesState(v); return storageSet(KEYS.routines, v); }, []);
