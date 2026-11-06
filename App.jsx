@@ -1907,7 +1907,6 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
               <div className="dashboard-music-copy">
                 <p style={{ margin: 0, lineHeight: 1.7, fontWeight: 700 }}>“Hoje estou feliz, acordei com o pé direito<br />
                   E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
-               <p style={{ margin: 0, lineHeight: 1.7, fontStyle: "italic", opacity: 0.9 }}>{settings.quote}</p>}
               </div>
             </div>
           </section>
