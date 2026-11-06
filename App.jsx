@@ -1224,7 +1224,6 @@ const APP_BUILD = "versão 11";
 const DEFAULT_SETTINGS = {
   name: "",
   greeting: "Bem-vinda de volta",
-  quote: "Pequenos passos todos os dias constroem grandes mudanças.",
   theme: { clay: "#7A1712", rose: "#591208", sage: "#6E534A" },
   dashboardWidgets: DEFAULT_WIDGETS,
   paymentMethods: ["Débito", "Crédito", "Pix", "Dinheiro", "Transferência", "Boleto", "Outro"],
@@ -1908,7 +1907,7 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
               <div className="dashboard-music-copy">
                 <p style={{ margin: 0, lineHeight: 1.7, fontWeight: 700 }}>“Hoje estou feliz, acordei com o pé direito<br />
                   E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
-                {settings.quote && <p style={{ margin: 0, lineHeight: 1.7, fontStyle: "italic", opacity: 0.9 }}>{settings.quote}</p>}
+               <p style={{ margin: 0, lineHeight: 1.7, fontStyle: "italic", opacity: 0.9 }}>{settings.quote}</p>}
               </div>
             </div>
           </section>
