@@ -789,7 +789,7 @@ const TITLE_WINE = "#6B1426";
 const TITLE_INK = "#1B1717";
 function SectionTitle({ title, count, right, compact = false }) {
   return (
-    <div style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", borderBottom: `3px solid ${TITLE_WINE}`, paddingBottom: 9, margin: compact ? "22px 0 6px" : "34px 0 16px" }}>
+    <div style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", borderBottom: `3px solid ${TITLE_WINE}`, paddingBottom: compact ? 4 : 9, margin: compact ? "22px 0 0" : "34px 0 16px" }}>
       <h2 className="cr-serif" style={{ margin: 0, fontSize: 30, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: TITLE_INK }}>{title}</h2>
       {count !== undefined && count !== null && <span style={{ margin: 0, fontSize: 13, fontWeight: 600, color: TITLE_WINE }}>{count}</span>}
       {right && <div style={{ marginLeft: "auto" }}>{right}</div>}
@@ -1375,6 +1375,8 @@ const GlobalStyle = () => (
     .beauty-contact { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 100%; margin-top: 6px; }
     .beauty-contact-names { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; font-size: 13px; color: var(--ink-soft); }
     .beauty-contact .cr-btn { flex-shrink: 0; }
+    .dashboard-music-copy { display: flex; align-items: center; gap: 24px; flex: 1; min-width: 0; flex-wrap: wrap; }
+    .dashboard-music-copy > * { flex: 1 1 220px; min-width: 0; }
     .cr-card-image-placeholder {
       width: calc(100% + 40px); aspect-ratio: 16 / 9; margin: -18px -20px 8px;
       border: 1.5px dashed var(--line); border-radius: 15px 15px 10px 10px;
@@ -1903,8 +1905,11 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
               <div aria-hidden="true" style={{ width: 112, height: 112, flexShrink: 0, borderRadius: 10, background: "linear-gradient(145deg, #F0D9CF, #C77B6C)", color: "#68100D", display: "grid", placeItems: "center" }}>
                 <Music2 size={42} strokeWidth={1.8} />
               </div>
-              <p style={{ margin: 0, lineHeight: 1.7, fontWeight: 700 }}>“Hoje estou feliz, acordei com o pé direito<br />
-                E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
+              <div className="dashboard-music-copy">
+                <p style={{ margin: 0, lineHeight: 1.7, fontWeight: 700 }}>“Hoje estou feliz, acordei com o pé direito<br />
+                  E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
+                {settings.quote && <p style={{ margin: 0, lineHeight: 1.7, fontStyle: "italic", opacity: 0.9 }}>{settings.quote}</p>}
+              </div>
             </div>
           </section>
         );
@@ -1936,9 +1941,9 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
       <p className="cr-sub" style={{ marginBottom: 2, textTransform: "capitalize" }}>{dataFmt}</p>
       <h1 className="cr-h1 cr-serif">{greeting.g}{settings.name ? `, ${settings.name}` : ""}! {greeting.emoji}</h1>
       <p className="cr-sub" style={{ fontStyle: "italic" }}>{greeting.sub}</p>
-      {settings.quote && <p className="cr-sub" style={{ fontStyle: "italic", opacity: 0.8 }}>{settings.quote}</p>}
-
       {widgets.some((w) => w.id === "musicPlayer") && renderWidget("musicPlayer")}
+      {settings.quote && !widgets.some((w) => w.id === "musicPlayer")
+        && <p className="cr-sub" style={{ fontStyle: "italic", opacity: 0.8 }}>{settings.quote}</p>}
 
       {widgets.some((w) => w.id === "panorama") && renderWidget("panorama")}
 
