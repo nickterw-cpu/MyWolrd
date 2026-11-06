@@ -15,7 +15,7 @@ import {
   Plus, Trash2, Pencil, X, Check, Search, Download, Upload, Sparkles, Flame, ChevronLeft, ChevronRight,
   GraduationCap, Briefcase, Sparkle, Image as ImageIcon, BookHeart, SearchCheck, Compass,
   HardDrive, Mail, FileText, BookOpen, ShoppingBag, ShoppingCart, Heart, Bot, Palette, ListChecks,
-  Music2, Play, Pause, SkipBack, SkipForward, Star
+  Music2, Play, Pause, SkipBack, SkipForward, Star, Instagram
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -330,7 +330,7 @@ const LIST_REGISTRY = {
   financeStatus: { label: "Status dos lançamentos", usedBy: [["finance", "status"]],
     defaults: [{ id: "pago", name: "Pago" }, { id: "pendente", name: "Pendente" }, { id: "agendado", name: "Agendado" }, { id: "cancelado", name: "Cancelado" }] },
   wishStatus: { label: "Status dos desejos da Wishlist", closedFlag: true, flagLabel: "já comprado ou cancelado", usedBy: [["shopping", "status", (it) => inferShoppingKind(it) === "desejo"]],
-    defaults: [{ id: "desejado", name: "Desejado" }, { id: "comprado", name: "Comprado", closed: true }, { id: "ganhei", name: "Ganhei", closed: true }, { id: "cancelado", name: "Cancelado", closed: true }] },
+    defaults: [{ id: "desejado", name: "Desejado" }, { id: "comprado", name: "Comprado", closed: true }, { id: "ganhei", name: "Ganhei", closed: true }, { id: "recomprar", name: "Recomprar" }] },
   coursePriority: {
     label: "Prioridades dos cursos", kind: "strings", settingsKey: "coursePriorities", usedBy: [["study", "priority"]],
     defaults: ["Importante fazer", "Quero muito fazer", "Pode esperar"].map((name) => ({ id: name, name })),
@@ -686,7 +686,7 @@ function reconcileLists(settings, collections) {
     let current = isStrings ? (Array.isArray(settings[reg.settingsKey]) ? settings[reg.settingsKey].map((n) => ({ id: n, name: n })) : reg.defaults)
       : (Array.isArray(saved[key]) ? saved[key] : reg.defaults);
     const requiredDefaults = key === "wishStatus"
-      ? reg.defaults.filter((option) => option.id === "ganhei")
+      ? reg.defaults.filter((option) => ["ganhei", "recomprar"].includes(option.id))
       : key === "coursePriority" ? reg.defaults : [];
     const missingDefaults = requiredDefaults.filter((option) => !current.some((entry) => entry.id === option.id));
     if (missingDefaults.length) {
@@ -884,6 +884,193 @@ function ListManagerModal({ listKey, items, setItems, usageCount, onDeleteItem, 
         <ConfirmModal title="Excluir opção" confirmLabel="Excluir"
           message={`"${confirmDel.name}" está sendo usada em ${confirmDel.used} item(ns). Eles continuam salvos, só ficam sem essa classificação.`}
           onConfirm={() => doDelete(confirmDel.idx)} onCancel={() => setConfirmDel(null)} />
+      )}
+    </Modal>
+  );
+}
+
+function ProcedureSectionsManager({ items, beauty, setBeauty, setItems, initialTarget, onClose }) {
+  const [rows, setRows] = useState(() => items.map((item) => ({ ...item })));
+  const [editingId, setEditingId] = useState(initialTarget?.action === "edit" ? initialTarget.sectionId : null);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const inputRefs = useRef([]);
+  const usedBy = (id) => beauty.filter((item) => inferProcStatus(item) === id).length;
+  const commit = (next) => {
+    setRows(next);
+    setItems(next);
+  };
+
+  useEffect(() => {
+    if (initialTarget?.action !== "delete") return;
+    const index = rows.findIndex((item) => item.id === initialTarget.sectionId);
+    if (index >= 0) setConfirmDel(index);
+  }, []);
+
+  const add = () => {
+    const item = { id: `proc-${uid()}`, name: "Novo título" };
+    commit([...rows, item]);
+    setEditingId(item.id);
+    requestAnimationFrame(() => inputRefs.current[rows.length]?.focus());
+  };
+  const rename = (id, name) => commit(rows.map((item) => item.id === id ? { ...item, name } : item));
+  const deleteSection = (mode, destination = "") => {
+    const item = rows[confirmDel];
+    if (!item) return;
+    if (mode === "migrate") {
+      setBeauty(beauty.map((procedure) => inferProcStatus(procedure) === item.id
+        ? { ...procedure, procStatus: destination }
+        : procedure));
+    } else if (mode === "delete") {
+      setBeauty(beauty.filter((procedure) => inferProcStatus(procedure) !== item.id));
+    }
+    commit(rows.filter((_, index) => index !== confirmDel));
+    setConfirmDel(null);
+  };
+
+  const deleting = confirmDel === null ? null : rows[confirmDel];
+  const itemCount = deleting ? usedBy(deleting.id) : 0;
+  const [destination, setDestination] = useState("");
+  useEffect(() => {
+    const options = rows.filter((item) => item.id !== deleting?.id);
+    if (!options.some((item) => item.id === destination)) setDestination(options[0]?.id || "");
+  }, [deleting, rows, destination]);
+
+  return (
+    <Modal title="Gerenciar títulos" onClose={onClose}>
+      <p className="cr-sub" style={{ marginTop: 0 }}>Os procedimentos são agrupados abaixo do título correspondente. Alterações salvas automaticamente.</p>
+      {rows.map((item, index) => (
+        <div className="cr-row section-manager-row" key={item.id} style={{ marginBottom: 8, flexWrap: "nowrap" }}>
+          <button type="button" className="cr-btn ghost" aria-label={`Mover ${item.name} para cima`} disabled={index === 0}
+            onClick={() => commit(moveItem(rows, index, -1))}>↑</button>
+          <button type="button" className="cr-btn ghost" aria-label={`Mover ${item.name} para baixo`} disabled={index === rows.length - 1}
+            onClick={() => commit(moveItem(rows, index, 1))}>↓</button>
+          <button type="button" className="cr-btn ghost" title="Renomear título" aria-label={`Renomear ${item.name}`}
+            onClick={() => { setEditingId(item.id); inputRefs.current[index]?.focus(); }}><Pencil size={13} /></button>
+          <input ref={(element) => { inputRefs.current[index] = element; }} className="cr-input" value={item.name}
+            readOnly={editingId !== item.id} aria-label={`Título ${item.name}`}
+            onChange={(event) => rename(item.id, event.target.value)}
+            onBlur={() => setEditingId(null)}
+            onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+          <button type="button" className="cr-btn ghost danger" title="Excluir título" aria-label={`Excluir ${item.name}`}
+            onClick={() => setConfirmDel(index)}><Trash2 size={13} /></button>
+        </div>
+      ))}
+      <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 14, flexWrap: "wrap" }}>
+        <button className="cr-btn" onClick={add}><Plus size={13} /> Novo título</button>
+        <button className="cr-btn primary" onClick={onClose}>Concluir</button>
+      </div>
+      {deleting && itemCount > 0 && (
+        <Modal size="small" title={`Excluir "${deleting.name}"?`} onClose={() => setConfirmDel(null)}>
+          <p style={{ fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>
+            Este título contém {itemCount} procedimento(s). Você pode movê-los para outro título ou excluir os cards junto.
+          </p>
+          {rows.filter((item) => item.id !== deleting.id).length > 0 && (
+            <div className="cr-field">
+              <label className="cr-label">Mover os procedimentos para</label>
+              <select className="cr-select" value={destination} onChange={(event) => setDestination(event.target.value)}>
+                {rows.filter((item) => item.id !== deleting.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="cr-row" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <button className="cr-btn" onClick={() => setConfirmDel(null)}>Cancelar</button>
+            {destination && <button className="cr-btn primary" onClick={() => deleteSection("migrate", destination)}>Mover cards e excluir título</button>}
+            <button className="cr-btn danger" onClick={() => deleteSection("delete")}>Excluir cards e título</button>
+          </div>
+        </Modal>
+      )}
+      {deleting && itemCount === 0 && (
+        <ConfirmModal title="Excluir título" message={`Excluir "${deleting.name}"?`}
+          onConfirm={() => deleteSection()} onCancel={() => setConfirmDel(null)} />
+      )}
+    </Modal>
+  );
+}
+
+function WishlistStatusManager({ items, setItems, shopping, setShopping, onClose }) {
+  const [rows, setRows] = useState(() => items.map((item) => ({ ...item })));
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [destination, setDestination] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const inputRefs = useRef([]);
+  const usage = (id) => shopping.filter((item) => inferShoppingKind(item) === "desejo" && item.status === id).length;
+  const commit = (next) => {
+    setRows(next);
+    setItems(next);
+  };
+  const add = () => {
+    const item = { id: `wish-${uid()}`, name: "Novo status", closed: false };
+    commit([...rows, item]);
+    setEditingId(item.id);
+    requestAnimationFrame(() => inputRefs.current[rows.length]?.focus());
+  };
+  const remove = (mode) => {
+    const item = rows[confirmDel];
+    if (!item) return;
+    if (mode === "migrate") {
+      setShopping(shopping.map((entry) => inferShoppingKind(entry) === "desejo" && entry.status === item.id
+        ? { ...entry, status: destination }
+        : entry));
+    }
+    commit(rows.filter((_, index) => index !== confirmDel));
+    setConfirmDel(null);
+  };
+  const deleting = confirmDel === null ? null : rows[confirmDel];
+  const used = deleting ? usage(deleting.id) : 0;
+  useEffect(() => {
+    const options = rows.filter((item) => item.id !== deleting?.id);
+    if (!options.some((item) => item.id === destination)) setDestination(options[0]?.id || "");
+  }, [deleting, rows, destination]);
+
+  return (
+    <Modal title="Gerenciar status da Wishlist" onClose={onClose}>
+      <p className="cr-sub" style={{ marginTop: 0 }}>Reordene, renomeie ou atualize os status dos itens.</p>
+      {rows.map((item, index) => (
+        <div className="cr-row section-manager-row" key={item.id} style={{ marginBottom: 8, flexWrap: "nowrap" }}>
+          <button type="button" className="cr-btn ghost" aria-label={`Mover ${item.name} para cima`} disabled={index === 0}
+            onClick={() => commit(moveItem(rows, index, -1))}>↑</button>
+          <button type="button" className="cr-btn ghost" aria-label={`Mover ${item.name} para baixo`} disabled={index === rows.length - 1}
+            onClick={() => commit(moveItem(rows, index, 1))}>↓</button>
+          <button type="button" className="cr-btn ghost" title="Renomear status" aria-label={`Renomear ${item.name}`}
+            onClick={() => { setEditingId(item.id); inputRefs.current[index]?.focus(); }}><Pencil size={13} /></button>
+          <input ref={(element) => { inputRefs.current[index] = element; }} className="cr-input" value={item.name}
+            readOnly={editingId !== item.id} aria-label={`Status ${item.name}`}
+            onChange={(event) => commit(rows.map((entry) => entry.id === item.id ? { ...entry, name: event.target.value } : entry))}
+            onBlur={() => setEditingId(null)}
+            onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+          <label className="cr-chip" style={{ whiteSpace: "nowrap", cursor: "pointer" }}>
+            <input type="checkbox" checked={!!item.closed} onChange={() => commit(rows.map((entry) => entry.id === item.id ? { ...entry, closed: !entry.closed } : entry))} />
+            Finalizado
+          </label>
+          <button type="button" className="cr-btn ghost danger" title="Excluir status" aria-label={`Excluir ${item.name}`}
+            onClick={() => setConfirmDel(index)}><Trash2 size={13} /></button>
+        </div>
+      ))}
+      <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 14, flexWrap: "wrap" }}>
+        <button className="cr-btn" onClick={add}><Plus size={13} /> Adicionar status</button>
+        <button className="cr-btn primary" onClick={onClose}>Concluir</button>
+      </div>
+      {deleting && (
+        <Modal size="small" title={`Excluir "${deleting.name}"?`} onClose={() => setConfirmDel(null)}>
+          <p style={{ fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>
+            {used > 0
+              ? `Este status está em uso por ${used} item(ns). Escolha outro status para migrá-los.`
+              : "Confirme a exclusão deste status."}
+          </p>
+          {used > 0 && (
+            <div className="cr-field">
+              <label className="cr-label">Migrar itens para</label>
+              <select className="cr-select" value={destination} onChange={(event) => setDestination(event.target.value)}>
+                {rows.filter((item) => item.id !== deleting.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="cr-row" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <button className="cr-btn" onClick={() => setConfirmDel(null)}>Cancelar</button>
+            <button className="cr-btn primary" onClick={() => remove(used > 0 ? "migrate" : "delete")}
+              disabled={used > 0 && !destination}>Excluir status{used > 0 ? " e migrar itens" : ""}</button>
+          </div>
+        </Modal>
       )}
     </Modal>
   );
@@ -1185,6 +1372,9 @@ const GlobalStyle = () => (
     .cr-card-heading h3 { width: 100%; min-width: 0; overflow-wrap: break-word; word-break: normal; }
     .cr-card-heading-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 2px; min-width: 0; max-width: 100%; }
     .cr-card-heading-actions .cr-btn { flex: 0 0 auto; }
+    .beauty-contact { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 100%; margin-top: 6px; }
+    .beauty-contact-names { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; font-size: 13px; color: var(--ink-soft); }
+    .beauty-contact .cr-btn { flex-shrink: 0; }
     .cr-card-image-placeholder {
       width: calc(100% + 40px); aspect-ratio: 16 / 9; margin: -18px -20px 8px;
       border: 1.5px dashed var(--line); border-radius: 15px 15px 10px 10px;
@@ -1265,9 +1455,12 @@ const GlobalStyle = () => (
       .cr-personal-card-wide { grid-column: span 1; }
       .cr-row { flex-wrap: wrap; }
       .cr-row > .cr-field { flex: 1 1 220px !important; min-width: 0; }
+      .section-manager-row { flex-wrap: wrap !important; }
+      .section-manager-row .cr-input { flex: 1 1 100%; }
       .cr-list-row { flex-wrap: wrap; gap: 8px; }
       .cr-list-row > * { min-width: 0; }
       .cr-list-title { flex: 1 1 calc(100% - 32px) !important; }
+      .beauty-contact { align-items: flex-start; flex-wrap: wrap; }
       .cr-calendar-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
       .cr-calendar-grid { min-width: 600px; }
       .cr-modal-backdrop { padding: 8px; }
@@ -1655,7 +1848,7 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
         );
       }
       case "weekCalendar": {
-        return <GoogleAgendaView gcal={gcal} setGcal={setGcal} compactHeader />;
+        return <GoogleAgendaView gcal={gcal} setGcal={setGcal} dashboardMode />;
       }
       case "financeCategory": {
         const catData = expenseCategoryData(finance, todayStr().slice(0, 7));
@@ -4810,7 +5003,7 @@ function gcalMergedEvents(gcal) {
     (c.events || []).map((e) => ({ ...e, id: `${c.id}:${e.id}`, calId: c.id, calName: c.name, color: c.color })));
 }
 
-function GoogleAgendaView({ gcal, setGcal, compactHeader = false }) {
+function GoogleAgendaView({ gcal, setGcal, dashboardMode = false }) {
   const [mode, setMode] = useState("mes");
   const [offset, setOffset] = useState(0);
   const [showBreaks, setShowBreaks] = useState(false);
@@ -4821,7 +5014,7 @@ function GoogleAgendaView({ gcal, setGcal, compactHeader = false }) {
   const today = todayStr();
 
   const merged = gcalMergedEvents(gcal);
-  const all = merged.filter((e) => (showBreaks || e.t.trim().toLowerCase() !== "pausa")
+  const all = merged.filter((e) => (dashboardMode || showBreaks || e.t.trim().toLowerCase() !== "pausa")
     && (!query || e.t.toLowerCase().includes(query.toLowerCase())));
 
   const evChip = (e) => (
@@ -4919,17 +5112,31 @@ function GoogleAgendaView({ gcal, setGcal, compactHeader = false }) {
 
   return (
     <div>
+      {dashboardMode ? (
+        <>
+          <div style={{ margin: "0 0 8px" }}>
+            <button type="button" onClick={() => openExternalLink("https://calendar.google.com")}
+              style={{ border: 0, background: "transparent", padding: 0, color: "var(--ink)", font: "inherit", textDecoration: "underline", cursor: "pointer" }}>
+              Abrir no Google Agenda
+            </button>
+          </div>
+          <div className="cr-row" style={{ justifyContent: "center", margin: "8px 0 14px" }}>
+            <button className="cr-btn ghost" aria-label="Mês anterior" onClick={() => setOffset(offset - 1)}>←</button>
+            <span className="cr-serif" style={{ fontSize: 15, minWidth: 140, textAlign: "center" }}>{rangeLabel}</span>
+            <button className="cr-btn ghost" aria-label="Próximo mês" onClick={() => setOffset(offset + 1)}>→</button>
+          </div>
+        </>
+      ) : (
+        <>
       <div className="cr-card" style={{ borderLeft: `5px solid ${GCAL_BLUE}`, marginTop: 14 }}>
         <div className="cr-row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
           <div>
-            {!compactHeader && <>
-              <p className="cr-serif" style={{ margin: 0, fontSize: 17, color: TITLE_INK, fontWeight: 700 }}><span style={{ color: TITLE_WINE }}>GOOGLE AGENDA:</span> o que realmente está agendado</p>
-              <p className="cr-sub" style={{ margin: "2px 0 0" }}>
-                {gcal.calendars.length === 0
-                  ? "Nenhuma agenda conectada ainda. Em \"Gerenciar agendas\", cole os links secretos .ics das suas agendas para ver todas aqui. Esta visão não mistura com as Rotinas."
-                  : `${gcal.calendars.filter((c) => c.enabled).length} de ${gcal.calendars.length} agenda(s) ativa(s), ${merged.length} evento(s)${updated ? `, atualizado em ${updated.toLocaleDateString("pt-BR")} às ${updated.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}. Esta visão não mistura com as Rotinas.`}
-              </p>
-            </>}
+            <p className="cr-serif" style={{ margin: 0, fontSize: 17, color: TITLE_INK, fontWeight: 700 }}><span style={{ color: TITLE_WINE }}>GOOGLE AGENDA:</span> o que realmente está agendado</p>
+            <p className="cr-sub" style={{ margin: "2px 0 0" }}>
+              {gcal.calendars.length === 0
+                ? "Nenhuma agenda conectada ainda. Em \"Gerenciar agendas\", cole os links secretos .ics das suas agendas para ver todas aqui. Esta visão não mistura com as Rotinas."
+                : `${gcal.calendars.filter((c) => c.enabled).length} de ${gcal.calendars.length} agenda(s) ativa(s), ${merged.length} evento(s)${updated ? `, atualizado em ${updated.toLocaleDateString("pt-BR")} às ${updated.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}. Esta visão não mistura com as Rotinas.`}
+            </p>
             {gcal.calendars.filter((c) => c.lastError).map((c) => (
               <p key={c.id} className="cr-sub" role="alert" style={{ color: "#7A1712", margin: "8px 0 0" }}>{c.name}: {c.lastError} Abra "Gerenciar agendas" para tentar de novo.</p>
             ))}
@@ -4969,6 +5176,8 @@ function GoogleAgendaView({ gcal, setGcal, compactHeader = false }) {
           <input type="checkbox" checked={showBreaks} onChange={() => setShowBreaks(!showBreaks)} style={{ marginRight: 4 }} /> mostrar "Pausa"
         </label>
       </div>
+        </>
+      )}
 
       {body}
 
@@ -6131,6 +6340,7 @@ function instagramUrl(v) {
   if (!v) return "";
   const t = v.trim();
   if (/^https?:\/\//i.test(t)) return t;
+  if (/^(?:www\.)?instagram\.com(?:\/|$)/i.test(t)) return "https://" + t;
   return "https://instagram.com/" + t.replace(/^@/, "").replace(/\/$/, "");
 }
 function siteUrl(v) {
@@ -6156,6 +6366,12 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
   const [customize, setCustomize] = useState(false);
   const on = (k) => cardFieldOn(settings || {}, k);
   const liveEditing = editing && editing !== "new" ? (beauty.find((x) => x.id === editing.id) || editing) : null;
+
+  useEffect(() => {
+    if (f.status !== "todos" && f.status !== "nd" && !getList("procStatus").some((status) => status.id === f.status)) {
+      setF((current) => ({ ...current, status: "todos" }));
+    }
+  }, [settings?.lists?.procStatus, f.status]);
 
   useEffect(() => {
     if (originTarget?.type !== "beauty") return;
@@ -6265,8 +6481,9 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <div><h1 className="cr-h1 cr-serif">Procedimentos Estéticos</h1><p className="cr-sub">{fmtBRL(realizedTotal)} realizados · {fmtBRL(plannedTotal)} planejados no período selecionado.</p></div>
         {section === "procedimentos" && (
-          <div className="cr-row">
+          <div className="cr-row" style={{ flexWrap: "wrap" }}>
             <button className="cr-btn" onClick={() => setCustomize(true)}><SettingsIcon size={13} /> Personalizar card</button>
+            <button className="cr-btn" onClick={() => ctx.openManager("procStatus")}><Plus size={14} /> Novo título</button>
             <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo procedimento</button>
           </div>
         )}
@@ -6332,7 +6549,15 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
             if (items.length === 0) return null;
             return (
               <div key={sec.id || "sem"} style={{ marginBottom: 22 }}>
-                <SectionTitle title={sec.label} count={`${items.length} ${items.length === 1 ? "procedimento" : "procedimentos"}`} />
+                <SectionTitle title={sec.label} count={`${items.length} ${items.length === 1 ? "procedimento" : "procedimentos"}`}
+                  right={sec.id ? (
+                    <div className="cr-row" style={{ gap: 2 }}>
+                      <button type="button" className="cr-btn ghost" title="Editar título" aria-label={`Editar título ${sec.label}`}
+                        onClick={() => ctx.openManager("procStatus", { sectionId: sec.id, action: "edit" })}><Pencil size={14} /></button>
+                      <button type="button" className="cr-btn ghost danger" title="Excluir título" aria-label={`Excluir título ${sec.label}`}
+                        onClick={() => ctx.openManager("procStatus", { sectionId: sec.id, action: "delete" })}><Trash2 size={14} /></button>
+                    </div>
+                  ) : null} />
                 <div className="cr-grid cr-grid-3">
                   {items.map((b) => (
                     <BeautyCard key={b.id} b={b} on={on} onEdit={() => setEditing(originalOf(b))} onRemove={() => remove(b.id)}
@@ -6454,7 +6679,20 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
       {chips.length === 0 && b.topic && <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}><CardTopicChip item={b} /></div>}
       <CardExtraText item={b} />
       {on("goal") && b.goal && <p style={{ fontSize: 13, margin: "4px 0" }}><strong>Objetivo:</strong> {b.goal}</p>}
-      {on("place") && b.professional && <p className="cr-sub" style={{ margin: "4px 0" }}>{b.professional}</p>}
+      {on("place") && (b.clinic || b.professional || b.instagram || b._placeObj?.instagram) && (
+        <div className="beauty-contact">
+          <div className="beauty-contact-names">
+            {b.clinic && <span>{b.clinic}</span>}
+            {b.professional && <span>{b.professional}</span>}
+          </div>
+          {(b.instagram || b._placeObj?.instagram) && (
+            <button type="button" className="cr-btn ghost" aria-label="Abrir Instagram" title="Abrir Instagram"
+              onClick={stop(() => openExternalLink(instagramUrl(b.instagram || b._placeObj.instagram)))}>
+              <Instagram size={15} /> Instagram
+            </button>
+          )}
+        </div>
+      )}
       {on("result") && b.result && <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>{b.result}</p>}
       {on("maintenance") && m && (
         <div className="cr-row" style={{ marginTop: 6, flexWrap: "wrap" }}>
@@ -6533,7 +6771,7 @@ function RegistrarRealizacaoModal({ item, onSave, onClose }) {
 function BeautyModal({ item, places, onSave, onClose, onRegister }) {
   const [form, setForm] = useState(item || {
     procStatus: "quero", region: "", degree: "", placeId: "", bodyArea: "", category: "", goal: "",
-    image: "", professional: "", clinic: "", cost: "", dateDone: "", priority: "alta", plannedSessions: "", nextExpenseDate: "",
+    image: "", professional: "", clinic: "", instagram: "", cost: "", dateDone: "", priority: "alta", plannedSessions: "", nextExpenseDate: "",
     recurring: false, frequencyUnit: "meses", frequencyValue: "", alertDays: DEFAULT_ALERT_DAYS,
     result: "", notes: "", link: "", name: "", history: [],
   });
@@ -6592,11 +6830,19 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
         </div>
       )}
       <div className="cr-row">
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Profissional</label>
-          <input className="cr-input" value={form.professional} onChange={(e) => setForm({ ...form, professional: e.target.value })} /></div>
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Clínica (texto livre)</label>
-          <input className="cr-input" value={form.clinic} onChange={(e) => setForm({ ...form, clinic: e.target.value })} /></div>
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Nome do profissional</label>
+          <input className="cr-input" value={form.professional || ""} onChange={(e) => setForm({ ...form, professional: e.target.value })} /></div>
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Nome da clínica</label>
+          <input className="cr-input" value={form.clinic || ""} onChange={(e) => setForm({ ...form, clinic: e.target.value })} /></div>
       </div>
+      <div className="cr-field"><label className="cr-label">Link do Instagram (URL ou @usuário)</label>
+        <input className="cr-input" value={form.instagram || ""} placeholder="@usuario"
+          onChange={(e) => setForm({ ...form, instagram: e.target.value })} /></div>
+      {form.instagram && (
+        <div className="cr-row" style={{ marginTop: -8, marginBottom: 10 }}>
+          <button type="button" className="cr-btn" onClick={() => openExternalLink(instagramUrl(form.instagram))}><Instagram size={14} /> Instagram</button>
+        </div>
+      )}
       <FormSection title="Valores e datas" />
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor por sessão (R$)</label>
@@ -7158,12 +7404,18 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
   const [purchasing, setPurchasing] = useState(null);
   const [editingPurchase, setEditingPurchase] = useState(null);
   const [tab, setTab] = useState("desejo");
+  const [showEssentials, setShowEssentials] = useState(false);
   const [filter, setFilter] = useState("todos");
   const [filterKind, setFilterKind] = useState("todos");
   const [filterCategory, setFilterCategory] = useState("todas");
   const [viewAll, setViewAll] = useState(false);
   const [customizingCards, setCustomizingCards] = useState(false);
-  const [financeFilters, setFinanceFilters] = useState({ query: "", category: "todas", purchaseClass: "todas", month: "", year: "" });
+  const [financeFilters, setFinanceFilters] = useState({ query: "", category: "todas", purchaseClass: "todas", month: "", year: "", essential: false });
+  const wishStatuses = getList("wishStatus");
+
+  useEffect(() => {
+    if (filter !== "todos" && filter !== "recomprar" && !wishStatuses.some((status) => status.id === filter)) setFilter("todos");
+  }, [settings?.lists?.wishStatus, filter]);
 
   useEffect(() => {
     if (!["shopping"].includes(originTarget?.type)) return;
@@ -7222,7 +7474,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     const isProduct = kind === "rotina" || kind === "produto";
     return { ...s, _kind: kind, _status: isProduct ? productStatus(s) : (s.status || "desejado") };
   });
-  const shouldRebuy = (item) => item._status === "comprado" || item._status === "quero recomprar" || item._status === "acabou";
+  const shouldRebuy = (item) => ["comprado", "recomprar", "quero recomprar", "acabou"].includes(item._status);
   const inTab = withKind.filter((item) => {
     if (filterKind === "desejos") return item._kind === "desejo";
     if (filterKind === "produtos") return item._kind === "produto";
@@ -7231,8 +7483,9 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     return true;
   });
   const filtered = inTab.filter((item) =>
-    (filter === "todos" || (filter === "recomprar" ? shouldRebuy(item) : item._status === filter))
-    && (filterCategory === "todas" || item.category === filterCategory));
+    (filter === "todos" || item._status === filter)
+    && (filterCategory === "todas" || item.category === filterCategory)
+    && (!showEssentials || item.essential));
   const categories = wishlistCategoryOptions(shopping.map((item) => item.category));
   const purchaseRows = shopping.flatMap((item) => (Array.isArray(item.purchaseHistory) ? item.purchaseHistory : [])
     .map((purchase, index) => ({
@@ -7242,6 +7495,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
       purchaseIndex: index,
       sourcePurchase: purchase,
       itemName: item.name,
+      essential: !!item.essential,
       date: purchase.date,
       amount: Number(purchase.amount) || 0,
       category: purchase.category || item.category || "",
@@ -7257,6 +7511,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     (!financeFilters.query || `${purchase.itemName} ${purchase.description}`.toLowerCase().includes(financeFilters.query.toLowerCase()))
     && (financeFilters.category === "todas" || purchase.category === financeFilters.category)
     && (financeFilters.purchaseClass === "todas" || purchase.purchaseClass === financeFilters.purchaseClass)
+    && (!financeFilters.essential || purchase.essential)
     && (!financeFilters.month || purchase.date.slice(5, 7) === financeFilters.month)
     && (!financeFilters.year || purchase.date.slice(0, 4) === financeFilters.year))
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -7309,7 +7564,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
         <div>
           <h1 className="cr-h1 cr-serif">Wishlist</h1>
           <p className="cr-sub">
-            {tab === "desejo" ? `${fmtBRL(totalDesejado)} em itens desejados.` : `${purchaseRows.length} compra(s) registrada(s), somando ${fmtBRL(purchaseRows.reduce((sum, purchase) => sum + purchase.amount, 0))}.`}
+            {tab === "desejo" ? (showEssentials ? `${filtered.length} item(ns) marcados como essenciais.` : `${fmtBRL(totalDesejado)} em itens desejados.`) : `${purchaseRows.length} compra(s) registrada(s), somando ${fmtBRL(purchaseRows.reduce((sum, purchase) => sum + purchase.amount, 0))}.`}
           </p>
         </div>
         {tab !== "finance" && (
@@ -7321,7 +7576,10 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
       </div>
 
       <div className="cr-tabbar" style={{ marginTop: 14 }}>
-        <button className={`cr-tabbtn ${tab === "desejo" ? "active" : ""}`} onClick={() => { setTab("desejo"); setFilter("todos"); setFilterCategory("todas"); }}>Desejos</button>
+        <button className={`cr-tabbtn ${tab === "desejo" && !showEssentials ? "active" : ""}`}
+          onClick={() => { setTab("desejo"); setShowEssentials(false); setFilter("todos"); setFilterCategory("todas"); }}>Minha Wishlist</button>
+        <button className={`cr-tabbtn ${tab === "desejo" && showEssentials ? "active" : ""}`}
+          onClick={() => { setTab("desejo"); setShowEssentials(true); setFilterKind("todos"); setFilter("todos"); setFilterCategory("todas"); }}>Meus essenciais</button>
         <button className={`cr-tabbtn ${tab === "finance" ? "active" : ""}`} onClick={() => setTab("finance")}>Financeiro</button>
       </div>
 
@@ -7352,6 +7610,11 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
                 onChange={(event) => setFinanceFilters({ ...financeFilters, purchaseClass: event.target.value })}>
                 <option value="todas">Todas as classes</option>
                 {PURCHASE_CLASS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              <select className="cr-select" aria-label="Filtrar compras por essenciais" value={financeFilters.essential ? "essentials" : "all"}
+                onChange={(event) => setFinanceFilters({ ...financeFilters, essential: event.target.value === "essentials" })}>
+                <option value="all">Todos os itens</option>
+                <option value="essentials">Meus essenciais</option>
               </select>
               <select className="cr-select" aria-label="Filtrar compras por mês" value={financeFilters.month}
                 onChange={(event) => setFinanceFilters({ ...financeFilters, month: event.target.value })}>
@@ -7406,16 +7669,14 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
         </select>
         <select className="cr-select" aria-label="Filtrar por status" style={{ maxWidth: 190 }} value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="todos">Todos os status</option>
-          <option value="desejado">Desejado</option>
-          <option value="comprado">Comprado</option>
-          <option value="ganhei">Ganhei</option>
-          <option value="recomprar">Recomprar</option>
+          {wishStatuses.map((status) => <option key={status.id} value={status.id}>{status.name}</option>)}
         </select>
         <select className="cr-select" style={{ maxWidth: 200 }} value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
           <option value="todas">Todas as categorias</option>
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         <button className="cr-btn" title="Gerenciar opções (criar, renomear, excluir, reordenar)" onClick={() => ctx.openManager("wishCategory")}><SettingsIcon size={13} /> Gerenciar categorias</button>
+        <button className="cr-btn" title="Adicionar, renomear, excluir e reordenar status" onClick={() => ctx.openManager("wishStatus")}><SettingsIcon size={13} /> Gerenciar status</button>
         <button className="cr-btn ghost" onClick={() => setViewAll(!viewAll)}>{viewAll ? "Ver por categoria" : "Visualizar todos"}</button>
       </div>
 
@@ -7519,7 +7780,8 @@ function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onCustomize, 
       </div>
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
         {show("category") && s.category && <span className="cr-chip">{s.category}</span>}
-        {show("priority") && <PriorityChip id={s.priority} />}
+          {s.essential && <span className="cr-chip"><Star size={12} fill="currentColor" /> Essencial</span>}
+          {show("priority") && <PriorityChip id={s.priority} />}
         {show("topic") && <CardTopicChip item={s} />}
       </div>
       {show("notes") && <CardExtraText item={s} />}
@@ -7582,7 +7844,7 @@ function SourceExpenseModal({ item, title, amount, onSave, onClose, allowNoAmoun
 function ShoppingModal({ item, defaultKind, onSave, onClose }) {
   const [form, setForm] = useState(item
     ? { ...item, kind: inferShoppingKind(item), purchaseClass: item.purchaseClass || (item.purchaseFrequency === "pontual" ? "unico" : "periodico"), status: inferShoppingKind(item) === "rotina" || inferShoppingKind(item) === "produto" ? productStatus(item) : item.status }
-    : { name: "", category: "", store: "", price: "", priority: "media", link: "", image: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" || defaultKind === "produto" ? "ainda tem" : "desejado"), desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
+    : { name: "", category: "", store: "", price: "", priority: "media", link: "", image: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" || defaultKind === "produto" ? "ainda tem" : "desejado"), essential: false, desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
   const autoStatus = useAutoSave(form, onSave, (form) => ({
     ...form,
     price: Number(form.price) || 0,
@@ -7624,6 +7886,10 @@ function ShoppingModal({ item, defaultKind, onSave, onClose }) {
         <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Status</label>
         <ManagedSelect listKey={isRoutine ? "productStatus" : "wishStatus"} value={form.status} onChange={(v) => setForm({ ...form, status: v })} /></div>
+      <label className="cr-row" style={{ cursor: "pointer", marginBottom: 12, justifyContent: "flex-start" }}>
+        <input type="checkbox" checked={!!form.essential} onChange={(event) => setForm({ ...form, essential: event.target.checked })} />
+        <span className="cr-label" style={{ margin: 0 }}>Marcar como essencial</span>
+      </label>
       <div className="cr-field"><label className="cr-label">{isRoutine ? "Frequência de reposição" : "Frequência de compra"}</label>
         <select className="cr-select" value={form.purchaseFrequency || "pontual"}
           onChange={(event) => setForm({ ...form, purchaseFrequency: event.target.value })}>
@@ -8785,7 +9051,7 @@ export default function App({ onSignOut }) {
   deletedPages.forEach((id) => (hiddenKeys[id] || []).forEach((k) => { searchData[k] = []; }));
 
   const collectionsMap = { vision: [vision, setVision], apps: [apps, setApps], notes: [notes, setNotes], accounts: [accounts, setAccounts], personaldev: [personaldev, setPersonaldev], tasks: [tasks, setTasks], shopping: [shopping, setShopping], habits: [habits, setHabits], goals: [goals, setGoals], beauty: [beauty, setBeauty], selfcare: [selfcare, setSelfcare], hobbies: [hobbies, setHobbies], career: [career, setCareer], study: [study, setStudy], finance: [finance, setFinance] };
-  const listsCtx = { openManager: (key) => setManager({ kind: "list", key }), openAreas: () => setManager({ kind: "areas" }), openPrices: () => setManager({ kind: "prices" }) };
+  const listsCtx = { openManager: (key, target) => setManager({ kind: "list", key, target }), openAreas: () => setManager({ kind: "areas" }), openPrices: () => setManager({ kind: "prices" }) };
   const renderManager = () => {
     if (!manager) return null;
     if (manager.kind === "prices") return <PriceBandsManager bands={getPriceBands()} setBands={(arr) => setSettings({ ...settings, priceBands: arr })} onClose={() => setManager(null)} />;
@@ -8798,6 +9064,14 @@ export default function App({ onSignOut }) {
       if (reg.kind === "strings") setSettings({ ...settings, [reg.settingsKey]: arr.map((x) => x.name) });
       else setSettings({ ...settings, lists: { ...(settings.lists || {}), [key]: arr } });
     };
+    if (key === "procStatus") {
+      return <ProcedureSectionsManager key={key} items={getList(key)} beauty={beauty} setBeauty={setBeauty}
+        setItems={setItems} initialTarget={manager.target} onClose={() => setManager(null)} />;
+    }
+    if (key === "wishStatus") {
+      return <WishlistStatusManager key={key} items={getList(key)} shopping={shopping} setShopping={setShopping}
+        setItems={setItems} onClose={() => setManager(null)} />;
+    }
     const usage = (id) => (reg.usedBy || []).reduce((n, [coll, field, pred]) => n + ((collectionsMap[coll] || [[]])[0]).filter((it) => it[field] === id && (!pred || pred(it))).length, 0);
     const onDeleteItem = (id) => {
       if (reg.kind === "strings") return;
