@@ -789,7 +789,7 @@ const TITLE_WINE = "#6B1426";
 const TITLE_INK = "#1B1717";
 function SectionTitle({ title, count, right, compact = false }) {
   return (
-    <div style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", borderBottom: `3px solid ${TITLE_WINE}`, paddingBottom: compact ? 4 : 9, margin: compact ? "22px 0 0" : "34px 0 16px" }}>
+    <div style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", borderBottom: `3px solid ${TITLE_WINE}`, paddingBottom: compact ? 0 : 9, margin: compact ? "22px 0 -10px" : "34px 0 16px" }}>
       <h2 className="cr-serif" style={{ margin: 0, fontSize: 30, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: TITLE_INK }}>{title}</h2>
       {count !== undefined && count !== null && <span style={{ margin: 0, fontSize: 13, fontWeight: 600, color: TITLE_WINE }}>{count}</span>}
       {right && <div style={{ marginLeft: "auto" }}>{right}</div>}
@@ -1375,8 +1375,8 @@ const GlobalStyle = () => (
     .beauty-contact { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 100%; margin-top: 6px; }
     .beauty-contact-names { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; font-size: 13px; color: var(--ink-soft); }
     .beauty-contact .cr-btn { flex-shrink: 0; }
-    .dashboard-music-copy { display: flex; align-items: center; gap: 24px; flex: 1; min-width: 0; flex-wrap: wrap; }
-    .dashboard-music-copy > * { flex: 1 1 220px; min-width: 0; }
+    .dashboard-music-copy { display: flex; align-items: center; justify-content: center; gap: 24px; flex: 1; min-width: 0; flex-wrap: nowrap; }
+    .dashboard-music-copy > * { flex: 1 1 0; min-width: 0; text-align: center; overflow-wrap: anywhere; }
     .cr-card-image-placeholder {
       width: calc(100% + 40px); aspect-ratio: 16 / 9; margin: -18px -20px 8px;
       border: 1.5px dashed var(--line); border-radius: 15px 15px 10px 10px;
@@ -6662,12 +6662,8 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
       ))}
       <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{m && on("maintenance") ? `${statusEmoji(m.level)} ` : ""}{b.name}</h3>
-        <div className="cr-card-heading-actions">
-          <CardPersonalizationButton item={b} onSave={onCustomize} hasImage />
-          <button className="cr-btn ghost danger" aria-label="Excluir procedimento" title="Excluir" onClick={stop(onRemove)}><Trash2 size={13} /></button>
-        </div>
       </div>
-      <div className="cr-row" role="group" aria-label={`Avaliação de ${b.name}`} style={{ gap: 2, marginTop: 6 }}>
+      <div className="cr-row" role="group" aria-label={`Avaliação de ${b.name}`} style={{ gap: 2, marginTop: 2 }}>
         {Array.from({ length: 5 }, (_, index) => {
           const value = index + 1;
           const selected = value <= Number(b.rating || 0);
@@ -6679,6 +6675,10 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
             </button>
           );
         })}
+      </div>
+      <div className="cr-card-heading-actions" style={{ marginTop: 4 }}>
+        <CardPersonalizationButton item={b} onSave={onCustomize} hasImage />
+        <button className="cr-btn ghost danger" aria-label="Excluir procedimento" title="Excluir" onClick={stop(onRemove)}><Trash2 size={13} /></button>
       </div>
       {chips.length > 0 && <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>{chips}<CardTopicChip item={b} /></div>}
       {chips.length === 0 && b.topic && <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}><CardTopicChip item={b} /></div>}
@@ -8570,21 +8570,22 @@ const NAV = [
   { id: "dashboard", label: "Dashboard", icon: Home },
   { id: "search", label: "Buscar", icon: SearchCheck },
   { id: "tasks", label: "Planejamento e Rotinas", icon: CalendarDays },
-  { id: "goals", label: "Metas", icon: Target },
   { id: "habits", label: "Hábitos", icon: Repeat },
   { id: "finance", label: "Finanças", icon: Wallet },
+  { id: "personaldev", label: "Desenvolvimento Pessoal", icon: Compass },
   { id: "study", label: "Estudos", icon: GraduationCap },
-  { id: "career", label: "Carreira", icon: Briefcase },
   { id: "beauty", label: "Procedimentos Estéticos", icon: Sparkles },
   { id: "selfcare", label: "Self-Care & Bem-estar", icon: Flame },
   { id: "hobbies", label: "Hobbies", icon: Sparkle },
-  { id: "personaldev", label: "Desenvolvimento Pessoal", icon: Compass },
+  { id: "goals", label: "Metas", icon: Target },
   { id: "shopping", label: "Wishlist", icon: Wallet },
-  { id: "notes", label: "Notas", icon: NotebookPen },
+  { id: "career", label: "Carreira", icon: Briefcase },
   { id: "vision", label: "Vision Board", icon: ImageIcon },
   { id: "apps", label: "Meus Apps", icon: Link2 },
+  { id: "notes", label: "Notas", icon: NotebookPen },
   { id: "settings", label: "Configurações", icon: SettingsIcon },
 ];
+const NAV_ORDER_VERSION = 1;
 
 const TAB_ROUTES = {
   dashboard: "dashboard", search: "buscar", tasks: "planejamento", goals: "metas",
@@ -8873,6 +8874,13 @@ export default function App({ onSignOut }) {
       setTab("dashboard");
     }
   }, [loaded, pages, settings.deletedPages, setTab, tab]);
+
+  useEffect(() => {
+    if (!loaded || settings.navigationOrderVersion === NAV_ORDER_VERSION) return;
+    const orderedPages = NAV.filter((item) => item.id !== "settings" && !(settings.deletedPages || []).includes(item.id)).map((item) => item.id);
+    orderedPages.push(...pages.map((page) => `page:${page.id}`));
+    setSettings({ ...settings, pageOrder: orderedPages, navigationOrderVersion: NAV_ORDER_VERSION });
+  }, [loaded, pages, settings, setSettings]);
 
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(async () => {
