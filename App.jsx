@@ -1900,7 +1900,7 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
         const formatPlayerTime = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
         return (
           <section className="cr-card" key="musicPlayer" style={{ marginBottom: 16, background: "#8F1111", color: "#FFFDF8", borderColor: "#8F1111" }}>
-            <div className="cr-row" style={{ alignItems: "center", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
+            <div className="cr-row" style={{ alignItems: "left", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
               <div aria-hidden="true" style={{ width: 112, height: 112, flexShrink: 0, borderRadius: 10, background: "linear-gradient(145deg, #F0D9CF, #C77B6C)", color: "#68100D", display: "grid", placeItems: "center" }}>
                 <Music2 size={42} strokeWidth={1.8} />
               </div>
@@ -2749,6 +2749,8 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const [filterStatus, setFilterStatus] = useState("todos");
   const [monthOffset, setMonthOffset] = useState(0);
   const [invoiceExpenseCardId, setInvoiceExpenseCardId] = useState("");
+  const [invoiceExpenseMonth, setInvoiceExpenseMonth] = useState("");
+  const [editingInvoiceCard, setEditingInvoiceCard] = useState(null);
   const chartMonth = settings.financeChartMonth || "todos";
   const [receiptTarget, setReceiptTarget] = useState("");
   const [invoiceCard, setInvoiceCard] = useState(cards[0]?.id || "");
@@ -2771,6 +2773,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
 
   const save = (data) => {
     const { installmentsCount, recurringEnabled, recurringMonths, ...base } = data;
+    if (!(base.type === "saida" && base.paymentMethod === "Crédito" && base.cardId)) delete base.invoiceMonth;
     if (base.type === "saida") {
       base.plannedAmount = Number(base.plannedAmount) || Number(base.amount) || 0;
     } else {
@@ -2782,9 +2785,16 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const generate = (data) => {
     const { installmentsCount, recurringEnabled, recurringMonths, id, ...base } = data;
     const rest = manualFinance.filter((x) => x.id !== id);
-    if (base.paymentMethod === "Crédito" && Number(installmentsCount) > 1) setFinance([...createFinanceInstallments(base, Number(installmentsCount)), ...rest]);
-    else setFinance([...generateRecurringOccurrences(base, Number(recurringMonths) || 12), ...rest]);
+    const generated = base.paymentMethod === "Crédito" && Number(installmentsCount) > 1
+      ? createFinanceInstallments(base, Number(installmentsCount))
+      : generateRecurringOccurrences(base, Number(recurringMonths) || 12);
+    const withInvoiceMonths = base.invoiceMonth
+      ? generated.map((entry, index) => ({ ...entry, invoiceMonth: addMonths(`${base.invoiceMonth}-01`, index).slice(0, 7) }))
+      : generated;
+    setFinance([...withInvoiceMonths, ...rest]);
     setEditing(null);
+    setInvoiceExpenseCardId("");
+    setInvoiceExpenseMonth("");
   };
   const discardDraft = (id) => { if (manualFinance.some((x) => x.id === id)) setFinance(manualFinance.filter((x) => x.id !== id)); };
   const remove = (id) => {
@@ -2854,12 +2864,16 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     if (!card) return null;
     const window = cardInvoiceWindow(card, selectedMonth);
     const purchases = finance.filter((entry) => entry.cardId === card.id && entry.type === "saida"
-      && entry.status !== "cancelado" && entry.date > window.previousClose && entry.date <= window.closeDate)
+      && entry.status !== "cancelado"
+      && (entry.invoiceMonth === selectedMonth
+        || (!entry.invoiceMonth && entry.date > window.previousClose && entry.date <= window.closeDate)))
       .sort((a, b) => a.date.localeCompare(b.date));
-    const total = purchases.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+    const savedAmount = Number(card.invoiceAmounts?.[selectedMonth]);
+    const existingAmount = Number.isFinite(savedAmount) ? Math.max(0, savedAmount) : 0;
+    const total = existingAmount + purchases.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
     const payments = (Array.isArray(card.payments) ? card.payments : []).filter((payment) => payment.invoiceMonth === selectedMonth);
     const paid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    return { card, window, purchases, total, payments, paid, remaining: Math.max(0, total - paid) };
+    return { card, window, purchases, existingAmount, total, payments, paid, remaining: Math.max(0, total - paid) };
   }, [cards, finance, invoiceCard, selectedMonth]);
   const registerInvoicePayment = () => {
     if (!invoiceDetails || !invoicePaymentDate || invoicePaymentDate > todayStr()) return;
@@ -3089,6 +3103,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             </select>
             {invoiceCard && <button className="cr-btn primary" onClick={() => {
               setInvoiceExpenseCardId(invoiceCard);
+              setInvoiceExpenseMonth(selectedMonth);
               setEditing("new");
             }}><Plus size={14} /> Adicionar compra à fatura</button>}
             <button className="cr-btn ghost" onClick={() => setMonthOffset(monthOffset - 1)}>←</button>
@@ -3097,14 +3112,18 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           </div>
           {cards.length === 0 && <div className="cr-card"><p className="cr-empty">Cadastre um cartão em "Contas & Cartões" para acompanhar compras e faturas.</p><button className="cr-btn" onClick={() => setTab("contas")}>Cadastrar cartão</button></div>}
           {invoiceDetails && (() => {
-            const { card, window, purchases, total, payments, paid, remaining } = invoiceDetails;
+            const { card, window, purchases, existingAmount, total, payments, paid, remaining } = invoiceDetails;
             return (
               <div className="cr-card">
-                <p className="cr-sub" style={{ marginTop: 0 }}>{card.name} · fecha em {fmtDateShort(window.closeDate)} · vence em {fmtDateShort(window.dueDate)} · compras de {fmtDateShort(window.previousClose)} a {fmtDateShort(window.closeDate)}</p>
+                <div className="cr-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <p className="cr-sub" style={{ marginTop: 0 }}>{card.name} · fecha em {fmtDateShort(window.closeDate)} · vence em {fmtDateShort(window.dueDate)} · compras de {fmtDateShort(window.previousClose)} a {fmtDateShort(window.closeDate)}</p>
+                  <button className="cr-btn ghost" onClick={() => setEditingInvoiceCard(card)}>Editar saldo informado</button>
+                </div>
                 <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
                   <span className="cr-serif" style={{ fontSize: 16 }}>Total da fatura</span>
                   <span className="cr-serif" style={{ fontSize: 18 }}>{fmtBRL(total)}</span>
                 </div>
+                <p className="cr-sub" style={{ margin: "0 0 10px" }}>Saldo já existente: {fmtBRL(existingAmount)} · compras registradas são somadas a esse valor.</p>
                 <div className="cr-grid cr-grid-2" style={{ marginBottom: 12 }}>
                   <div><p className="cr-label">Já pago</p><strong>{fmtBRL(paid)}</strong></div>
                   <div><p className="cr-label">Saldo a pagar</p><strong>{fmtBRL(remaining)}</strong></div>
@@ -3159,14 +3178,15 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       {tab === "investimentos" && <InvestmentsPanel investments={investments} setInvestments={setInvestments} settings={settings} setSettings={setSettings} />}
 
       {tab === "contas" && (
-        <AccountsCardsPanel accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} finance={finance} />
+        <AccountsCardsPanel accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} finance={finance} invoiceMonth={selectedMonth} />
       )}
 
       {editing && (
-        <FinanceModal item={editing === "new" ? null : editing} initialCardId={invoiceExpenseCardId} onSave={save} onGenerate={generate} onDiscard={discardDraft} onClose={() => { setEditing(null); setInvoiceExpenseCardId(""); }}
+        <FinanceModal item={editing === "new" ? null : editing} initialCardId={invoiceExpenseCardId} initialInvoiceMonth={invoiceExpenseMonth} onSave={save} onGenerate={generate} onDiscard={discardDraft} onClose={() => { setEditing(null); setInvoiceExpenseCardId(""); setInvoiceExpenseMonth(""); }}
           accounts={accounts} cards={cards} paymentMethods={settings.paymentMethods || DEFAULT_SETTINGS.paymentMethods}
           categories={settings.financeCategories || DEFAULT_SETTINGS.financeCategories} />
       )}
+      {editingInvoiceCard && <CardModal item={editingInvoiceCard} invoiceMonth={selectedMonth} onSave={(data) => setCards(upsertById(cards, data))} onClose={() => setEditingInvoiceCard(null)} />}
     </div>
   );
 }
@@ -3649,13 +3669,14 @@ function InvestmentModal({ item, categories, onSave, onClose }) {
   );
 }
 
-function FinanceModal({ item, initialCardId = "", onSave, onGenerate, onDiscard, onClose, accounts, cards, paymentMethods, categories }) {
+function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSave, onGenerate, onDiscard, onClose, accounts, cards, paymentMethods, categories }) {
   const ctx = useContext(ListsContext);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [form, setForm] = useState(item || {
     type: "saida", category: categories[0] || "", expenseClass: "variable", amount: "", plannedAmount: "", date: todayStr(), desc: "",
     paymentMethod: initialCardId ? "Crédito" : "Pix", status: "pago", accountId: "", cardId: initialCardId, link: "",
+    invoiceMonth: initialInvoiceMonth,
     installmentsCount: 1, recurringEnabled: false, recurringMonths: 12,
   });
   const isEdit = !!item;
@@ -3856,7 +3877,7 @@ function MiniBarChartFinance({ data, height = 280 }) {
   );
 }
 
-function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, setSettings, finance }) {
+function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, setSettings, finance, invoiceMonth }) {
   const [editingAccount, setEditingAccount] = useState(null);
   const [editingCard, setEditingCard] = useState(null);
   const [newMethod, setNewMethod] = useState("");
@@ -3908,6 +3929,7 @@ function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, 
           <div className="cr-list-row" key={c.id}>
             <span className="cr-list-title" style={{ flex: 1 }}>{c.name}</span>
             <span className="cr-chip">limite {fmtBRL(c.limit)}</span>
+            <span className="cr-chip">fatura informada {fmtBRL(c.invoiceAmounts?.[invoiceMonth] || 0)}</span>
             <span className="cr-chip">fecha dia {c.closingDay}</span>
             <span className="cr-chip">vence dia {c.dueDay}</span>
             <button className="cr-btn ghost" onClick={() => setEditingCard(c)}><Pencil size={13} /></button>
@@ -3932,7 +3954,7 @@ function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, 
       </div>
 
       {editingAccount && <AccountModal item={editingAccount === "new" ? null : editingAccount} onSave={saveAccount} onClose={() => setEditingAccount(null)} />}
-      {editingCard && <CardModal item={editingCard === "new" ? null : editingCard} onSave={saveCard} onClose={() => setEditingCard(null)} />}
+      {editingCard && <CardModal item={editingCard === "new" ? null : editingCard} invoiceMonth={invoiceMonth} onSave={saveCard} onClose={() => setEditingCard(null)} />}
     </div>
   );
 }
@@ -3957,14 +3979,35 @@ function AccountModal({ item, onSave, onClose }) {
   );
 }
 
-function CardModal({ item, onSave, onClose }) {
-  const [form, setForm] = useState(item || { id: uid(), name: "", limit: "", closingDay: "", dueDay: "", bank: "" });
+function CardModal({ item, invoiceMonth = todayStr().slice(0, 7), onSave, onClose }) {
+  const [form, setForm] = useState(() => ({
+    ...(item || { id: uid(), name: "", limit: "", closingDay: "", dueDay: "", bank: "" }),
+    invoiceMonth,
+    invoiceAmount: String(item?.invoiceAmounts?.[invoiceMonth] ?? 0),
+  }));
   const validDay = (value) => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 31;
-  const autoStatus = useAutoSave(form, onSave, (form) => ({ ...form, limit: Number(form.limit) || 0 }), undefined,
-    (value) => !!value.name?.trim() && validDay(value.closingDay) && validDay(value.dueDay));
+  const validMonth = (value) => /^\d{4}-\d{2}$/.test(value || "");
+  const serializeCard = (value) => {
+    const { invoiceMonth: month, invoiceAmount, ...card } = value;
+    const invoiceAmounts = Object.fromEntries(Object.entries(card.invoiceAmounts || {}).map(([key, amount]) => {
+      const numericAmount = Number(amount);
+      return [key, Number.isFinite(numericAmount) ? Math.max(0, numericAmount) : 0];
+    }));
+    return {
+      ...card,
+      limit: Number(card.limit) || 0,
+      invoiceAmounts: {
+        ...invoiceAmounts,
+        [month]: Math.max(0, Number(invoiceAmount) || 0),
+      },
+    };
+  };
+  const ready = (value) => !!value.name?.trim() && validDay(value.closingDay) && validDay(value.dueDay)
+    && validMonth(value.invoiceMonth) && Number.isFinite(Number(value.invoiceAmount)) && Number(value.invoiceAmount) >= 0;
+  const autoStatus = useAutoSave(form, onSave, serializeCard, undefined, ready);
   const saveNow = () => {
-    if (!form.name.trim() || !validDay(form.closingDay) || !validDay(form.dueDay)) return;
-    onSave({ ...form, limit: Number(form.limit) || 0 });
+    if (!ready(form)) return;
+    onSave(serializeCard(form));
     onClose();
   };
   return (
@@ -3981,9 +4024,24 @@ function CardModal({ item, onSave, onClose }) {
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Dia de vencimento</label>
           <input type="number" min="1" max="31" className="cr-input" value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: e.target.value })} /></div>
       </div>
+      <div className="cr-row" style={{ flexWrap: "wrap" }}>
+        <div className="cr-field" style={{ flex: 1, minWidth: 150 }}><label className="cr-label">Mês da fatura</label>
+          <input type="month" className="cr-input" value={form.invoiceMonth} onChange={(e) => setForm({
+            ...form,
+            invoiceMonth: e.target.value,
+            invoiceAmount: String(form.invoiceAmounts?.[e.target.value] ?? 0),
+          })} /></div>
+        <div className="cr-field" style={{ flex: 1, minWidth: 150 }}><label className="cr-label">Saldo já existente na fatura (R$)</label>
+          <input type="number" min="0" step="0.01" className="cr-input" value={form.invoiceAmount} onChange={(e) => setForm({
+            ...form,
+            invoiceAmount: e.target.value,
+            invoiceAmounts: { ...(form.invoiceAmounts || {}), [form.invoiceMonth]: e.target.value },
+          })} /></div>
+      </div>
+      <p className="cr-sub">Informe o saldo que já existe neste mês. As compras registradas no app serão somadas a esse valor.</p>
       {(!validDay(form.closingDay) || !validDay(form.dueDay)) && <p className="cr-sub" role="alert" style={{ color: "#A1493C" }}>Informe os dias de fechamento e vencimento (1 a 31) para habilitar a fatura.</p>}
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
-      <button type="button" className="cr-btn primary" disabled={!form.name.trim() || !validDay(form.closingDay) || !validDay(form.dueDay)} onClick={saveNow}>Salvar cartão</button>
+      <button type="button" className="cr-btn primary" disabled={!ready(form)} onClick={saveNow}>Salvar cartão</button>
     </Modal>
   );
 }
