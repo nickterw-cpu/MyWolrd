@@ -2750,6 +2750,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const [tab, setTab] = useState("visao");
   const [filterStatus, setFilterStatus] = useState("todos");
   const [monthOffset, setMonthOffset] = useState(0);
+  const [invoiceExpenseCardId, setInvoiceExpenseCardId] = useState("");
   const chartMonth = settings.financeChartMonth || "todos";
   const [receiptTarget, setReceiptTarget] = useState("");
   const [invoiceCard, setInvoiceCard] = useState(cards[0]?.id || "");
@@ -3088,6 +3089,10 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
               <option value="">Selecione um cartão</option>
               {cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            {invoiceCard && <button className="cr-btn primary" onClick={() => {
+              setInvoiceExpenseCardId(invoiceCard);
+              setEditing("new");
+            }}><Plus size={14} /> Adicionar compra à fatura</button>}
             <button className="cr-btn ghost" onClick={() => setMonthOffset(monthOffset - 1)}>←</button>
             <span className="cr-serif" style={{ fontSize: 15 }}>{monthLabel(selectedMonth)}</span>
             <button className="cr-btn ghost" onClick={() => setMonthOffset(monthOffset + 1)}>→</button>
@@ -3107,7 +3112,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                   <div><p className="cr-label">Saldo a pagar</p><strong>{fmtBRL(remaining)}</strong></div>
                 </div>
                 <h3 className="cr-serif" style={{ fontSize: 15 }}>Compras</h3>
-                {purchases.length === 0 && <p className="cr-empty">Nenhuma compra neste ciclo da fatura.</p>}
+                {purchases.length === 0 && <p className="cr-empty">Nenhuma compra neste ciclo. Use “Adicionar compra à fatura” ou registre um lançamento como Crédito e selecione este cartão.</p>}
                 {purchases.map((f) => (
                   <div className="cr-list-row" key={f.id}>
                     <span className="cr-list-title" style={{ flex: 1 }}>{f.desc || f.category}</span>
@@ -3160,7 +3165,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       )}
 
       {editing && (
-        <FinanceModal item={editing === "new" ? null : editing} onSave={save} onGenerate={generate} onDiscard={discardDraft} onClose={() => setEditing(null)}
+        <FinanceModal item={editing === "new" ? null : editing} initialCardId={invoiceExpenseCardId} onSave={save} onGenerate={generate} onDiscard={discardDraft} onClose={() => { setEditing(null); setInvoiceExpenseCardId(""); }}
           accounts={accounts} cards={cards} paymentMethods={settings.paymentMethods || DEFAULT_SETTINGS.paymentMethods}
           categories={settings.financeCategories || DEFAULT_SETTINGS.financeCategories} />
       )}
@@ -3646,13 +3651,13 @@ function InvestmentModal({ item, categories, onSave, onClose }) {
   );
 }
 
-function FinanceModal({ item, onSave, onGenerate, onDiscard, onClose, accounts, cards, paymentMethods, categories }) {
+function FinanceModal({ item, initialCardId = "", onSave, onGenerate, onDiscard, onClose, accounts, cards, paymentMethods, categories }) {
   const ctx = useContext(ListsContext);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [form, setForm] = useState(item || {
     type: "saida", category: categories[0] || "", expenseClass: "variable", amount: "", plannedAmount: "", date: todayStr(), desc: "",
-    paymentMethod: "Pix", status: "pago", accountId: "", cardId: "", link: "",
+    paymentMethod: initialCardId ? "Crédito" : "Pix", status: "pago", accountId: "", cardId: initialCardId, link: "",
     installmentsCount: 1, recurringEnabled: false, recurringMonths: 12,
   });
   const isEdit = !!item;
