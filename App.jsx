@@ -2876,18 +2876,29 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     const card = cards.find((entry) => entry.id === invoiceCard);
     if (!card) return null;
     const window = cardInvoiceWindow(card, selectedMonth);
-    const purchases = finance.filter((entry) => entry.cardId === card.id && entry.type === "saida"
-      && entry.status !== "cancelado"
-      && (entry.invoiceMonth === selectedMonth
-        || (!entry.invoiceMonth && entry.date > window.previousClose && entry.date <= window.closeDate)))
+    const cardPurchases = finance.filter((entry) => entry.cardId === card.id && entry.type === "saida"
+      && entry.status !== "cancelado")
+      .map((entry) => ({
+        ...entry,
+        targetInvoiceMonth: entry.invoiceMonth || cardInvoiceMonthForDate(card, entry.date),
+      }));
+    const purchases = cardPurchases.filter((entry) => entry.targetInvoiceMonth === selectedMonth)
       .sort((a, b) => a.date.localeCompare(b.date));
+    const otherPurchases = cardPurchases
+      .filter((entry) => entry.targetInvoiceMonth && entry.targetInvoiceMonth !== selectedMonth)
+      .sort((a, b) => b.date.localeCompare(a.date));
     const savedAmount = Number(card.invoiceAmounts?.[selectedMonth]);
     const existingAmount = Number.isFinite(savedAmount) ? Math.max(0, savedAmount) : 0;
     const total = existingAmount + purchases.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
     const payments = (Array.isArray(card.payments) ? card.payments : []).filter((payment) => payment.invoiceMonth === selectedMonth);
     const paid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    return { card, window, purchases, existingAmount, total, payments, paid, remaining: Math.max(0, total - paid) };
+    return { card, window, purchases, otherPurchases, existingAmount, total, payments, paid, remaining: Math.max(0, total - paid) };
   }, [cards, finance, invoiceCard, selectedMonth]);
+  const showInvoiceMonth = (month) => {
+    const [year, monthNumber] = month.split("-").map(Number);
+    const now = new Date();
+    setMonthOffset((year - now.getFullYear()) * 12 + monthNumber - (now.getMonth() + 1));
+  };
   const registerInvoicePayment = () => {
     if (!invoiceDetails || !invoicePaymentDate || invoicePaymentDate > todayStr()) return;
     const amount = Number(invoicePaymentAmount);
@@ -3125,7 +3136,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           </div>
           {cards.length === 0 && <div className="cr-card"><p className="cr-empty">Cadastre um cartão em "Contas & Cartões" para acompanhar compras e faturas.</p><button className="cr-btn" onClick={() => setTab("contas")}>Cadastrar cartão</button></div>}
           {invoiceDetails && (() => {
-            const { card, window, purchases, existingAmount, total, payments, paid, remaining } = invoiceDetails;
+            const { card, window, purchases, otherPurchases, existingAmount, total, payments, paid, remaining } = invoiceDetails;
             return (
               <div className="cr-card">
                 <div className="cr-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -3152,6 +3163,19 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                     <span style={{ fontWeight: 600, fontSize: 13.5 }}>{fmtBRL(f.amount)}</span>
                   </div>
                 ))}
+                {purchases.length === 0 && otherPurchases.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <p className="cr-sub">Há compras deste cartão em outros ciclos:</p>
+                    {otherPurchases.map((purchase) => (
+                      <div className="cr-list-row" key={purchase.id}>
+                        <span className="cr-list-title" style={{ flex: 1 }}>{purchase.desc || purchase.category}</span>
+                        <span className="cr-chip">{fmtDateShort(purchase.date)}</span>
+                        <span className="cr-chip">{monthLabel(purchase.targetInvoiceMonth)}</span>
+                        <button className="cr-btn ghost" onClick={() => showInvoiceMonth(purchase.targetInvoiceMonth)}>Ver fatura</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <h3 className="cr-serif" style={{ fontSize: 15, marginTop: 18 }}>Pagamentos registrados</h3>
                 {payments.map((payment) => (
                   <div className="cr-list-row" key={payment.id}><span className="cr-list-title" style={{ flex: 1 }}>{fmtDateShort(payment.date)}</span><strong>{fmtBRL(payment.amount)}</strong></div>
