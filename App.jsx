@@ -7,7 +7,7 @@ import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, summarizeFinanceMonth } from "./src/lib/financePlan.js";
 import {
   actualExpenseAverages, buildFinanceAlerts, buildFinanceForecast, buildIntegratedFinance,
-  cardInvoiceMonthForDate, createFinanceInstallments, nextFinanceDate,
+  cardInvoiceMonthForDate, cardLimitSummary, createFinanceInstallments, nextFinanceDate,
 } from "./src/lib/financeIntegration.js";
 import { notify } from "./src/components/ToastHost.jsx";
 import {
@@ -3133,12 +3133,34 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           {cards.length === 0 && <div className="cr-card"><p className="cr-empty">Cadastre um cartão em "Contas & Cartões" para acompanhar compras e faturas.</p><button className="cr-btn" onClick={() => setTab("contas")}>Cadastrar cartão</button></div>}
           {invoiceDetails && (() => {
             const { card, window, purchases, otherPurchases, existingAmount, total, payments, paid, remaining } = invoiceDetails;
+            const limitSummary = cardLimitSummary(card, finance);
+            const limitProgress = Math.min(100, Math.max(0, limitSummary.usedPercent));
             return (
               <div className="cr-card">
                 <div className="cr-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
                   <p className="cr-sub" style={{ marginTop: 0 }}>{card.name} · fecha em {fmtDateShort(window.closeDate)} · vence em {fmtDateShort(window.dueDate)} · compras de {fmtDateShort(window.previousClose)} a {fmtDateShort(window.closeDate)}</p>
                   <button className="cr-btn ghost" onClick={() => setEditingInvoiceCard(card)}>Editar saldo informado</button>
                 </div>
+                <div className="cr-grid cr-grid-3" style={{ marginBottom: 12 }}>
+                  <div><p className="cr-label">Limite geral</p><strong>{limitSummary.limit > 0 ? fmtBRL(limitSummary.limit) : "Limite não informado"}</strong></div>
+                  <div><p className="cr-label">Limite usado</p><strong>{fmtBRL(limitSummary.used)}</strong></div>
+                  <div><p className="cr-label">Limite disponível</p><strong>{limitSummary.limit > 0 ? fmtBRL(limitSummary.available) : "Limite não informado"}</strong></div>
+                </div>
+                {limitSummary.limit > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 4 }}>
+                      <span className="cr-sub" style={{ margin: 0 }}>Uso do limite</span>
+                      <span className="cr-sub" style={{ margin: 0 }}>{limitSummary.usedPercent.toFixed(0)}%</span>
+                    </div>
+                    <div className="cr-progress-track" role="progressbar" aria-label="Uso do limite do cartão"
+                      aria-valuemin={0} aria-valuemax={100} aria-valuenow={limitProgress}>
+                      <div className="cr-progress-fill" style={{
+                        width: `${limitProgress}%`,
+                        background: limitSummary.overLimit ? "#A1493C" : "#5C7A56",
+                      }} />
+                    </div>
+                  </div>
+                )}
                 <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
                   <span className="cr-serif" style={{ fontSize: 16 }}>Total da fatura</span>
                   <span className="cr-serif" style={{ fontSize: 18 }}>{fmtBRL(total)}</span>
@@ -3215,7 +3237,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       )}
 
       {editing && (
-        <FinanceModal item={editing === "new" ? null : editing} initialCardId={invoiceExpenseCardId} initialInvoiceMonth={invoiceExpenseMonth} onSave={save} onGenerate={generate} onDiscard={discardDraft} onClose={() => { setEditing(null); setInvoiceExpenseCardId(""); setInvoiceExpenseMonth(""); }}
+        <FinanceModal item={editing === "new" ? null : editing} initialCardId={invoiceExpenseCardId} initialInvoiceMonth={invoiceExpenseMonth} onSave={save} onGenerate={generate} onDiscard={discardDraft} onClose={() => { setEditing(null); setInvoiceExpenseCardId(""); setInvoiceExpenseMonth(""); }} finance={finance}
           accounts={accounts} cards={cards} paymentMethods={settings.paymentMethods || DEFAULT_SETTINGS.paymentMethods}
           categories={settings.financeCategories || DEFAULT_SETTINGS.financeCategories} />
       )}
@@ -3702,7 +3724,7 @@ function InvestmentModal({ item, categories, onSave, onClose }) {
   );
 }
 
-function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSave, onGenerate, onDiscard, onClose, accounts, cards, paymentMethods, categories }) {
+function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSave, onGenerate, onDiscard, onClose, accounts, cards, paymentMethods, categories, finance }) {
   const ctx = useContext(ListsContext);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -3715,6 +3737,9 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
   const isEdit = !!item;
   const isCredit = form.paymentMethod === "Crédito";
   const selectedCard = cards.find((card) => card.id === form.cardId);
+  const limitSummary = selectedCard
+    ? cardLimitSummary(selectedCard, isEdit ? finance.filter((entry) => entry.id !== item.id) : finance)
+    : null;
   const invoiceMonthForForm = form.invoiceMonth || cardInvoiceMonthForDate(selectedCard, form.date);
   const draftId = useRef(uid());
   const needsGeneration = !isEdit && ((isCredit && Number(form.installmentsCount) > 1) || !!form.recurringEnabled);
@@ -3809,6 +3834,11 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
       )}
       {form.type === "saida" && isCredit && form.cardId && invoiceMonthForForm
         && <p className="cr-sub">Esta compra será incluída na fatura de {monthLabel(invoiceMonthForForm)}.</p>}
+      {form.type === "saida" && isCredit && selectedCard && limitSummary.limit > 0
+        && Number(form.amount) > limitSummary.available
+        && <p className="cr-sub" role="alert" style={{ color: "#A1493C" }}>
+          Esta compra de {fmtBRL(Number(form.amount))} ultrapassa o limite disponível de {fmtBRL(limitSummary.available)}. O lançamento ainda poderá ser salvo.
+        </p>}
       {isCredit && cards.length === 0 && <p className="cr-sub" role="alert" style={{ color: "#A1493C" }}>Cadastre um cartão em Contas & Cartões para vincular esta compra à fatura.</p>}
       {!isCredit && accounts.length > 0 && (
         <div className="cr-field"><label className="cr-label">Conta</label>
@@ -3963,15 +3993,31 @@ function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, 
         </div>
         {cards.length === 0 && <p className="cr-empty">Nenhum cartão cadastrado.</p>}
         {cards.map((c) => (
-          <div className="cr-list-row" key={c.id}>
-            <span className="cr-list-title" style={{ flex: 1 }}>{c.name}</span>
-            <span className="cr-chip">limite {fmtBRL(c.limit)}</span>
-            <span className="cr-chip">fatura informada {fmtBRL(c.invoiceAmounts?.[invoiceMonth] || 0)}</span>
-            <span className="cr-chip">fecha dia {c.closingDay}</span>
-            <span className="cr-chip">vence dia {c.dueDay}</span>
-            <button className="cr-btn ghost" onClick={() => setEditingCard(c)}><Pencil size={13} /></button>
-            <button className="cr-btn ghost danger" onClick={() => setCards(cards.filter((x) => x.id !== c.id))}><Trash2 size={13} /></button>
-          </div>
+          (() => {
+            const limitSummary = cardLimitSummary(c, finance);
+            const limitProgress = Math.min(100, Math.max(0, limitSummary.usedPercent));
+            return (
+              <div className="cr-list-row" key={c.id} style={{ flexWrap: "wrap" }}>
+                <span className="cr-list-title" style={{ flex: 1 }}>{c.name}</span>
+                <span className="cr-chip">limite geral {limitSummary.limit > 0 ? fmtBRL(limitSummary.limit) : "Limite não informado"}</span>
+                <span className="cr-chip">disponível {limitSummary.limit > 0 ? fmtBRL(limitSummary.available) : "Limite não informado"}</span>
+                {limitSummary.limit > 0 && (
+                  <div className="cr-progress-track" style={{ width: 90 }} role="progressbar"
+                    aria-label={`Uso do limite de ${c.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={limitProgress}>
+                    <div className="cr-progress-fill" style={{
+                      width: `${limitProgress}%`,
+                      background: limitSummary.overLimit ? "#A1493C" : "#5C7A56",
+                    }} />
+                  </div>
+                )}
+                <span className="cr-chip">fatura informada {fmtBRL(c.invoiceAmounts?.[invoiceMonth] || 0)}</span>
+                <span className="cr-chip">fecha dia {c.closingDay}</span>
+                <span className="cr-chip">vence dia {c.dueDay}</span>
+                <button className="cr-btn ghost" onClick={() => setEditingCard(c)}><Pencil size={13} /></button>
+                <button className="cr-btn ghost danger" onClick={() => setCards(cards.filter((x) => x.id !== c.id))}><Trash2 size={13} /></button>
+              </div>
+            );
+          })()
         ))}
       </div>
 
