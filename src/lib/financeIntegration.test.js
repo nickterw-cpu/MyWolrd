@@ -4,11 +4,26 @@ import {
   buildFinanceAlerts,
   buildFinanceForecast,
   buildIntegratedFinance,
+  cardInvoiceMonthForDate,
   createFinanceInstallments,
   nextFinanceDate,
 } from "./financeIntegration.js";
 
 const today = "2026-10-18";
+
+describe("cardInvoiceMonthForDate", () => {
+  it("assigns purchases on or before closing to the correct due month", () => {
+    const card = { closingDay: 25, dueDay: 5 };
+    expect(cardInvoiceMonthForDate(card, "2026-10-25")).toBe("2026-11");
+    expect(cardInvoiceMonthForDate(card, "2026-10-26")).toBe("2026-12");
+  });
+
+  it("handles due dates later than the closing day and short months", () => {
+    const card = { closingDay: 31, dueDay: 15 };
+    expect(cardInvoiceMonthForDate(card, "2026-02-28")).toBe("2026-03");
+    expect(cardInvoiceMonthForDate(card, "2026-03-01")).toBe("2026-04");
+  });
+});
 
 describe("buildIntegratedFinance", () => {
   it("supports itemized deductions while preserving legacy total deductions", () => {

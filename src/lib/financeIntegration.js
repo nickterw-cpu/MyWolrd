@@ -32,6 +32,19 @@ function shiftMonths(date, months) {
   return target.toISOString().slice(0, 10);
 }
 
+export function cardInvoiceMonthForDate(card, date) {
+  if (!card || !validDate(date)) return "";
+  const closingDay = Math.min(31, Math.max(1, Math.floor(Number(card.closingDay) || 1)));
+  const dueDay = Math.min(31, Math.max(1, Math.floor(Number(card.dueDay) || 1)));
+  const [year, month] = date.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const closingDate = `${date.slice(0, 7)}-${String(Math.min(closingDay, lastDay)).padStart(2, "0")}`;
+  const closingMonth = date > closingDate
+    ? shiftMonths(`${date.slice(0, 7)}-01`, 1).slice(0, 7)
+    : date.slice(0, 7);
+  return shiftMonths(`${closingMonth}-01`, dueDay <= closingDay ? 1 : 0).slice(0, 7);
+}
+
 function shiftDays(date, days) {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
 }

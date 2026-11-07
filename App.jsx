@@ -7,7 +7,7 @@ import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, summarizeFinanceMonth } from "./src/lib/financePlan.js";
 import {
   actualExpenseAverages, buildFinanceAlerts, buildFinanceForecast, buildIntegratedFinance,
-  createFinanceInstallments, nextFinanceDate,
+  cardInvoiceMonthForDate, createFinanceInstallments, nextFinanceDate,
 } from "./src/lib/financeIntegration.js";
 import { notify } from "./src/components/ToastHost.jsx";
 import {
@@ -2773,7 +2773,15 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
 
   const save = (data) => {
     const { installmentsCount, recurringEnabled, recurringMonths, ...base } = data;
-    if (!(base.type === "saida" && base.paymentMethod === "Crédito" && base.cardId)) delete base.invoiceMonth;
+    if (base.type === "saida" && base.paymentMethod === "Crédito" && base.cardId) {
+      if (!base.invoiceMonth) {
+        const card = cards.find((entry) => entry.id === base.cardId);
+        const invoiceMonth = cardInvoiceMonthForDate(card, base.date);
+        if (invoiceMonth) base.invoiceMonth = invoiceMonth;
+      }
+    } else {
+      delete base.invoiceMonth;
+    }
     if (base.type === "saida") {
       base.plannedAmount = Number(base.plannedAmount) || Number(base.amount) || 0;
     } else {
@@ -2784,6 +2792,11 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   // parcelamento e recorrência geram vários lançamentos de uma vez, então têm um botão próprio
   const generate = (data) => {
     const { installmentsCount, recurringEnabled, recurringMonths, id, ...base } = data;
+    if (base.type === "saida" && base.paymentMethod === "Crédito" && base.cardId && !base.invoiceMonth) {
+      const card = cards.find((entry) => entry.id === base.cardId);
+      const invoiceMonth = cardInvoiceMonthForDate(card, base.date);
+      if (invoiceMonth) base.invoiceMonth = invoiceMonth;
+    }
     const rest = manualFinance.filter((x) => x.id !== id);
     const generated = base.paymentMethod === "Crédito" && Number(installmentsCount) > 1
       ? createFinanceInstallments(base, Number(installmentsCount))
@@ -3681,6 +3694,8 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
   });
   const isEdit = !!item;
   const isCredit = form.paymentMethod === "Crédito";
+  const selectedCard = cards.find((card) => card.id === form.cardId);
+  const invoiceMonthForForm = form.invoiceMonth || cardInvoiceMonthForDate(selectedCard, form.date);
   const draftId = useRef(uid());
   const needsGeneration = !isEdit && ((isCredit && Number(form.installmentsCount) > 1) || !!form.recurringEnabled);
   const autoStatus = useAutoSave(form, onSave, (f) => {
@@ -3772,6 +3787,8 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
             {cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select></div>
       )}
+      {form.type === "saida" && isCredit && form.cardId && invoiceMonthForForm
+        && <p className="cr-sub">Esta compra será incluída na fatura de {monthLabel(invoiceMonthForForm)}.</p>}
       {isCredit && cards.length === 0 && <p className="cr-sub" role="alert" style={{ color: "#A1493C" }}>Cadastre um cartão em Contas & Cartões para vincular esta compra à fatura.</p>}
       {!isCredit && accounts.length > 0 && (
         <div className="cr-field"><label className="cr-label">Conta</label>
