@@ -5,6 +5,7 @@ import {
   buildFinanceForecast,
   buildIntegratedFinance,
   cardInvoiceMonthForDate,
+  cardLimitSummary,
   createFinanceInstallments,
   nextFinanceDate,
 } from "./financeIntegration.js";
@@ -22,6 +23,81 @@ describe("cardInvoiceMonthForDate", () => {
     const card = { closingDay: 31, dueDay: 15 };
     expect(cardInvoiceMonthForDate(card, "2026-02-28")).toBe("2026-03");
     expect(cardInvoiceMonthForDate(card, "2026-03-01")).toBe("2026-04");
+  });
+});
+
+describe("cardLimitSummary", () => {
+  it("counts all open invoice months and releases the limit when a bill is paid", () => {
+    const card = { id: "card-1", limit: 5000, closingDay: 10, dueDay: 17, invoiceAmounts: {}, payments: [] };
+    const purchase = (id, date, amount) => ({
+      id, cardId: card.id, type: "saida", paymentMethod: "Crédito", status: "pago",
+      date, amount, invoiceMonth: cardInvoiceMonthForDate(card, date),
+    });
+    const purchaseA = purchase("purchase-a", "2026-11-05", 300);
+    const purchaseB = createFinanceInstallments({
+      id: "purchase-b", date: "2026-11-08", amount: 1200, type: "saida",
+      paymentMethod: "Crédito", status: "pago", cardId: card.id,
+    }, 12).map((entry) => ({
+      ...entry,
+      invoiceMonth: cardInvoiceMonthForDate(card, entry.date),
+    }));
+    let finance = [purchaseA, ...purchaseB];
+    const invoiceTotal = (month, entries) => (Number(card.invoiceAmounts[month]) || 0) + entries
+      .filter((entry) => entry.cardId === card.id && entry.type === "saida"
+        && entry.paymentMethod === "Crédito" && entry.status !== "cancelado"
+        && (entry.invoiceMonth || cardInvoiceMonthForDate(card, entry.date)) === month)
+      .reduce((total, entry) => total + Number(entry.amount || 0), 0);
+
+    expect(invoiceTotal("2026-11", finance)).toBe(400);
+    expect(cardLimitSummary(card, finance)).toEqual({
+      limit: 5000, used: 1500, available: 3500, usedPercent: 30, overLimit: false,
+    });
+
+    const purchaseC = purchase("purchase-c", "2026-11-12", 500);
+    finance = [...finance, purchaseC];
+    expect(invoiceTotal("2026-11", finance)).toBe(400);
+    expect(invoiceTotal("2026-12", finance)).toBe(600);
+    expect(cardLimitSummary(card, finance)).toMatchObject({ used: 2000, available: 3000 });
+
+    const paidCard = {
+      ...card,
+      payments: [{ id: "payment-1", invoiceMonth: "2026-11", date: "2026-11-17", amount: 400 }],
+    };
+    const paidSummary = cardLimitSummary(paidCard, finance);
+    expect(paidSummary).toMatchObject({ used: 1600, available: 3400 });
+
+    const canceledAndOtherCard = [
+      ...finance,
+      { ...purchase("canceled", "2026-11-05", 900), status: "cancelado" },
+      { ...purchase("other-card", "2026-11-05", 900), cardId: "card-2" },
+    ];
+    expect(cardLimitSummary(paidCard, canceledAndOtherCard)).toEqual(paidSummary);
+  });
+
+  it("counts installment cents accurately and flags spending above the limit", () => {
+    const card = { id: "card-1", limit: 5000, closingDay: 10, dueDay: 17, payments: [] };
+    const installments = createFinanceInstallments({
+      id: "purchase-cents", date: "2026-11-08", amount: 1000, type: "saida",
+      paymentMethod: "Crédito", status: "pago", cardId: card.id,
+    }, 3).map((entry) => ({
+      ...entry,
+      invoiceMonth: cardInvoiceMonthForDate(card, entry.date),
+    }));
+    expect(installments.map((entry) => entry.amount)).toEqual([333.33, 333.33, 333.34]);
+    expect(cardLimitSummary(card, installments)).toMatchObject({ used: 1000, available: 4000 });
+
+    const overLimitSummary = cardLimitSummary(card, [{
+      cardId: card.id, type: "saida", paymentMethod: "Crédito", amount: 6000,
+      date: "2026-11-05", status: "pago",
+    }]);
+    expect(overLimitSummary).toMatchObject({ used: 6000, available: -1000, overLimit: true });
+  });
+
+  it("includes the informed invoice balance and avoids percentages without a limit", () => {
+    const card = { id: "card-1", limit: "", closingDay: 10, dueDay: 17, invoiceAmounts: { "2026-11": 250 } };
+    expect(cardLimitSummary(card, [])).toEqual({
+      limit: 0, used: 250, available: -250, usedPercent: 0, overLimit: true,
+    });
   });
 });
 

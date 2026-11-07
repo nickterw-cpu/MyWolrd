@@ -45,6 +45,46 @@ export function cardInvoiceMonthForDate(card, date) {
   return shiftMonths(`${closingMonth}-01`, dueDay <= closingDay ? 1 : 0).slice(0, 7);
 }
 
+export function cardLimitSummary(card, finance) {
+  const toCents = (value) => {
+    const amount = Number(value);
+    return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
+  };
+  const limitCents = toCents(card?.limit);
+  const invoices = new Map(
+    Object.entries(card?.invoiceAmounts || {}).map(([month, amount]) => [month, toCents(amount)]),
+  );
+
+  (Array.isArray(finance) ? finance : []).forEach((entry) => {
+    if (entry.cardId !== card?.id || entry.type !== "saida" || entry.paymentMethod !== "Crédito"
+      || entry.status === "cancelado") return;
+    const month = entry.invoiceMonth || cardInvoiceMonthForDate(card, entry.date);
+    if (!month) return;
+    invoices.set(month, (invoices.get(month) || 0) + toCents(entry.amount));
+  });
+
+  const payments = new Map();
+  (Array.isArray(card?.payments) ? card.payments : []).forEach((payment) => {
+    if (!payment.invoiceMonth) return;
+    payments.set(payment.invoiceMonth, (payments.get(payment.invoiceMonth) || 0) + toCents(payment.amount));
+  });
+
+  const usedCents = [...invoices].reduce((total, [month, invoiceCents]) =>
+    total + Math.max(0, invoiceCents - (payments.get(month) || 0)), 0);
+  const availableCents = limitCents - usedCents;
+  const limit = limitCents / 100;
+  const used = usedCents / 100;
+  const available = availableCents / 100;
+
+  return {
+    limit,
+    used,
+    available,
+    usedPercent: limitCents > 0 ? (usedCents / limitCents) * 100 : 0,
+    overLimit: availableCents < 0,
+  };
+}
+
 function shiftDays(date, days) {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
 }
