@@ -7,7 +7,8 @@ import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, summarizeFinanceMonth } from "./src/lib/financePlan.js";
 import {
   actualExpenseAverages, buildFinanceAlerts, buildFinanceForecast, buildIntegratedFinance,
-  cardInvoiceMonthForDate, cardLimitSummary, createFinanceInstallments, nextFinanceDate,
+  cardInvoiceMonthForDate, cardInvoiceMonthForEntry, cardLimitSummary, createCardFinanceInstallments,
+  financeEntryWithInvoiceMonth, createFinanceInstallments, nextFinanceDate,
 } from "./src/lib/financeIntegration.js";
 import { notify } from "./src/components/ToastHost.jsx";
 import {
@@ -2772,15 +2773,14 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   );
 
   const save = (data) => {
-    const { installmentsCount, recurringEnabled, recurringMonths, ...base } = data;
+    const { installmentsCount, recurringEnabled, recurringMonths, invoiceMonthExplicit, ...base } = data;
     if (base.type === "saida" && base.paymentMethod === "Crédito" && base.cardId) {
-      if (!base.invoiceMonth) {
-        const card = cards.find((entry) => entry.id === base.cardId);
-        const invoiceMonth = cardInvoiceMonthForDate(card, base.date);
-        if (invoiceMonth) base.invoiceMonth = invoiceMonth;
-      }
+      const card = cards.find((entry) => entry.id === base.cardId);
+      base.invoiceMonthExplicit = !!invoiceMonthExplicit;
+      Object.assign(base, financeEntryWithInvoiceMonth(base, card, invoiceMonthExplicit ? base.invoiceMonth : ""));
     } else {
       delete base.invoiceMonth;
+      delete base.invoiceMonthExplicit;
     }
     if (base.type === "saida") {
       base.plannedAmount = Number(base.plannedAmount) || Number(base.amount) || 0;
@@ -2791,19 +2791,25 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   };
   // parcelamento e recorrência geram vários lançamentos de uma vez, então têm um botão próprio
   const generate = (data) => {
-    const { installmentsCount, recurringEnabled, recurringMonths, id, ...base } = data;
-    if (base.type === "saida" && base.paymentMethod === "Crédito" && base.cardId && !base.invoiceMonth) {
-      const card = cards.find((entry) => entry.id === base.cardId);
-      const invoiceMonth = cardInvoiceMonthForDate(card, base.date);
-      if (invoiceMonth) base.invoiceMonth = invoiceMonth;
-    }
+    const { installmentsCount, recurringEnabled, recurringMonths, invoiceMonthExplicit, id, ...base } = data;
+    const explicitInvoiceMonth = invoiceMonthExplicit ? base.invoiceMonth : "";
+    delete base.invoiceMonth;
+    delete base.invoiceMonthExplicit;
     const rest = manualFinance.filter((x) => x.id !== id);
-    const generated = base.paymentMethod === "Crédito" && Number(installmentsCount) > 1
-      ? createFinanceInstallments(base, Number(installmentsCount))
+    const isInstallmentPurchase = base.type === "saida" && base.paymentMethod === "Crédito"
+      && !!base.cardId && Number(installmentsCount) > 1;
+    const card = cards.find((entry) => entry.id === base.cardId);
+    const generated = isInstallmentPurchase
+      ? createCardFinanceInstallments(base, Number(installmentsCount), card, explicitInvoiceMonth)
       : generateRecurringOccurrences(base, Number(recurringMonths) || 12);
-    const withInvoiceMonths = base.invoiceMonth
-      ? generated.map((entry, index) => ({ ...entry, invoiceMonth: addMonths(`${base.invoiceMonth}-01`, index).slice(0, 7) }))
-      : generated;
+    const withInvoiceMonths = isInstallmentPurchase && explicitInvoiceMonth
+      ? generated.map((entry) => ({ ...entry, invoiceMonthExplicit: true }))
+      : base.type === "saida" && base.paymentMethod === "Crédito" && card
+        ? generated.map((entry, index) => ({
+          ...financeEntryWithInvoiceMonth(entry, card, index === 0 ? explicitInvoiceMonth : ""),
+          ...(index === 0 && explicitInvoiceMonth ? { invoiceMonthExplicit: true } : {}),
+        }))
+        : generated;
     setFinance([...withInvoiceMonths, ...rest]);
     setEditing(null);
     setInvoiceExpenseCardId("");
@@ -2874,7 +2880,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       && entry.status !== "cancelado")
       .map((entry) => ({
         ...entry,
-        targetInvoiceMonth: entry.invoiceMonth || cardInvoiceMonthForDate(card, entry.date),
+        targetInvoiceMonth: cardInvoiceMonthForEntry(card, entry, finance),
       }));
     const purchases = cardPurchases.filter((entry) => entry.targetInvoiceMonth === selectedMonth)
       .sort((a, b) => a.date.localeCompare(b.date));
@@ -3728,10 +3734,14 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
   const ctx = useContext(ListsContext);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const [form, setForm] = useState(item || {
+  const [form, setForm] = useState(item ? {
+    ...item,
+    invoiceMonthExplicit: item.invoiceMonthExplicit === true,
+  } : {
     type: "saida", category: categories[0] || "", expenseClass: "variable", amount: "", plannedAmount: "", date: todayStr(), desc: "",
     paymentMethod: initialCardId ? "Crédito" : "Pix", status: "pago", accountId: "", cardId: initialCardId, link: "",
     invoiceMonth: initialInvoiceMonth,
+    invoiceMonthExplicit: !!initialInvoiceMonth,
     installmentsCount: 1, recurringEnabled: false, recurringMonths: 12,
   });
   const isEdit = !!item;
@@ -3740,7 +3750,9 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
   const limitSummary = selectedCard
     ? cardLimitSummary(selectedCard, isEdit ? finance.filter((entry) => entry.id !== item.id) : finance)
     : null;
-  const invoiceMonthForForm = form.invoiceMonth || cardInvoiceMonthForDate(selectedCard, form.date);
+  const invoiceMonthForForm = form.invoiceMonthExplicit
+    ? form.invoiceMonth
+    : cardInvoiceMonthForDate(selectedCard, form.date);
   const draftId = useRef(uid());
   const needsGeneration = !isEdit && ((isCredit && Number(form.installmentsCount) > 1) || !!form.recurringEnabled);
   const autoStatus = useAutoSave(form, onSave, (f) => {

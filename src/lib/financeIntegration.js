@@ -45,6 +45,39 @@ export function cardInvoiceMonthForDate(card, date) {
   return shiftMonths(`${closingMonth}-01`, dueDay <= closingDay ? 1 : 0).slice(0, 7);
 }
 
+export function financeEntryWithInvoiceMonth(entry, card, explicitInvoiceMonth = "") {
+  const invoiceMonth = explicitInvoiceMonth || cardInvoiceMonthForDate(card, entry.date);
+  return invoiceMonth ? { ...entry, invoiceMonth } : { ...entry, invoiceMonth: "" };
+}
+
+export function cardInvoiceMonthForEntry(card, entry, finance = []) {
+  if (entry.invoiceMonthExplicit && entry.invoiceMonth) return entry.invoiceMonth;
+  const installmentIndex = Number(entry.installmentGroup?.index);
+  if (entry.installmentGroup?.id && installmentIndex > 1) {
+    const firstInstallment = finance.find((candidate) =>
+      candidate.installmentGroup?.id === entry.installmentGroup.id
+      && Number(candidate.installmentGroup.index) === 1);
+    const firstMonth = firstInstallment
+      ? (firstInstallment.invoiceMonthExplicit && firstInstallment.invoiceMonth)
+        || cardInvoiceMonthForDate(card, firstInstallment.date)
+      : cardInvoiceMonthForDate(card, entry.date);
+    return firstMonth
+      ? shiftMonths(`${firstMonth}-01`, installmentIndex - 1).slice(0, 7)
+      : "";
+  }
+  return cardInvoiceMonthForDate(card, entry.date);
+}
+
+export function createCardFinanceInstallments(transaction, count, card, explicitInvoiceMonth = "") {
+  const firstInvoiceMonth = explicitInvoiceMonth || cardInvoiceMonthForDate(card, transaction.date);
+  return createFinanceInstallments(transaction, count).map((entry, index) => {
+    const invoiceMonth = firstInvoiceMonth
+      ? shiftMonths(`${firstInvoiceMonth}-01`, index).slice(0, 7)
+      : "";
+    return { ...entry, invoiceMonth };
+  });
+}
+
 export function cardLimitSummary(card, finance) {
   const toCents = (value) => {
     const amount = Number(value);
@@ -58,7 +91,7 @@ export function cardLimitSummary(card, finance) {
   (Array.isArray(finance) ? finance : []).forEach((entry) => {
     if (entry.cardId !== card?.id || entry.type !== "saida" || entry.paymentMethod !== "Crédito"
       || entry.status === "cancelado") return;
-    const month = entry.invoiceMonth || cardInvoiceMonthForDate(card, entry.date);
+    const month = cardInvoiceMonthForEntry(card, entry, finance);
     if (!month) return;
     invoices.set(month, (invoices.get(month) || 0) + toCents(entry.amount));
   });

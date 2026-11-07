@@ -4,9 +4,12 @@ import {
   buildFinanceAlerts,
   buildFinanceForecast,
   buildIntegratedFinance,
+  cardInvoiceMonthForEntry,
   cardInvoiceMonthForDate,
   cardLimitSummary,
+  createCardFinanceInstallments,
   createFinanceInstallments,
+  financeEntryWithInvoiceMonth,
   nextFinanceDate,
 } from "./financeIntegration.js";
 
@@ -23,6 +26,70 @@ describe("cardInvoiceMonthForDate", () => {
     const card = { closingDay: 31, dueDay: 15 };
     expect(cardInvoiceMonthForDate(card, "2026-02-28")).toBe("2026-03");
     expect(cardInvoiceMonthForDate(card, "2026-03-01")).toBe("2026-04");
+  });
+
+  it("uses the due month for closing-day boundaries and short months", () => {
+    const card = { closingDay: 23, dueDay: 30 };
+    expect([
+      "2026-10-23", "2026-10-24", "2026-11-07", "2026-11-23", "2026-11-24",
+    ].map((date) => cardInvoiceMonthForDate(card, date))).toEqual([
+      "2026-10", "2026-11", "2026-11", "2026-11", "2026-12",
+    ]);
+
+    expect(cardInvoiceMonthForDate({ closingDay: 31, dueDay: 30 }, "2026-10-31")).toBe("2026-11");
+    expect(cardInvoiceMonthForDate({ closingDay: 31, dueDay: 30 }, "2026-11-01")).toBe("2026-12");
+    expect(cardInvoiceMonthForDate({ closingDay: 30, dueDay: 30 }, "2026-10-30")).toBe("2026-11");
+    expect(cardInvoiceMonthForDate({ closingDay: 30, dueDay: 30 }, "2026-10-31")).toBe("2026-12");
+  });
+
+  it("recalculates the month when an edited transaction date changes", () => {
+    const card = { closingDay: 23, dueDay: 30 };
+    const savedEntry = financeEntryWithInvoiceMonth({
+      date: "2026-11-07",
+      invoiceMonth: "2027-01",
+    }, card);
+
+    expect(savedEntry.invoiceMonth).toBe("2026-11");
+    expect(financeEntryWithInvoiceMonth({ date: "2026-11-07" }, card, "2027-01").invoiceMonth).toBe("2027-01");
+  });
+
+  it("generates consecutive invoice months for installments from the purchase cycle", () => {
+    const card = { closingDay: 23, dueDay: 30 };
+    const installments = createCardFinanceInstallments({
+      id: "purchase-1200",
+      date: "2026-11-07",
+      amount: 1200,
+      type: "saida",
+      paymentMethod: "Crédito",
+      status: "pago",
+      cardId: "card-1",
+      invoiceMonth: "2027-01",
+    }, 4, card);
+
+    expect(installments.map((entry) => entry.invoiceMonth)).toEqual([
+      "2026-11", "2026-12", "2027-01", "2027-02",
+    ]);
+    expect(installments.map((entry) => entry.amount)).toEqual([300, 300, 300, 300]);
+  });
+
+  it("keeps installments consecutive when a short month clamps their dates", () => {
+    const card = { closingDay: 30, dueDay: 30 };
+    const installments = createCardFinanceInstallments({
+      id: "purchase-short-month",
+      date: "2027-01-30",
+      amount: 900,
+      type: "saida",
+      paymentMethod: "Crédito",
+      status: "pago",
+      cardId: "card-1",
+    }, 3, card);
+
+    expect(installments.map((entry) => entry.date)).toEqual([
+      "2027-01-30", "2027-02-28", "2027-03-30",
+    ]);
+    expect(installments.map((entry) => cardInvoiceMonthForEntry(card, entry, installments))).toEqual([
+      "2027-02", "2027-03", "2027-04",
+    ]);
   });
 });
 
