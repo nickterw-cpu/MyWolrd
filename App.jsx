@@ -2747,7 +2747,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const [editing, setEditing] = useState(null);
   const [tab, setTab] = useState("visao");
   const [filterStatus, setFilterStatus] = useState("todos");
-  const [monthOffset, setMonthOffset] = useState(0);
+  const [selectedMonth, setSelectedMonth] = useState(() => localDateStr(new Date()).slice(0, 7));
   const [invoiceExpenseCardId, setInvoiceExpenseCardId] = useState("");
   const [invoiceExpenseMonth, setInvoiceExpenseMonth] = useState("");
   const [editingInvoiceCard, setEditingInvoiceCard] = useState(null);
@@ -2866,12 +2866,6 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     }
   };
 
-  const selectedMonth = useMemo(() => {
-    const d = new Date();
-    d.setDate(1);
-    d.setMonth(d.getMonth() + monthOffset);
-    return localDateStr(d).slice(0, 7);
-  }, [monthOffset]);
   const invoiceDetails = useMemo(() => {
     const card = cards.find((entry) => entry.id === invoiceCard);
     if (!card) return null;
@@ -2895,10 +2889,12 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     return { card, window, purchases, otherPurchases, existingAmount, total, payments, paid, remaining: Math.max(0, total - paid) };
   }, [cards, finance, invoiceCard, selectedMonth]);
   const showInvoiceMonth = (month) => {
-    const [year, monthNumber] = month.split("-").map(Number);
-    const now = new Date();
-    setMonthOffset((year - now.getFullYear()) * 12 + monthNumber - (now.getMonth() + 1));
+    setSelectedMonth(month);
   };
+  const shiftSelectedMonth = (offset) => {
+    setSelectedMonth(addMonths(`${selectedMonth}-01`, offset).slice(0, 7));
+  };
+  const returnToCurrentMonth = () => setSelectedMonth(localDateStr(new Date()).slice(0, 7));
   const registerInvoicePayment = () => {
     if (!invoiceDetails || !invoicePaymentDate || invoicePaymentDate > todayStr()) return;
     const amount = Number(invoicePaymentAmount);
@@ -2979,10 +2975,10 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       {tab === "visao" && (
         <div>
           <div className="cr-row" style={{ margin: "14px 0", alignItems: "center" }}>
-            <button className="cr-btn ghost" onClick={() => setMonthOffset(monthOffset - 1)}>←</button>
+            <button type="button" className="cr-btn ghost" onClick={() => shiftSelectedMonth(-1)}>←</button>
             <span className="cr-serif" style={{ fontSize: 16, minWidth: 90, textAlign: "center" }}>{monthLabel(selectedMonth)}</span>
-            <button className="cr-btn ghost" onClick={() => setMonthOffset(monthOffset + 1)}>→</button>
-            {monthOffset !== 0 && <button className="cr-btn ghost" onClick={() => setMonthOffset(0)}>hoje</button>}
+            <button type="button" className="cr-btn ghost" onClick={() => shiftSelectedMonth(1)}>→</button>
+            {selectedMonth !== localDateStr(new Date()).slice(0, 7) && <button type="button" className="cr-btn ghost" onClick={returnToCurrentMonth}>hoje</button>}
           </div>
           {(() => {
             const fm = financeMood(income, expense);
@@ -3130,9 +3126,9 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
               setInvoiceExpenseMonth(selectedMonth);
               setEditing("new");
             }}><Plus size={14} /> Adicionar compra à fatura</button>}
-            <button className="cr-btn ghost" onClick={() => setMonthOffset(monthOffset - 1)}>←</button>
+            <button type="button" className="cr-btn ghost" onClick={() => shiftSelectedMonth(-1)}>←</button>
             <span className="cr-serif" style={{ fontSize: 15 }}>{monthLabel(selectedMonth)}</span>
-            <button className="cr-btn ghost" onClick={() => setMonthOffset(monthOffset + 1)}>→</button>
+            <button type="button" className="cr-btn ghost" onClick={() => shiftSelectedMonth(1)}>→</button>
           </div>
           {cards.length === 0 && <div className="cr-card"><p className="cr-empty">Cadastre um cartão em "Contas & Cartões" para acompanhar compras e faturas.</p><button className="cr-btn" onClick={() => setTab("contas")}>Cadastrar cartão</button></div>}
           {invoiceDetails && (() => {
@@ -3171,7 +3167,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                         <span className="cr-list-title" style={{ flex: 1 }}>{purchase.desc || purchase.category}</span>
                         <span className="cr-chip">{fmtDateShort(purchase.date)}</span>
                         <span className="cr-chip">{monthLabel(purchase.targetInvoiceMonth)}</span>
-                        <button className="cr-btn ghost" onClick={() => showInvoiceMonth(purchase.targetInvoiceMonth)}>Ver fatura</button>
+                        <button type="button" className="cr-btn ghost" onClick={() => showInvoiceMonth(purchase.targetInvoiceMonth)}>Ver fatura</button>
                       </div>
                     ))}
                   </div>
