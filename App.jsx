@@ -10,6 +10,7 @@ import {
   cardInvoiceMonthForDate, cardInvoiceMonthForEntry, cardLimitSummary, createCardFinanceInstallments,
   financeEntryWithInvoiceMonth, createFinanceInstallments, nextFinanceDate,
 } from "./src/lib/financeIntegration.js";
+import { buildCardInvoices, cardInvoiceDueDate, defaultInvoicePaymentDate, ensureInvoiceRecord } from "./src/lib/cardInvoices.js";
 import { notify } from "./src/components/ToastHost.jsx";
 import {
   Home, CalendarDays, Target, Repeat, Wallet, NotebookPen, Link2, Settings as SettingsIcon,
@@ -790,7 +791,7 @@ const TITLE_WINE = "#6B1426";
 const TITLE_INK = "#1B1717";
 function SectionTitle({ title, count, right, compact = false }) {
   return (
-    <div style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", borderBottom: `3px solid ${TITLE_WINE}`, paddingBottom: compact ? 0 : 9, margin: compact ? "22px 0 -10px" : "34px 0 16px" }}>
+    <div style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", borderBottom: `3px solid ${TITLE_WINE}`, paddingBottom: compact ? 4 : 9, margin: compact ? "22px 0 14px" : "34px 0 16px" }}>
       <h2 className="cr-serif" style={{ margin: 0, fontSize: 30, fontWeight: 700, letterSpacing: 3, textTransform: "uppercase", color: TITLE_INK }}>{title}</h2>
       {count !== undefined && count !== null && <span style={{ margin: 0, fontSize: 13, fontWeight: 600, color: TITLE_WINE }}>{count}</span>}
       {right && <div style={{ marginLeft: "auto" }}>{right}</div>}
@@ -1375,8 +1376,18 @@ const GlobalStyle = () => (
     .beauty-contact { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 100%; margin-top: 6px; }
     .beauty-contact-names { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; font-size: 13px; color: var(--ink-soft); }
     .beauty-contact .cr-btn { flex-shrink: 0; }
-    .dashboard-music-copy { display: flex; align-items: center; justify-content: center; gap: 24px; flex: 1; min-width: 0; flex-wrap: nowrap; }
-    .dashboard-music-copy > * { flex: 1 1 0; min-width: 0; text-align: center; overflow-wrap: anywhere; }
+    /* Player à esquerda, frase alinhada à direita; em telas estreitas a frase desce para baixo do player */
+    .dashboard-music { display: flex; align-items: center; justify-content: space-between; gap: 16px 24px; flex-wrap: wrap; margin-top: 16px; min-width: 0; }
+    .dashboard-music-player {
+      width: 112px; height: 112px; flex: 0 0 auto; border-radius: 10px;
+      background: linear-gradient(145deg, #F0D9CF, #C77B6C); color: #68100D; display: grid; place-items: center;
+    }
+    .dashboard-music-copy { flex: 1 1 260px; min-width: 0; display: flex; justify-content: flex-end; }
+    .dashboard-music-copy p { margin: 0; max-width: 520px; line-height: 1.7; font-weight: 700; text-align: right; overflow-wrap: break-word; }
+    @media (max-width: 520px) {
+      .dashboard-music-copy { justify-content: flex-start; flex-basis: 100%; }
+      .dashboard-music-copy p { text-align: left; }
+    }
     .cr-card-image-placeholder {
       width: calc(100% + 40px); aspect-ratio: 16 / 9; margin: -18px -20px 8px;
       border: 1.5px dashed var(--line); border-radius: 15px 15px 10px 10px;
@@ -1406,11 +1417,76 @@ const GlobalStyle = () => (
     .cr-progress-track { height: 8px; border-radius: 8px; background: #E6DCCF; overflow: hidden; }
     .cr-progress-fill { height: 100%; border-radius: 8px; background: var(--clay); }
     .cr-list-row {
-      display: flex; align-items: center; gap: 12px; padding: 10px 4px;
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 4px;
       min-width: 0; border-bottom: 1px solid var(--line);
     }
-    .cr-list-title { min-width: 0; flex: 1; }
-    .cr-list-row > span { overflow-wrap: anywhere; }
+    /* quebra só entre palavras: o título nunca encolhe abaixo de ~140px; se não couber, os chips descem */
+    .cr-list-title { min-width: min(140px, 100%); flex: 1 1 140px; overflow-wrap: break-word; word-break: normal; }
+    .cr-list-row > span { overflow-wrap: break-word; word-break: normal; max-width: 100%; }
+    .cr-chip { max-width: 100%; }
+    .cr-account-row { display: grid; gap: 8px; padding: 12px 4px; border-bottom: 1px solid var(--line); min-width: 0; }
+    .cr-account-row:last-child { border-bottom: none; }
+    .cr-account-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+    .cr-account-row-head .cr-list-title { font-weight: 600; }
+    .cr-account-row-actions { display: flex; gap: 2px; flex-shrink: 0; }
+    .cr-account-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+    .cr-catchart { display: grid; gap: 12px; min-width: 0; }
+    .cr-catchart-types { display: flex; flex-wrap: wrap; gap: 6px; }
+    .cr-catchart-types .cr-tabbtn { padding: 5px 12px; font-size: 12.5px; }
+    .cr-catchart-body { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; min-width: 0; }
+    .cr-catchart-chart { flex: 0 1 auto; min-width: 0; max-width: 100%; display: flex; justify-content: center; }
+    .cr-catchart-body.is-bars .cr-catchart-chart { flex: 1 1 280px; display: block; }
+    .cr-catchart-legend { list-style: none; margin: 0; padding: 0; flex: 1 1 220px; min-width: 0; display: grid; gap: 6px; }
+    .cr-catchart-legend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; font-size: 13px; cursor: default; }
+    .cr-catchart-dot { width: 10px; height: 10px; border-radius: 3px; }
+    .cr-catchart-name { overflow-wrap: break-word; min-width: 0; }
+    .cr-catchart-value { font-weight: 600; white-space: nowrap; }
+    .cr-catchart-pct { color: var(--ink-soft); white-space: nowrap; min-width: 44px; text-align: right; }
+    .cr-catchart-hbars { display: grid; gap: 8px; width: 100%; }
+    .cr-catchart-hbar { display: grid; grid-template-columns: minmax(70px, 30%) 1fr; align-items: center; gap: 8px; font-size: 12.5px; }
+    .cr-catchart-hbar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cr-catchart-hbar-track { height: 14px; background: #EFE8DE; border-radius: 7px; overflow: hidden; }
+    .cr-catchart-hbar-track > div { height: 100%; border-radius: 7px; }
+    .cr-catchart-vbars { display: flex; align-items: flex-end; gap: 8px; width: 100%; padding-top: 4px; border-bottom: 1px solid var(--line); }
+    .cr-catchart-vbar { flex: 1 1 0; min-width: 0; max-width: 56px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; }
+    .cr-catchart-vbar > div { width: 100%; border-radius: 6px 6px 0 0; }
+    .cr-catchart-vbar-value { font-size: 10.5px; color: var(--ink-soft); white-space: nowrap; }
+    .cr-section-tabs { align-items: center; }
+    .cr-section-tab {
+      display: inline-flex; align-items: stretch; max-width: 100%; border: 1px solid var(--line); border-radius: 100px;
+      background: #fff; color: var(--ink-soft); overflow: hidden;
+    }
+    .cr-section-tab.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+    .cr-section-tab button { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+    .cr-section-tab .cr-section-tab-main { padding: 6px 4px 6px 14px; font-size: 13px; min-width: 0; overflow-wrap: break-word; text-align: left; }
+    .cr-section-tab .cr-section-tab-edit { padding: 6px 10px 6px 6px; display: inline-flex; align-items: center; opacity: 0.7; }
+    .cr-section-tab-edit:hover { opacity: 1; }
+    .cr-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .cr-routine-block {
+      position: absolute; box-sizing: border-box; overflow: hidden; border-radius: 6px; font-size: 11px; line-height: 1.25;
+      cursor: pointer; box-shadow: 0 0 0 1px rgb(255 255 255 / 70%);
+    }
+    .cr-routine-block:hover, .cr-routine-block:focus-visible { box-shadow: 0 0 0 2px var(--ink); z-index: 2; outline: none; }
+    .cr-routine-detail p { margin: 0 0 8px; font-size: 14px; overflow-wrap: break-word; }
+    /* Calendário: dias passados apagados, hoje com destaque, próximos dias normais */
+    .cr-cal-day { padding: 6px; min-height: 96px; cursor: pointer; transition: opacity 0.2s; }
+    .cr-cal-day.is-past { opacity: 0.4; }
+    .cr-cal-day.is-future.is-outside { opacity: 0.7; }
+    .cr-cal-day.is-today { background: #E8F0F9; border: 2px solid #3F6C9E; }
+    .cr-cal-daynum { font-size: 12px; font-weight: 500; margin-bottom: 3px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; }
+    .cr-cal-day.is-today .cr-cal-daynum { background: #3F6C9E; color: #fff; font-weight: 700; }
+    .cr-invoice-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 320px); gap: 16px; align-items: start; }
+    .cr-invoice-side { display: grid; gap: 16px; min-width: 0; }
+    .cr-invoice-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .cr-invoice-total { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 12px 0; margin-bottom: 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .cr-invoice-history {
+      display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 6px; margin: 0;
+      border: 0; border-bottom: 1px solid var(--line); border-radius: 8px; background: transparent;
+      font: inherit; font-size: 13.5px; color: inherit; text-align: left; cursor: pointer;
+    }
+    .cr-invoice-history > span:first-child { flex: 1; min-width: 0; }
+    .cr-invoice-history.active { background: #F0DAD3; }
+    @media (max-width: 1100px) { .cr-invoice-layout { grid-template-columns: minmax(0, 1fr); } }
     .cr-list-row:last-child { border-bottom: none; }
     .cr-checkbox {
       width: 19px; height: 19px; border-radius: 6px; border: 1.5px solid #C9BEAE;
@@ -1677,6 +1753,145 @@ function DonutChart({ data, size = 200, thickness = 32 }) {
   );
 }
 
+const CATEGORY_CHART_TYPES = [
+  { id: "pizza", label: "Pizza" },
+  { id: "rosca", label: "Rosca" },
+  { id: "barras-h", label: "Barras horizontais" },
+  { id: "barras-v", label: "Barras verticais" },
+];
+
+function piePath(cx, cy, r, inner, start, end) {
+  const pt = (angle, radius) => [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)];
+  // fatia de 100%: dois arcos de 180° (um arco com início = fim não é desenhado)
+  if (end - start >= 2 * Math.PI - 1e-6) {
+    const outer = `M ${cx - r} ${cy} A ${r} ${r} 0 1 1 ${cx + r} ${cy} A ${r} ${r} 0 1 1 ${cx - r} ${cy} Z`;
+    return inner > 0
+      ? `${outer} M ${cx - inner} ${cy} A ${inner} ${inner} 0 1 0 ${cx + inner} ${cy} A ${inner} ${inner} 0 1 0 ${cx - inner} ${cy} Z`
+      : outer;
+  }
+  const large = end - start > Math.PI ? 1 : 0;
+  const [x1, y1] = pt(start, r);
+  const [x2, y2] = pt(end, r);
+  if (inner <= 0) return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+  const [x3, y3] = pt(end, inner);
+  const [x4, y4] = pt(start, inner);
+  return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${inner} ${inner} 0 ${large} 0 ${x4} ${y4} Z`;
+}
+
+// Gráfico "Gastos por categoria": o mesmo componente no Dashboard e em Finanças.
+// A visualização escolhida fica salva em settings.categoryChartType (vale para os dois lugares).
+function CategoryExpenseChart({ data, settings, setSettings, size = 200 }) {
+  const [hover, setHover] = useState(null);
+  const type = CATEGORY_CHART_TYPES.some((option) => option.id === settings?.categoryChartType) ? settings.categoryChartType : "pizza";
+  const total = data.reduce((sum, entry) => sum + entry.value, 0) || 1;
+  const max = Math.max(1, ...data.map((entry) => entry.value));
+  const items = data.map((entry) => ({ ...entry, pct: (entry.value / total) * 100 }));
+  const pctLabel = (pct) => `${pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+  const dim = (i) => (hover === null || hover === i ? 1 : 0.4);
+  const r = size / 2;
+  let cumulative = 0;
+  const slices = items.map((entry) => {
+    const start = (cumulative / total) * 2 * Math.PI - Math.PI / 2;
+    cumulative += entry.value;
+    const end = (cumulative / total) * 2 * Math.PI - Math.PI / 2;
+    return { ...entry, start, end };
+  });
+
+  let chart;
+  if (type === "pizza" || type === "rosca") {
+    const inner = type === "rosca" ? r - 34 : 0;
+    chart = (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Gastos por categoria" style={{ maxWidth: "100%", height: "auto", flexShrink: 0 }}>
+        {slices.map((slice, i) => (
+          <path key={slice.label} d={piePath(r, r, r - 1, inner, slice.start, slice.end)} fill={slice.color} stroke="#fff" strokeWidth={2}
+            fillRule="evenodd" opacity={dim(i)} style={{ cursor: "pointer", transition: "opacity 0.15s" }}
+            onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} onClick={() => setHover(hover === i ? null : i)}>
+            <title>{`${slice.label}: ${fmtBRL(slice.value)} (${pctLabel(slice.pct)})`}</title>
+          </path>
+        ))}
+        {type === "rosca" && (
+          <>
+            <text x={r} y={r - 2} textAnchor="middle" className="cr-serif" style={{ fontSize: 16, fill: "var(--ink)" }}>
+              {hover !== null ? pctLabel(items[hover].pct) : fmtBRL(total)}
+            </text>
+            <text x={r} y={r + 16} textAnchor="middle" style={{ fontSize: 11, fill: "var(--ink-soft)" }}>
+              {hover !== null ? items[hover].label : "total"}
+            </text>
+          </>
+        )}
+      </svg>
+    );
+  } else if (type === "barras-h") {
+    chart = (
+      <div className="cr-catchart-hbars">
+        {items.map((entry, i) => (
+          <div key={entry.label} className="cr-catchart-hbar" style={{ opacity: dim(i) }}
+            onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} title={`${entry.label}: ${fmtBRL(entry.value)}`}>
+            <span className="cr-catchart-hbar-label">{entry.label}</span>
+            <div className="cr-catchart-hbar-track">
+              <div style={{ width: `${Math.max(2, (entry.value / max) * 100)}%`, background: entry.color }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  } else {
+    chart = (
+      <div className="cr-catchart-vbars" style={{ height: size }}>
+        {items.map((entry, i) => (
+          <div key={entry.label} className="cr-catchart-vbar" style={{ opacity: dim(i) }}
+            onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} title={`${entry.label}: ${fmtBRL(entry.value)}`}>
+            <span className="cr-catchart-vbar-value">{pctLabel(entry.pct)}</span>
+            <div style={{ height: `${Math.max(2, (entry.value / max) * 82)}%`, background: entry.color }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="cr-catchart">
+      <div className="cr-catchart-types" role="group" aria-label="Tipo de gráfico">
+        {CATEGORY_CHART_TYPES.map((option) => (
+          <button key={option.id} type="button" className={`cr-tabbtn ${type === option.id ? "active" : ""}`} aria-pressed={type === option.id}
+            onClick={() => setSettings && setSettings({ ...settings, categoryChartType: option.id })}>{option.label}</button>
+        ))}
+      </div>
+      <div className={`cr-catchart-body ${type.startsWith("barras") ? "is-bars" : ""}`}>
+        <div className="cr-catchart-chart">{chart}</div>
+        <ul className="cr-catchart-legend">
+          {items.map((entry, i) => (
+            <li key={entry.label} style={{ opacity: hover === null || hover === i ? 1 : 0.5 }}
+              onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+              <span className="cr-catchart-dot" style={{ background: entry.color }} />
+              <span className="cr-catchart-name">{entry.label}</span>
+              <span className="cr-catchart-value">{fmtBRL(entry.value)}</span>
+              <span className="cr-catchart-pct">{pctLabel(entry.pct)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// Data de hoje que se atualiza sozinha (virada do dia, volta do app ao primeiro plano).
+function useToday() {
+  const [today, setToday] = useState(todayStr);
+  useEffect(() => {
+    const refresh = () => setToday((current) => (current === todayStr() ? current : todayStr()));
+    const timer = setInterval(refresh, 60 * 1000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+  return today;
+}
+
 function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev, gcal, setGcal, setTasks, setHabits, setSettings, goTo }) {
   const today = todayStr();
   const now = new Date();
@@ -1862,7 +2077,7 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
             </div>
             {catData.length === 0
               ? <p className="cr-empty">Nenhum gasto registrado este mês ainda.</p>
-              : <DonutChart data={catData} />}
+              : <CategoryExpenseChart data={catData} settings={settings} setSettings={setSettings} />}
           </div>
         );
       }
@@ -1901,12 +2116,12 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
         const formatPlayerTime = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
         return (
           <section className="cr-card" key="musicPlayer" style={{ marginBottom: 16, background: "#8F1111", color: "#FFFDF8", borderColor: "#8F1111" }}>
-            <div className="cr-row" style={{ alignItems: "left", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
-              <div aria-hidden="true" style={{ width: 112, height: 112, flexShrink: 0, borderRadius: 10, background: "linear-gradient(145deg, #F0D9CF, #C77B6C)", color: "#68100D", display: "grid", placeItems: "center" }}>
+            <div className="dashboard-music">
+              <div className="dashboard-music-player" aria-hidden="true">
                 <Music2 size={42} strokeWidth={1.8} />
               </div>
               <div className="dashboard-music-copy">
-                <p style={{ margin: 0, lineHeight: 1.7, fontWeight: 700 }}>“Hoje estou feliz, acordei com o pé direito<br />
+                <p>“Hoje estou feliz, acordei com o pé direito<br />
                   E eu vou fazer de novo, eu vou fazer muito bem feito”</p>
               </div>
             </div>
@@ -2772,15 +2987,29 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     [manualFinance, shopping, beauty, hobbies],
   );
 
+  // Toda compra no crédito pertence a uma fatura (cartão + mês de pagamento); cria o registro se ainda não existir.
+  const ensureInvoices = (cardId, months) => {
+    const card = cards.find((entry) => entry.id === cardId);
+    if (!card) return;
+    const next = months.filter(Boolean).reduce((acc, month) => ensureInvoiceRecord(acc, month, todayStr()), card);
+    if (next !== card) setCards(cards.map((entry) => entry.id === cardId ? next : entry));
+  };
   const save = (data) => {
     const { installmentsCount, recurringEnabled, recurringMonths, invoiceMonthExplicit, ...base } = data;
     if (base.type === "saida" && base.paymentMethod === "Crédito" && base.cardId) {
       const card = cards.find((entry) => entry.id === base.cardId);
       base.invoiceMonthExplicit = !!invoiceMonthExplicit;
       Object.assign(base, financeEntryWithInvoiceMonth(base, card, invoiceMonthExplicit ? base.invoiceMonth : ""));
+      if (!base.invoiceMonthExplicit) delete base.invoiceDueDate;
+      if (card) {
+        const month = cardInvoiceMonthForEntry(card, base, manualFinance);
+        ensureInvoices(card.id, [month]);
+        if (tab === "fatura" && month) { setInvoiceCard(card.id); setSelectedMonth(month); }
+      }
     } else {
       delete base.invoiceMonth;
       delete base.invoiceMonthExplicit;
+      delete base.invoiceDueDate;
     }
     if (base.type === "saida") {
       base.plannedAmount = Number(base.plannedAmount) || Number(base.amount) || 0;
@@ -2795,6 +3024,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     const explicitInvoiceMonth = invoiceMonthExplicit ? base.invoiceMonth : "";
     delete base.invoiceMonth;
     delete base.invoiceMonthExplicit;
+    delete base.invoiceDueDate;
     const rest = manualFinance.filter((x) => x.id !== id);
     const isInstallmentPurchase = base.type === "saida" && base.paymentMethod === "Crédito"
       && !!base.cardId && Number(installmentsCount) > 1;
@@ -2810,6 +3040,11 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           ...(index === 0 && explicitInvoiceMonth ? { invoiceMonthExplicit: true } : {}),
         }))
         : generated;
+    if (base.type === "saida" && base.paymentMethod === "Crédito" && card) {
+      const months = withInvoiceMonths.map((entry) => cardInvoiceMonthForEntry(card, entry, withInvoiceMonths));
+      ensureInvoices(card.id, months);
+      if (tab === "fatura" && months[0]) { setInvoiceCard(card.id); setSelectedMonth(months[0]); }
+    }
     setFinance([...withInvoiceMonths, ...rest]);
     setEditing(null);
     setInvoiceExpenseCardId("");
@@ -2872,30 +3107,45 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     }
   };
 
+  const cardInvoices = useMemo(() => {
+    const card = cards.find((entry) => entry.id === invoiceCard);
+    return card ? buildCardInvoices(card, finance) : [];
+  }, [cards, finance, invoiceCard]);
   const invoiceDetails = useMemo(() => {
     const card = cards.find((entry) => entry.id === invoiceCard);
     if (!card) return null;
     const window = cardInvoiceWindow(card, selectedMonth);
-    const cardPurchases = finance.filter((entry) => entry.cardId === card.id && entry.type === "saida"
-      && entry.status !== "cancelado")
-      .map((entry) => ({
-        ...entry,
-        targetInvoiceMonth: cardInvoiceMonthForEntry(card, entry, finance),
-      }));
-    const purchases = cardPurchases.filter((entry) => entry.targetInvoiceMonth === selectedMonth)
-      .sort((a, b) => a.date.localeCompare(b.date));
-    const otherPurchases = cardPurchases
-      .filter((entry) => entry.targetInvoiceMonth && entry.targetInvoiceMonth !== selectedMonth)
-      .sort((a, b) => b.date.localeCompare(a.date));
-    const savedAmount = Number(card.invoiceAmounts?.[selectedMonth]);
-    const existingAmount = Number.isFinite(savedAmount) ? Math.max(0, savedAmount) : 0;
-    const total = existingAmount + purchases.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
-    const payments = (Array.isArray(card.payments) ? card.payments : []).filter((payment) => payment.invoiceMonth === selectedMonth);
-    const paid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    return { card, window, purchases, otherPurchases, existingAmount, total, payments, paid, remaining: Math.max(0, total - paid) };
-  }, [cards, finance, invoiceCard, selectedMonth]);
+    const invoice = cardInvoices.find((entry) => entry.month === selectedMonth) || {
+      month: selectedMonth, purchases: [], informed: 0, total: 0, payments: [], paid: 0, remaining: 0,
+      dueDate: cardInvoiceDueDate(card, selectedMonth), record: undefined, status: "aberta",
+    };
+    return { card, window, ...invoice, existingAmount: invoice.informed };
+  }, [cards, cardInvoices, invoiceCard, selectedMonth]);
   const showInvoiceMonth = (month) => {
     setSelectedMonth(month);
+  };
+  const setInvoicePaidStatus = (paidStatus) => {
+    if (!invoiceDetails) return;
+    const { card, remaining } = invoiceDetails;
+    const withRecord = ensureInvoiceRecord(card, selectedMonth, todayStr());
+    const record = withRecord.invoices[selectedMonth];
+    let payments = Array.isArray(withRecord.payments) ? withRecord.payments : [];
+    if (paidStatus === "paga" && remaining > 0) {
+      payments = [...payments, { id: uid(), invoiceMonth: selectedMonth, date: todayStr(), amount: remaining, auto: true }];
+    }
+    if (paidStatus === "aberta") payments = payments.filter((payment) => !(payment.auto && payment.invoiceMonth === selectedMonth));
+    const next = {
+      ...withRecord,
+      payments,
+      invoices: { ...withRecord.invoices, [selectedMonth]: { ...record, status: paidStatus, paidAt: paidStatus === "paga" ? todayStr() : "" } },
+    };
+    setCards(cards.map((entry) => entry.id === card.id ? next : entry));
+  };
+  const removeInvoicePayment = (paymentId) => {
+    if (!invoiceDetails) return;
+    setCards(cards.map((entry) => entry.id === invoiceDetails.card.id
+      ? { ...entry, payments: (entry.payments || []).filter((payment) => payment.id !== paymentId) }
+      : entry));
   };
   const shiftSelectedMonth = (offset) => {
     setSelectedMonth(addMonths(`${selectedMonth}-01`, offset).slice(0, 7));
@@ -3082,7 +3332,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             return (
               <div className="cr-card" style={{ marginBottom: 16 }}>
                 <p className="cr-label" style={{ marginBottom: 10 }}>Gastos por categoria — {monthLabel(selectedMonth)}</p>
-                <DonutChart data={catData} />
+                <CategoryExpenseChart data={catData} settings={settings} setSettings={setSettings} />
               </div>
             );
           })()}
@@ -3122,98 +3372,130 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
 
       {tab === "fatura" && (
         <div>
-          <div className="cr-row" style={{ margin: "14px 0", alignItems: "center" }}>
-            <select className="cr-select" style={{ maxWidth: 200 }} value={invoiceCard} onChange={(e) => setInvoiceCard(e.target.value)}>
+          <div className="cr-row" style={{ margin: "14px 0", alignItems: "center", flexWrap: "wrap" }}>
+            <select className="cr-select" style={{ maxWidth: 220 }} aria-label="Cartão da fatura" value={invoiceCard} onChange={(e) => setInvoiceCard(e.target.value)}>
               <option value="">Selecione um cartão</option>
               {cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            <div className="cr-row" style={{ gap: 4, flexWrap: "nowrap" }}>
+              <button type="button" className="cr-btn ghost" aria-label="Fatura anterior" onClick={() => shiftSelectedMonth(-1)}>←</button>
+              <span className="cr-serif" style={{ fontSize: 15, minWidth: 74, textAlign: "center" }}>{monthLabel(selectedMonth)}</span>
+              <button type="button" className="cr-btn ghost" aria-label="Próxima fatura" onClick={() => shiftSelectedMonth(1)}>→</button>
+              {selectedMonth !== localDateStr(new Date()).slice(0, 7) && <button type="button" className="cr-btn ghost" onClick={returnToCurrentMonth}>hoje</button>}
+            </div>
             {invoiceCard && <button className="cr-btn primary" onClick={() => {
               setInvoiceExpenseCardId(invoiceCard);
               setInvoiceExpenseMonth(selectedMonth);
               setEditing("new");
             }}><Plus size={14} /> Adicionar compra à fatura</button>}
-            <button type="button" className="cr-btn ghost" onClick={() => shiftSelectedMonth(-1)}>←</button>
-            <span className="cr-serif" style={{ fontSize: 15 }}>{monthLabel(selectedMonth)}</span>
-            <button type="button" className="cr-btn ghost" onClick={() => shiftSelectedMonth(1)}>→</button>
           </div>
           {cards.length === 0 && <div className="cr-card"><p className="cr-empty">Cadastre um cartão em "Contas & Cartões" para acompanhar compras e faturas.</p><button className="cr-btn" onClick={() => setTab("contas")}>Cadastrar cartão</button></div>}
           {invoiceDetails && (() => {
-            const { card, window, purchases, otherPurchases, existingAmount, total, payments, paid, remaining } = invoiceDetails;
+            const { card, window, purchases, existingAmount, total, payments, paid, remaining, status, dueDate } = invoiceDetails;
             const limitSummary = cardLimitSummary(card, finance);
             const limitProgress = Math.min(100, Math.max(0, limitSummary.usedPercent));
+            const hasCycleDays = Number(card.closingDay) >= 1 && Number(card.dueDay) >= 1;
             return (
-              <div className="cr-card">
-                <div className="cr-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                  <p className="cr-sub" style={{ marginTop: 0 }}>{card.name} · fecha em {fmtDateShort(window.closeDate)} · vence em {fmtDateShort(window.dueDate)} · compras de {fmtDateShort(window.previousClose)} a {fmtDateShort(window.closeDate)}</p>
-                  <button className="cr-btn ghost" onClick={() => setEditingInvoiceCard(card)}>Editar saldo informado</button>
-                </div>
-                <div className="cr-grid cr-grid-3" style={{ marginBottom: 12 }}>
-                  <div><p className="cr-label">Limite geral</p><strong>{limitSummary.limit > 0 ? fmtBRL(limitSummary.limit) : "Limite não informado"}</strong></div>
-                  <div><p className="cr-label">Limite usado</p><strong>{fmtBRL(limitSummary.used)}</strong></div>
-                  <div><p className="cr-label">Limite disponível</p><strong>{limitSummary.limit > 0 ? fmtBRL(limitSummary.available) : "Limite não informado"}</strong></div>
-                </div>
-                {limitSummary.limit > 0 && (
-                  <div style={{ marginBottom: 16 }}>
-                    <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 4 }}>
-                      <span className="cr-sub" style={{ margin: 0 }}>Uso do limite</span>
-                      <span className="cr-sub" style={{ margin: 0 }}>{limitSummary.usedPercent.toFixed(0)}%</span>
+              <div className="cr-invoice-layout">
+                <div className="cr-card">
+                  <div className="cr-invoice-head">
+                    <div style={{ minWidth: 0 }}>
+                      <p className="cr-label" style={{ margin: 0 }}>{card.name}</p>
+                      <h2 className="cr-serif" style={{ margin: "2px 0 4px", fontSize: 20 }}>Fatura de {monthLabel(selectedMonth)}</h2>
+                      <p className="cr-sub" style={{ margin: 0 }}>
+                        Pagamento em {fmtDateShort(dueDate)}
+                        {hasCycleDays ? ` · compras de ${fmtDateShort(window.previousClose)} a ${fmtDateShort(window.closeDate)}` : ""}
+                      </p>
                     </div>
-                    <div className="cr-progress-track" role="progressbar" aria-label="Uso do limite do cartão"
-                      aria-valuemin={0} aria-valuemax={100} aria-valuenow={limitProgress}>
-                      <div className="cr-progress-fill" style={{
-                        width: `${limitProgress}%`,
-                        background: limitSummary.overLimit ? "#A1493C" : "#5C7A56",
-                      }} />
+                    <span className="cr-chip" style={status === "paga"
+                      ? { background: "#E3EBDF", color: "#4F6B49", fontWeight: 700 }
+                      : { background: "#FBEBD4", color: "#96631C", fontWeight: 700 }}>
+                      {status === "paga" ? "Paga" : "Aberta"}
+                    </span>
+                  </div>
+                  <div className="cr-invoice-total">
+                    <span className="cr-serif" style={{ fontSize: 16 }}>Total da fatura</span>
+                    <span className="cr-serif" style={{ fontSize: 22 }}>{fmtBRL(total)}</span>
+                  </div>
+                  <div className="cr-grid cr-grid-3" style={{ marginBottom: 12, gap: 10 }}>
+                    <div><p className="cr-label">Já pago</p><strong>{fmtBRL(paid)}</strong></div>
+                    <div><p className="cr-label">Saldo a pagar</p><strong>{fmtBRL(remaining)}</strong></div>
+                    <div><p className="cr-label">Lançamentos</p><strong>{purchases.length}</strong></div>
+                  </div>
+                  <div className="cr-row" style={{ flexWrap: "wrap", marginBottom: 6 }}>
+                    {status === "paga"
+                      ? <button type="button" className="cr-btn" onClick={() => setInvoicePaidStatus("aberta")}>Reabrir fatura</button>
+                      : <button type="button" className="cr-btn primary" disabled={total <= 0} onClick={() => setInvoicePaidStatus("paga")}><Check size={14} /> Marcar como paga</button>}
+                    <button type="button" className="cr-btn ghost" onClick={() => setEditingInvoiceCard(card)}>Editar saldo informado</button>
+                  </div>
+                  {existingAmount > 0 && <p className="cr-sub" style={{ margin: "0 0 10px" }}>Inclui saldo informado manualmente: {fmtBRL(existingAmount)}.</p>}
+
+                  <h3 className="cr-serif" style={{ fontSize: 15, marginTop: 16 }}>Lançamentos</h3>
+                  {purchases.length === 0 && <p className="cr-empty">Nenhum lançamento nesta fatura. Use “Adicionar compra à fatura” ou registre um lançamento no Crédito com este cartão.</p>}
+                  {purchases.map((f) => (
+                    <div className="cr-list-row" key={f.id}>
+                      <span className="cr-list-title">{f.desc || f.category || "Compra"}</span>
+                      <span className="cr-chip">compra {fmtDateShort(f.date)}</span>
+                      {f.installmentGroup && <span className="cr-chip">{f.installmentGroup.index}/{f.installmentGroup.total}</span>}
+                      <span style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: "nowrap" }}>{fmtBRL(f.amount)}</span>
+                      {!f.sourceRef && <>
+                        <button className="cr-btn ghost" aria-label={`Editar ${f.desc || "lançamento"}`} onClick={() => setEditing(manualFinance.find((entry) => entry.id === f.id) || f)}><Pencil size={13} /></button>
+                        <button className="cr-btn ghost danger" aria-label={`Excluir ${f.desc || "lançamento"}`} onClick={() => remove(f.id)}><Trash2 size={13} /></button>
+                      </>}
                     </div>
-                  </div>
-                )}
-                <div className="cr-row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
-                  <span className="cr-serif" style={{ fontSize: 16 }}>Total da fatura</span>
-                  <span className="cr-serif" style={{ fontSize: 18 }}>{fmtBRL(total)}</span>
+                  ))}
+
+                  <h3 className="cr-serif" style={{ fontSize: 15, marginTop: 18 }}>Pagamentos registrados</h3>
+                  {payments.map((payment) => (
+                    <div className="cr-list-row" key={payment.id}>
+                      <span className="cr-list-title">{fmtDateShort(payment.date)}{payment.auto ? " · marcada como paga" : ""}</span>
+                      <strong style={{ whiteSpace: "nowrap" }}>{fmtBRL(payment.amount)}</strong>
+                      <button className="cr-btn ghost danger" aria-label="Excluir pagamento" onClick={() => removeInvoicePayment(payment.id)}><Trash2 size={13} /></button>
+                    </div>
+                  ))}
+                  {payments.length === 0 && <p className="cr-sub">Nenhum pagamento registrado para esta fatura.</p>}
+                  {remaining > 0 && (
+                    <div className="cr-row" style={{ marginTop: 12, alignItems: "end", flexWrap: "wrap" }}>
+                      <div className="cr-field" style={{ flex: "1 1 160px" }}><label className="cr-label">Valor pago (R$)</label>
+                        <input type="number" min="0.01" max={remaining} step="0.01" className="cr-input" value={invoicePaymentAmount} onChange={(event) => setInvoicePaymentAmount(event.target.value)} /></div>
+                      <div className="cr-field" style={{ flex: "1 1 160px" }}><label className="cr-label">Data do pagamento</label>
+                        <input type="date" max={todayStr()} className="cr-input" value={invoicePaymentDate} onChange={(event) => setInvoicePaymentDate(event.target.value)} /></div>
+                      <button className="cr-btn primary" style={{ marginBottom: 12 }} disabled={!(Number(invoicePaymentAmount) > 0) || Number(invoicePaymentAmount) > remaining || invoicePaymentDate > todayStr()} onClick={registerInvoicePayment}>Registrar pagamento</button>
+                    </div>
+                  )}
                 </div>
-                <p className="cr-sub" style={{ margin: "0 0 10px" }}>Saldo já existente: {fmtBRL(existingAmount)} · compras registradas são somadas a esse valor.</p>
-                <div className="cr-grid cr-grid-2" style={{ marginBottom: 12 }}>
-                  <div><p className="cr-label">Já pago</p><strong>{fmtBRL(paid)}</strong></div>
-                  <div><p className="cr-label">Saldo a pagar</p><strong>{fmtBRL(remaining)}</strong></div>
-                </div>
-                <h3 className="cr-serif" style={{ fontSize: 15 }}>Compras</h3>
-                {purchases.length === 0 && <p className="cr-empty">Nenhuma compra neste ciclo. Use “Adicionar compra à fatura” ou registre um lançamento como Crédito e selecione este cartão.</p>}
-                {purchases.map((f) => (
-                  <div className="cr-list-row" key={f.id}>
-                    <span className="cr-list-title" style={{ flex: 1 }}>{f.desc || f.category}</span>
-                    <span className="cr-chip">{fmtDateShort(f.date)}</span>
-                    {f.installmentGroup && <span className="cr-chip">{f.installmentGroup.index}/{f.installmentGroup.total}</span>}
-                    <span className="cr-chip" style={{ background: effectiveStatus(f) === "atrasado" ? "#F6DEDA" : undefined }}>{STATUS_LABEL[effectiveStatus(f)]}</span>
-                    <span style={{ fontWeight: 600, fontSize: 13.5 }}>{fmtBRL(f.amount)}</span>
-                  </div>
-                ))}
-                {purchases.length === 0 && otherPurchases.length > 0 && (
-                  <div style={{ marginTop: 12 }}>
-                    <p className="cr-sub">Há compras deste cartão em outros ciclos:</p>
-                    {otherPurchases.map((purchase) => (
-                      <div className="cr-list-row" key={purchase.id}>
-                        <span className="cr-list-title" style={{ flex: 1 }}>{purchase.desc || purchase.category}</span>
-                        <span className="cr-chip">{fmtDateShort(purchase.date)}</span>
-                        <span className="cr-chip">{monthLabel(purchase.targetInvoiceMonth)}</span>
-                        <button type="button" className="cr-btn ghost" onClick={() => showInvoiceMonth(purchase.targetInvoiceMonth)}>Ver fatura</button>
+
+                <div className="cr-invoice-side">
+                  <div className="cr-card">
+                    <h3 className="cr-serif" style={{ margin: "0 0 10px", fontSize: 15 }}>Limite do cartão</h3>
+                    <div className="cr-grid" style={{ gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(min(120px, 100%), 1fr))" }}>
+                      <div><p className="cr-label">Limite geral</p><strong>{limitSummary.limit > 0 ? fmtBRL(limitSummary.limit) : "Não informado"}</strong></div>
+                      <div><p className="cr-label">Usado</p><strong>{fmtBRL(limitSummary.used)}</strong></div>
+                      <div><p className="cr-label">Disponível</p><strong>{limitSummary.limit > 0 ? fmtBRL(limitSummary.available) : "—"}</strong></div>
+                    </div>
+                    {limitSummary.limit > 0 && (
+                      <div style={{ marginTop: 10 }}>
+                        <div className="cr-progress-track" role="progressbar" aria-label="Uso do limite do cartão"
+                          aria-valuemin={0} aria-valuemax={100} aria-valuenow={limitProgress}>
+                          <div className="cr-progress-fill" style={{ width: `${limitProgress}%`, background: limitSummary.overLimit ? "#A1493C" : "#5C7A56" }} />
+                        </div>
+                        <p className="cr-sub" style={{ margin: "4px 0 0" }}>{limitSummary.usedPercent.toFixed(0)}% do limite em uso</p>
                       </div>
+                    )}
+                  </div>
+                  <div className="cr-card">
+                    <h3 className="cr-serif" style={{ margin: "0 0 6px", fontSize: 15 }}>Histórico de faturas</h3>
+                    {cardInvoices.length === 0 && <p className="cr-sub" style={{ margin: 0 }}>As faturas aparecem aqui assim que houver um lançamento no cartão.</p>}
+                    {cardInvoices.map((invoice) => (
+                      <button type="button" key={invoice.month} className={`cr-invoice-history ${invoice.month === selectedMonth ? "active" : ""}`}
+                        onClick={() => showInvoiceMonth(invoice.month)} aria-current={invoice.month === selectedMonth ? "true" : undefined}>
+                        <span className="cr-serif">{monthLabel(invoice.month)}</span>
+                        <span className="cr-chip" style={invoice.status === "paga" ? { background: "#E3EBDF", color: "#4F6B49" } : { background: "#FBEBD4", color: "#96631C" }}>{invoice.status === "paga" ? "Paga" : "Aberta"}</span>
+                        <strong>{fmtBRL(invoice.total)}</strong>
+                      </button>
                     ))}
                   </div>
-                )}
-                <h3 className="cr-serif" style={{ fontSize: 15, marginTop: 18 }}>Pagamentos registrados</h3>
-                {payments.map((payment) => (
-                  <div className="cr-list-row" key={payment.id}><span className="cr-list-title" style={{ flex: 1 }}>{fmtDateShort(payment.date)}</span><strong>{fmtBRL(payment.amount)}</strong></div>
-                ))}
-                {payments.length === 0 && <p className="cr-sub">Nenhum pagamento registrado para esta fatura.</p>}
-                {remaining > 0 && (
-                  <div className="cr-row" style={{ marginTop: 12, alignItems: "end", flexWrap: "wrap" }}>
-                    <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor pago (R$)</label>
-                      <input type="number" min="0.01" max={remaining} step="0.01" className="cr-input" value={invoicePaymentAmount} onChange={(event) => setInvoicePaymentAmount(event.target.value)} /></div>
-                    <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Data do pagamento</label>
-                      <input type="date" max={todayStr()} className="cr-input" value={invoicePaymentDate} onChange={(event) => setInvoicePaymentDate(event.target.value)} /></div>
-                    <button className="cr-btn primary" disabled={!(Number(invoicePaymentAmount) > 0) || Number(invoicePaymentAmount) > remaining || invoicePaymentDate > todayStr()} onClick={registerInvoicePayment}>Registrar pagamento</button>
-                  </div>
-                )}
+                </div>
               </div>
             );
           })()}
@@ -3752,7 +4034,12 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
     : null;
   const invoiceMonthForForm = form.invoiceMonthExplicit
     ? form.invoiceMonth
-    : cardInvoiceMonthForDate(selectedCard, form.date);
+    : selectedCard && defaultInvoicePaymentDate(selectedCard, form.date).slice(0, 7);
+  // Data de pagamento da fatura: define em qual fatura (mês de pagamento) a compra entra.
+  const invoicePaymentDateForForm = form.invoiceMonthExplicit
+    ? (form.invoiceDueDate?.slice(0, 7) === form.invoiceMonth ? form.invoiceDueDate : cardInvoiceDueDate(selectedCard, form.invoiceMonth))
+    : selectedCard ? defaultInvoicePaymentDate(selectedCard, form.date) : "";
+  const isCreditPurchase = form.type === "saida" && isCredit;
   const draftId = useRef(uid());
   const needsGeneration = !isEdit && ((isCredit && Number(form.installmentsCount) > 1) || !!form.recurringEnabled);
   const autoStatus = useAutoSave(form, onSave, (f) => {
@@ -3808,7 +4095,7 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
           <input type="number" min="0.01" step="0.01" className="cr-input" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
         </div>
         <div className="cr-field" style={{ flex: 1 }}>
-          <label className="cr-label">{form.type === "saida" && form.status !== "pago" ? "Vencimento previsto" : "Data do lançamento / pagamento"}</label>
+          <label className="cr-label">{isCreditPurchase ? "Data da compra" : form.type === "saida" && form.status !== "pago" ? "Vencimento previsto" : "Data do lançamento / pagamento"}</label>
           <input type="date" className="cr-input" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
       </div>
       {form.type === "saida" && (
@@ -3844,8 +4131,25 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
             {cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select></div>
       )}
-      {form.type === "saida" && isCredit && form.cardId && invoiceMonthForForm
-        && <p className="cr-sub">Esta compra será incluída na fatura de {monthLabel(invoiceMonthForForm)}.</p>}
+      {isCreditPurchase && form.cardId && (
+        <div className="cr-field">
+          <label className="cr-label">Data de pagamento da fatura</label>
+          <input type="date" className="cr-input" value={invoicePaymentDateForForm || ""}
+            onChange={(e) => setForm(e.target.value
+              ? { ...form, invoiceDueDate: e.target.value, invoiceMonth: e.target.value.slice(0, 7), invoiceMonthExplicit: true }
+              : { ...form, invoiceDueDate: "", invoiceMonth: "", invoiceMonthExplicit: false })} />
+          {invoiceMonthForForm && (
+            <p className="cr-sub" style={{ margin: "4px 0 0" }}>
+              Esta compra entra na fatura de <strong>{monthLabel(invoiceMonthForForm)}</strong>
+              {form.invoiceMonthExplicit ? " (data informada por você)." : " (calculada pelo fechamento do cartão)."}
+              {form.invoiceMonthExplicit && (
+                <button type="button" className="cr-btn ghost" style={{ padding: "0 4px", minHeight: 0, display: "inline" }}
+                  onClick={() => setForm({ ...form, invoiceDueDate: "", invoiceMonth: "", invoiceMonthExplicit: false })}>usar cálculo automático</button>
+              )}
+            </p>
+          )}
+        </div>
+      )}
       {form.type === "saida" && isCredit && selectedCard && limitSummary.limit > 0
         && Number(form.amount) > limitSummary.available
         && <p className="cr-sub" role="alert" style={{ color: "#A1493C" }}>
@@ -3986,12 +4290,18 @@ function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, 
               && (!entry.status || entry.status === "pago"));
             const balance = posted.reduce((total, entry) => total + (entry.type === "entrada" ? 1 : -1) * Number(entry.amount || 0), 0);
             return (
-              <div className="cr-list-row" key={a.id}>
-                <span className="cr-list-title" style={{ flex: 1 }}>{a.name}</span>
-                <span className="cr-chip">{a.type}</span>
-                <span className="cr-chip">Saldo registrado: {fmtBRL(balance)}</span>
-                <button className="cr-btn ghost" onClick={() => setEditingAccount(a)}><Pencil size={13} /></button>
-                <button className="cr-btn ghost danger" onClick={() => setAccounts(accounts.filter((x) => x.id !== a.id))}><Trash2 size={13} /></button>
+              <div className="cr-account-row" key={a.id}>
+                <div className="cr-account-row-head">
+                  <span className="cr-list-title">{a.name}</span>
+                  <div className="cr-account-row-actions">
+                    <button className="cr-btn ghost" aria-label={`Editar ${a.name}`} onClick={() => setEditingAccount(a)}><Pencil size={13} /></button>
+                    <button className="cr-btn ghost danger" aria-label={`Excluir ${a.name}`} onClick={() => setAccounts(accounts.filter((x) => x.id !== a.id))}><Trash2 size={13} /></button>
+                  </div>
+                </div>
+                <div className="cr-account-row-meta">
+                  <span className="cr-chip">{a.type}</span>
+                  <span className="cr-chip">Saldo registrado: {fmtBRL(balance)}</span>
+                </div>
               </div>
             );
           })()
@@ -4009,12 +4319,23 @@ function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, 
             const limitSummary = cardLimitSummary(c, finance);
             const limitProgress = Math.min(100, Math.max(0, limitSummary.usedPercent));
             return (
-              <div className="cr-list-row" key={c.id} style={{ flexWrap: "wrap" }}>
-                <span className="cr-list-title" style={{ flex: 1 }}>{c.name}</span>
-                <span className="cr-chip">limite geral {limitSummary.limit > 0 ? fmtBRL(limitSummary.limit) : "Limite não informado"}</span>
-                <span className="cr-chip">disponível {limitSummary.limit > 0 ? fmtBRL(limitSummary.available) : "Limite não informado"}</span>
+              <div className="cr-account-row" key={c.id}>
+                <div className="cr-account-row-head">
+                  <span className="cr-list-title">{c.name}{c.bank ? <span className="cr-sub" style={{ margin: "0 0 0 6px", fontWeight: 400 }}>{c.bank}</span> : null}</span>
+                  <div className="cr-account-row-actions">
+                    <button className="cr-btn ghost" aria-label={`Editar ${c.name}`} onClick={() => setEditingCard(c)}><Pencil size={13} /></button>
+                    <button className="cr-btn ghost danger" aria-label={`Excluir ${c.name}`} onClick={() => setCards(cards.filter((x) => x.id !== c.id))}><Trash2 size={13} /></button>
+                  </div>
+                </div>
+                <div className="cr-account-row-meta">
+                  <span className="cr-chip">limite geral {limitSummary.limit > 0 ? fmtBRL(limitSummary.limit) : "não informado"}</span>
+                  <span className="cr-chip">disponível {limitSummary.limit > 0 ? fmtBRL(limitSummary.available) : "—"}</span>
+                  <span className="cr-chip">fatura informada {fmtBRL(c.invoiceAmounts?.[invoiceMonth] || 0)}</span>
+                  <span className="cr-chip">fecha dia {c.closingDay}</span>
+                  <span className="cr-chip">vence dia {c.dueDay}</span>
+                </div>
                 {limitSummary.limit > 0 && (
-                  <div className="cr-progress-track" style={{ width: 90 }} role="progressbar"
+                  <div className="cr-progress-track" style={{ width: "100%", maxWidth: 320 }} role="progressbar"
                     aria-label={`Uso do limite de ${c.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={limitProgress}>
                     <div className="cr-progress-fill" style={{
                       width: `${limitProgress}%`,
@@ -4022,11 +4343,6 @@ function AccountsCardsPanel({ accounts, setAccounts, cards, setCards, settings, 
                     }} />
                   </div>
                 )}
-                <span className="cr-chip">fatura informada {fmtBRL(c.invoiceAmounts?.[invoiceMonth] || 0)}</span>
-                <span className="cr-chip">fecha dia {c.closingDay}</span>
-                <span className="cr-chip">vence dia {c.dueDay}</span>
-                <button className="cr-btn ghost" onClick={() => setEditingCard(c)}><Pencil size={13} /></button>
-                <button className="cr-btn ghost danger" onClick={() => setCards(cards.filter((x) => x.id !== c.id))}><Trash2 size={13} /></button>
               </div>
             );
           })()
@@ -5172,7 +5488,7 @@ function GoogleAgendaView({ gcal, setGcal, dashboardMode = false }) {
   const [detail, setDetail] = useState(null);
   const [connect, setConnect] = useState(false);
   const [dayOpen, setDayOpen] = useState(null);
-  const today = todayStr();
+  const today = useToday();
 
   const merged = gcalMergedEvents(gcal);
   const all = merged.filter((e) => (dashboardMode || showBreaks || e.t.trim().toLowerCase() !== "pausa")
@@ -5201,10 +5517,11 @@ function GoogleAgendaView({ gcal, setGcal, dashboardMode = false }) {
           {cells.map((day) => {
             const evs = gcalOnDay(all, day);
             const inMonth = day.slice(0, 7) === ym;
+            const timing = day < today ? "past" : day === today ? "today" : "future";
             return (
-              <div key={day} onClick={() => setDayOpen(day)} className="cr-card"
-                style={{ padding: 6, minHeight: 96, cursor: "pointer", opacity: inMonth ? 1 : 0.45, background: day === today ? "#E8F0F9" : undefined, borderColor: day === today ? GCAL_BLUE : undefined }}>
-                <div style={{ fontSize: 12, fontWeight: day === today ? 700 : 500, marginBottom: 3 }}>{Number(day.slice(8))}</div>
+              <div key={day} onClick={() => setDayOpen(day)} className={`cr-card cr-cal-day is-${timing} ${inMonth ? "" : "is-outside"}`}
+                aria-current={timing === "today" ? "date" : undefined}>
+                <div className="cr-cal-daynum">{Number(day.slice(8))}</div>
                 {evs.slice(0, 3).map(evChip)}
                 {evs.length > 3 && <div className="cr-sub" style={{ margin: 0, fontSize: 11 }}>+{evs.length - 3} mais</div>}
               </div>
@@ -5220,7 +5537,7 @@ function GoogleAgendaView({ gcal, setGcal, dashboardMode = false }) {
       <div style={{ overflowX: "auto" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(120px, 1fr))", gap: 8, minWidth: 840 }}>
           {Array.from({ length: 7 }, (_, i) => addDays(start, i)).map((day, i) => (
-            <div key={day} className="cr-card" style={{ padding: 8, minHeight: 220, background: day === today ? "#E8F0F9" : undefined, borderColor: day === today ? GCAL_BLUE : undefined }}>
+            <div key={day} className={`cr-card cr-cal-day is-${day < today ? "past" : day === today ? "today" : "future"}`} style={{ padding: 8, minHeight: 220 }}>
               <p className="cr-serif" style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 600 }}>{WEEKDAY_LABELS[i]} {fmtDateShort(day)}</p>
               {gcalOnDay(all, day).map(evChip)}
               {gcalOnDay(all, day).length === 0 && <p className="cr-sub" style={{ margin: 0, fontSize: 11.5 }}>livre</p>}
@@ -5594,27 +5911,32 @@ function stepRangeLabel(step) {
 }
 
 // Lado a lado quando duas atividades acontecem no mesmo horário
+// Usa o fim visual (it.vem, que considera a altura mínima do bloco) para que blocos curtos não se sobreponham.
 function layoutLanes(items) {
   items.sort((a, b) => a.sm - b.sm || a.em - b.em);
+  const endOf = (it) => Math.max(it.em, it.vem || 0);
   let cluster = [], clusterEnd = -1, laneEnds = [];
   const flush = () => { cluster.forEach((it) => { it.lanes = laneEnds.length || 1; }); cluster = []; laneEnds = []; clusterEnd = -1; };
   items.forEach((it) => {
     if (cluster.length && it.sm >= clusterEnd) flush();
     let lane = laneEnds.findIndex((e) => e <= it.sm);
-    if (lane < 0) { lane = laneEnds.length; laneEnds.push(it.em); } else laneEnds[lane] = it.em;
-    it.lane = lane; cluster.push(it); clusterEnd = Math.max(clusterEnd, it.em);
+    if (lane < 0) { lane = laneEnds.length; laneEnds.push(endOf(it)); } else laneEnds[lane] = endOf(it);
+    it.lane = lane; cluster.push(it); clusterEnd = Math.max(clusterEnd, endOf(it));
   });
   flush();
 }
 
-function RoutinesCalendar({ routines, onEdit, onToggle }) {
+function RoutinesCalendar({ routines, onEdit, onToggle, onRemoveStep }) {
   const ctx = useContext(ListsContext);
   const [routineFilter, setRoutineFilter] = useState("todas");
-  const todayIdx = (new Date().getDay() + 6) % 7;
-  const today = todayStr();
+  const [openEvent, setOpenEvent] = useState(null);
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  const today = useToday();
+  const todayIdx = (new Date(`${today}T00:00:00`).getDay() + 6) % 7;
   const weekStart = startOfWeek(today);
   const list = routineFilter === "todas" ? routines : routines.filter((r) => r.id === routineFilter);
   const PX = 0.85; // pixels por minuto
+  const MIN_BLOCK = 24; // altura mínima do bloco (px)
 
   const columns = WEEKDAY_LABELS.map((label, day) => {
     const date = addDays(weekStart, day);
@@ -5627,18 +5949,24 @@ function RoutinesCalendar({ routines, onEdit, onToggle }) {
       const sm = toMin(start);
       let em = end ? toMin(end) : sm + 60;
       if (em <= sm) em = sm + 30;
-      timed.push({ routine: r, step: s, cat, start, end: end || fromMin(em), sm, em, date });
+      timed.push({ routine: r, step: s, cat, start, end: end || fromMin(em), sm, em, vem: sm + Math.ceil((MIN_BLOCK + 2) / PX), date });
     }));
     layoutLanes(timed);
     return { label, day, date, timed, untimed };
   });
   const allTimed = columns.flatMap((c) => c.timed);
   const gridStart = allTimed.length ? Math.min(7, Math.floor(Math.min(...allTimed.map((e) => e.sm)) / 60)) : 7;
-  const gridEnd = allTimed.length ? Math.max(21, Math.ceil(Math.max(...allTimed.map((e) => e.em)) / 60)) : 21;
+  const gridEnd = allTimed.length ? Math.max(21, Math.ceil(Math.max(...allTimed.map((e) => Math.max(e.em, e.vem))) / 60)) : 21;
   const gridH = (gridEnd - gridStart) * 60 * PX;
   const hours = Array.from({ length: gridEnd - gridStart + 1 }, (_, i) => gridStart + i);
   const usedCats = new Set(columns.flatMap((c) => [...c.timed, ...c.untimed].map((e) => e.cat)));
   const cols = "52px repeat(7, minmax(104px, 1fr))";
+  // o evento aberto é relido das rotinas atuais para refletir marcações feitas no pop-up
+  const current = openEvent && (() => {
+    const routine = routines.find((r) => r.id === openEvent.routineId);
+    const step = routine?.steps?.find((s) => s.id === openEvent.stepId);
+    return step ? { ...openEvent, routine, step } : null;
+  })();
 
   return (
     <div>
@@ -5667,13 +5995,16 @@ function RoutinesCalendar({ routines, onEdit, onToggle }) {
             <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4, marginBottom: 6 }}>
               <div className="cr-sub" style={{ margin: 0, fontSize: 10.5, textAlign: "right", paddingRight: 4 }}>sem horário</div>
               {columns.map((c) => (
-                <div key={c.day}>
+                <div key={c.day} style={{ minWidth: 0 }}>
                   {c.untimed.map((e, i) => {
                     const done = !!e.step.log?.[e.date];
                     return (
-                      <div key={e.step.id + i} onClick={() => onEdit(e.routine)} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11, padding: "3px 6px", borderRadius: 6, marginBottom: 3, background: itemColor("routineCategory", e.cat), color: readableText(itemColor("routineCategory", e.cat)), opacity: done ? 0.62 : 1 }}>
+                      <div key={e.step.id + i} role="button" tabIndex={0} title={stepLabel(e.step)}
+                        onClick={() => setOpenEvent({ routineId: e.routine.id, stepId: e.step.id, cat: e.cat, date: e.date, start: "", end: "" })}
+                        onKeyDown={(ev) => { if (ev.key === "Enter") setOpenEvent({ routineId: e.routine.id, stepId: e.step.id, cat: e.cat, date: e.date, start: "", end: "" }); }}
+                        style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11, padding: "3px 6px", borderRadius: 6, marginBottom: 3, background: itemColor("routineCategory", e.cat), color: readableText(itemColor("routineCategory", e.cat)), opacity: done ? 0.62 : 1, minWidth: 0 }}>
                         <div onClick={(event) => { event.stopPropagation(); onToggle(e.routine, e.step.id, e.date); }} style={{ width: 14, height: 14, flexShrink: 0, borderRadius: 4, border: `1.5px solid ${readableText(itemColor("routineCategory", e.cat))}`, background: done ? readableText(itemColor("routineCategory", e.cat)) : "transparent", display: "grid", placeItems: "center" }}>{done && <Check size={10} color={itemColor("routineCategory", e.cat)} />}</div>
-                        <span style={{ textDecoration: done ? "line-through" : "none" }}>{stepLabel(e.step)}</span>
+                        <span className="cr-ellipsis" style={{ textDecoration: done ? "line-through" : "none" }}>{stepLabel(e.step)}</span>
                       </div>
                     );
                   })}
@@ -5693,20 +6024,24 @@ function RoutinesCalendar({ routines, onEdit, onToggle }) {
                   const color = itemColor("routineCategory", e.cat);
                   const txt = readableText(color);
                   const done = !!e.step.log?.[e.date];
-                  const h = Math.max(24, (e.em - e.sm) * PX - 2);
+                  const h = Math.max(MIN_BLOCK, (e.em - e.sm) * PX - 2);
+                  const narrow = e.lanes > 1;
+                  const open = () => setOpenEvent({ routineId: e.routine.id, stepId: e.step.id, cat: e.cat, date: e.date, start: e.start, end: e.end, minutes: e.em - e.sm });
                   return (
-                    <div key={e.step.id + "-" + i} onClick={() => onEdit(e.routine)}
-                      title={`${stepLabel(e.step)} · ${listName("routineCategory", e.cat)} · ${e.start} – ${e.end} (${fmtDuration(e.em - e.sm)})`}
-                      style={{ position: "absolute", top: (e.sm - gridStart * 60) * PX, height: h, left: `calc(${(e.lane * 100) / e.lanes}% + 1px)`, width: `calc(${100 / e.lanes}% - 3px)`,
-                        background: color, color: txt, borderRadius: 6, padding: "3px 6px 3px 22px", fontSize: 11, lineHeight: 1.25, overflow: "hidden", cursor: "pointer", boxSizing: "border-box", opacity: done ? 0.55 : 1 }}>
+                    <div key={e.step.id + "-" + i} role="button" tabIndex={0} onClick={open}
+                      onKeyDown={(ev) => { if (ev.key === "Enter") open(); }}
+                      title={`${stepLabel(e.step)} · ${e.start} – ${e.end}`}
+                      className="cr-routine-block"
+                      style={{ top: (e.sm - gridStart * 60) * PX, height: h, left: `calc(${(e.lane * 100) / e.lanes}% + 1px)`, width: `calc(${100 / e.lanes}% - 3px)`,
+                        background: color, color: txt, padding: narrow ? "3px 4px 3px 20px" : "3px 6px 3px 22px", opacity: done ? 0.55 : 1 }}>
                       <div onClick={(ev) => { ev.stopPropagation(); onToggle(e.routine, e.step.id, e.date); }}
                         aria-label={done ? "Marcar como pendente" : "Marcar como concluído"}
                         style={{ position: "absolute", top: 3, left: 3, width: 14, height: 14, borderRadius: 4, border: `1.5px solid ${txt}`, background: done ? txt : "transparent", color, display: "flex", alignItems: "center", justifyContent: "center" }}>
                         {done && <Check size={10} />}
                       </div>
-                      <strong style={{ display: "block", fontSize: 10.5 }}>{e.start} – {e.end}</strong>
-                      <span style={{ textDecoration: done ? "line-through" : "none" }}>{stepLabel(e.step)}</span>
-                      {h > 56 && <span style={{ display: "block", opacity: 0.85, fontSize: 10 }}>{listName("routineCategory", e.cat)} · {fmtDuration(e.em - e.sm)}</span>}
+                      <strong className="cr-ellipsis" style={{ display: "block", fontSize: 10.5 }}>{e.start}{narrow ? "" : ` – ${e.end}`}</strong>
+                      <span className="cr-ellipsis" style={{ display: "block", textDecoration: done ? "line-through" : "none" }}>{stepLabel(e.step)}</span>
+                      {h > 56 && !narrow && <span className="cr-ellipsis" style={{ display: "block", opacity: 0.85, fontSize: 10 }}>{listName("routineCategory", e.cat)} · {fmtDuration(e.em - e.sm)}</span>}
                     </div>
                   );
                 })}
@@ -5715,6 +6050,33 @@ function RoutinesCalendar({ routines, onEdit, onToggle }) {
           </div>
         </div>
       </div>
+
+      {current && (
+        <Modal size="small" title={stepLabel(current.step) || "Atividade"} onClose={() => setOpenEvent(null)}>
+          <div className="cr-routine-detail">
+            <p><strong>Horário:</strong> {current.start ? `${current.start} – ${current.end}${current.minutes ? ` (${fmtDuration(current.minutes)})` : ""}` : "sem horário definido"}</p>
+            <p><strong>Dia:</strong> {fmtCalendarDate(current.date)}</p>
+            <p><strong>Rotina:</strong> {current.routine.name || "Sem nome"}</p>
+            <p><strong>Categoria:</strong> <span className="cr-chip" style={{ background: itemColor("routineCategory", current.cat), color: readableText(itemColor("routineCategory", current.cat)) }}>{listName("routineCategory", current.cat)}</span></p>
+            <p><strong>Dias da semana:</strong> {stepDays(current.step).map((d) => WEEKDAY_LABELS[d]).join(", ")}</p>
+            <p><strong>Descrição:</strong> {current.step.notes?.trim() ? current.step.notes : <span className="cr-sub" style={{ margin: 0 }}>sem descrição (adicione em Editar)</span>}</p>
+          </div>
+          <label className="cr-row" style={{ cursor: "pointer", margin: "4px 0 14px", flexWrap: "nowrap" }}>
+            <input type="checkbox" checked={!!current.step.log?.[current.date]} onChange={() => onToggle(current.routine, current.step.id, current.date)} />
+            <span style={{ fontSize: 14 }}>Feito neste dia</span>
+          </label>
+          <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+            <button type="button" className="cr-btn ghost danger" onClick={() => setConfirmRemove(current)}><Trash2 size={14} /> Excluir</button>
+            <button type="button" className="cr-btn primary" onClick={() => { setOpenEvent(null); onEdit(current.routine); }}><Pencil size={14} /> Editar</button>
+          </div>
+        </Modal>
+      )}
+      {confirmRemove && (
+        <ConfirmModal title="Excluir atividade" confirmLabel="Excluir"
+          message={`Excluir "${stepLabel(confirmRemove.step)}" da rotina "${confirmRemove.routine.name}"? Ela sai de todos os dias da semana.`}
+          onConfirm={() => { onRemoveStep(confirmRemove.routine, confirmRemove.step.id); setConfirmRemove(null); setOpenEvent(null); }}
+          onCancel={() => setConfirmRemove(null)} />
+      )}
     </div>
   );
 }
@@ -5771,7 +6133,8 @@ function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal }) {
       {view === "google" ? (
         <GoogleAgendaView gcal={gcal} setGcal={setGcal} />
       ) : view === "calendario" ? (
-        filteredRoutines.length === 0 ? <p className="cr-empty">Nenhuma rotina nesta categoria ainda.</p> : <RoutinesCalendar routines={filteredRoutines} onEdit={setEditing} onToggle={toggleStep} />
+        filteredRoutines.length === 0 ? <p className="cr-empty">Nenhuma rotina nesta categoria ainda.</p> : <RoutinesCalendar routines={filteredRoutines} onEdit={setEditing} onToggle={toggleStep}
+          onRemoveStep={(routine, stepId) => setRoutines(routines.map((r) => r.id === routine.id ? { ...r, steps: (r.steps || []).filter((s) => s.id !== stepId) } : r))} />
       ) : (
         <>
         <div className="cr-row" style={{ marginTop: 12 }}>
@@ -6184,6 +6547,8 @@ function RoutineModal({ routine, onSave, onClose }) {
                 <ManagedSelect listKey="routineCategory" value={s.category || stepCategoryId(s)} onChange={(v) => updateStep(s.id, "category", v)} />
               </div>
             </div>
+            <input className="cr-input" style={{ marginBottom: 6 }} placeholder="Descrição (opcional)" value={s.notes || ""}
+              onChange={(e) => updateStep(s.id, "notes", e.target.value)} />
             <div className="cr-row" style={{ flexWrap: "wrap", gap: 4 }}>
               {WEEKDAY_LABELS.map((l, d) => (
                 <button key={d} type="button" onClick={() => toggleDay(s, d)} className="cr-chip"
@@ -6811,11 +7176,8 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
   ].filter(Boolean);
   return (
     <div className={`cr-card ${personalizedCardClass(b)}`} style={{ cursor: "pointer", ...personalizedCardStyle(b) }} onClick={onEdit} title="Clique para abrir o procedimento completo">
-      {on("image") && (b.image ? (
-        <CardImage item={b} src={b.image} style={{ borderRadius: 10, marginBottom: 8 }} />
-      ) : (
-        <CardImagePlaceholder label="Adicionar imagem" onClick={stop(onEdit)} />
-      ))}
+      {/* Sem imagem o card começa direto no título: nada de bloco vazio nem sobreposição */}
+      {on("image") && b.image && <CardImage item={b} src={b.image} style={{ borderRadius: 10, marginBottom: 8 }} />}
       <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{m && on("maintenance") ? `${statusEmoji(m.level)} ` : ""}{b.name}</h3>
       </div>
@@ -6833,7 +7195,10 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
         })}
       </div>
       <div className="cr-card-heading-actions" style={{ marginTop: 4 }}>
-        <CardPersonalizationButton item={b} onSave={onCustomize} hasImage />
+        {on("image") && !b.image && (
+          <button type="button" className="cr-btn ghost" aria-label="Adicionar imagem" title="Adicionar imagem" onClick={stop(onEdit)}><ImageIcon size={13} /></button>
+        )}
+        <CardPersonalizationButton item={b} onSave={onCustomize} hasImage={!!b.image} />
         <button className="cr-btn ghost danger" aria-label="Excluir procedimento" title="Excluir" onClick={stop(onRemove)}><Trash2 size={13} /></button>
       </div>
       {chips.length > 0 && <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>{chips}<CardTopicChip item={b} /></div>}
@@ -7559,33 +7924,69 @@ function purchaseClassLabel(value) {
   return PURCHASE_CLASS_OPTIONS.find((option) => option.value === value)?.label || "Não informado";
 }
 
+// Seções da Wishlist: cada uma tem lista, filtros e personalização de card próprios.
+// Os nomes ficam em settings.wishlistSections e podem ser renomeados no app.
+const DEFAULT_WISHLIST_SECTIONS = [
+  { id: "wishlist", name: "Minha Wishlist" },
+  { id: "essenciais", name: "Meus essenciais" },
+  { id: "comprinhas", name: "Comprinhas" },
+];
+
+function wishlistSections(settings) {
+  const saved = Array.isArray(settings?.wishlistSections) ? settings.wishlistSections.filter((section) => section && section.id) : [];
+  const merged = DEFAULT_WISHLIST_SECTIONS.map((def) => ({ ...def, ...(saved.find((section) => section.id === def.id) || {}) }));
+  saved.forEach((section) => { if (!merged.some((entry) => entry.id === section.id)) merged.push(section); });
+  return merged.map((section) => ({
+    ...section,
+    name: String(section.name || "").trim() || DEFAULT_WISHLIST_SECTIONS.find((def) => def.id === section.id)?.name || "Seção",
+  }));
+}
+
+// Itens antigos não têm "section": os marcados como essenciais vão para Meus essenciais, o resto para Minha Wishlist.
+function shoppingSectionOf(item, sections) {
+  const id = item.section || (item.essential ? "essenciais" : "wishlist");
+  return !sections || sections.some((section) => section.id === id) ? id : "wishlist";
+}
+
+const EMPTY_WISHLIST_FILTERS = { kind: "todos", status: "todos", category: "todas", viewAll: false };
+
 function ShoppingView({ shopping, setShopping, settings, setSettings, originTarget, clearOriginTarget }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
   const [purchasing, setPurchasing] = useState(null);
   const [editingPurchase, setEditingPurchase] = useState(null);
-  const [tab, setTab] = useState("desejo");
-  const [showEssentials, setShowEssentials] = useState(false);
-  const [filter, setFilter] = useState("todos");
-  const [filterKind, setFilterKind] = useState("todos");
-  const [filterCategory, setFilterCategory] = useState("todas");
-  const [viewAll, setViewAll] = useState(false);
+  const [tab, setTab] = useState("wishlist"); // id da seção ou "finance"
+  const [filtersBySection, setFiltersBySection] = useState({});
   const [customizingCards, setCustomizingCards] = useState(false);
-  const [financeFilters, setFinanceFilters] = useState({ query: "", category: "todas", purchaseClass: "todas", month: "", year: "", essential: false });
+  const [namingSection, setNamingSection] = useState(null); // { id?, name }
+  const [financeFilters, setFinanceFilters] = useState({ query: "", category: "todas", purchaseClass: "todas", month: "", year: "", section: "todas" });
   const wishStatuses = getList("wishStatus");
+  const sections = wishlistSections(settings);
+  const activeSection = sections.find((section) => section.id === tab) || null;
+  const sectionName = (id) => sections.find((section) => section.id === id)?.name || "Minha Wishlist";
+  const sf = { ...EMPTY_WISHLIST_FILTERS, ...(filtersBySection[tab] || {}) };
+  const setSF = (patch) => setFiltersBySection((all) => ({ ...all, [tab]: { ...EMPTY_WISHLIST_FILTERS, ...(all[tab] || {}), ...patch } }));
+  const filter = sf.status;
+  const filterKind = sf.kind;
+  const filterCategory = sf.category;
+  const viewAll = sf.viewAll;
 
   useEffect(() => {
-    if (filter !== "todos" && filter !== "recomprar" && !wishStatuses.some((status) => status.id === filter)) setFilter("todos");
+    if (!activeSection && tab !== "finance") setTab("wishlist");
+  }, [activeSection, tab]);
+
+  useEffect(() => {
+    if (filter !== "todos" && filter !== "recomprar" && !wishStatuses.some((status) => status.id === filter)
+      && !getList("productStatus").some((status) => status.id === filter)) setSF({ status: "todos" });
   }, [settings?.lists?.wishStatus, filter]);
 
   useEffect(() => {
     if (!["shopping"].includes(originTarget?.type)) return;
     const item = shopping.find((entry) => entry.id === originTarget.sourceId);
     if (item) {
-      setTab("desejo");
-      setFilterKind("todos");
-      setFilter("todos");
-      setFilterCategory("todas");
+      const sectionId = shoppingSectionOf(item, sections);
+      setTab(sectionId);
+      setFiltersBySection((all) => ({ ...all, [sectionId]: { ...EMPTY_WISHLIST_FILTERS } }));
       setEditing(item);
     }
     clearOriginTarget();
@@ -7593,8 +7994,11 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
 
   const save = (data) => {
     const markedPurchased = String(data.status || "").trim().toLowerCase() === "comprado";
+    const section = data.section || shoppingSectionOf(data, sections);
     setShopping(upsertById(shopping, {
       ...data,
+      section,
+      essential: section === "essenciais",
       archived: data.purchaseClass === "unico" && markedPurchased ? true : data.archived,
     }));
   };
@@ -7630,13 +8034,32 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     setEditingPurchase(null);
   };
 
+  // Renomear / criar seção: só o nome muda, o conteúdo da seção continua o mesmo.
+  const saveSectionName = ({ id, name }) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const current = wishlistSections(settings);
+    const next = id
+      ? current.map((section) => section.id === id ? { ...section, name: trimmed } : section)
+      : [...current, { id: `secao-${uid()}`, name: trimmed, custom: true }];
+    setSettings({ ...settings, wishlistSections: next });
+    if (!id) setTab(next[next.length - 1].id);
+    setNamingSection(null);
+  };
+  const deleteSection = (id) => {
+    setSettings({ ...settings, wishlistSections: wishlistSections(settings).filter((section) => section.id !== id) });
+    setTab("wishlist");
+    setNamingSection(null);
+  };
+
   const withKind = shopping.filter((s) => !s.archived).map((s) => {
     const kind = inferShoppingKind(s);
     const isProduct = kind === "rotina" || kind === "produto";
-    return { ...s, _kind: kind, _status: isProduct ? productStatus(s) : (s.status || "desejado") };
+    return { ...s, _kind: kind, _section: shoppingSectionOf(s, sections), _status: isProduct ? productStatus(s) : (s.status || "desejado") };
   });
+  const inSection = withKind.filter((item) => item._section === tab);
   const shouldRebuy = (item) => ["comprado", "recomprar", "quero recomprar", "acabou"].includes(item._status);
-  const inTab = withKind.filter((item) => {
+  const inTab = inSection.filter((item) => {
     if (filterKind === "desejos") return item._kind === "desejo";
     if (filterKind === "produtos") return item._kind === "produto";
     if (filterKind === "rotinas") return item._kind === "rotina";
@@ -7645,9 +8068,15 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
   });
   const filtered = inTab.filter((item) =>
     (filter === "todos" || item._status === filter)
-    && (filterCategory === "todas" || item.category === filterCategory)
-    && (!showEssentials || item.essential));
-  const categories = wishlistCategoryOptions(shopping.map((item) => item.category));
+    && (filterCategory === "todas" || item.category === filterCategory));
+  const sectionStatuses = (() => {
+    const ids = new Set(inSection.map((item) => item._status));
+    const known = [...wishStatuses, ...getList("productStatus")].filter((status, index, list) =>
+      list.findIndex((entry) => entry.id === status.id) === index);
+    const used = known.filter((status) => ids.has(status.id));
+    return used.length ? used : wishStatuses;
+  })();
+  const categories = wishlistCategoryOptions(inSection.map((item) => item.category));
   const purchaseRows = shopping.flatMap((item) => (Array.isArray(item.purchaseHistory) ? item.purchaseHistory : [])
     .map((purchase, index) => ({
       id: `${item.id}:${purchase.id || `${purchase.date}-${index}`}`,
@@ -7656,7 +8085,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
       purchaseIndex: index,
       sourcePurchase: purchase,
       itemName: item.name,
-      essential: !!item.essential,
+      section: shoppingSectionOf(item, sections),
       date: purchase.date,
       amount: Number(purchase.amount) || 0,
       category: purchase.category || item.category || "",
@@ -7672,7 +8101,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     (!financeFilters.query || `${purchase.itemName} ${purchase.description}`.toLowerCase().includes(financeFilters.query.toLowerCase()))
     && (financeFilters.category === "todas" || purchase.category === financeFilters.category)
     && (financeFilters.purchaseClass === "todas" || purchase.purchaseClass === financeFilters.purchaseClass)
-    && (!financeFilters.essential || purchase.essential)
+    && (financeFilters.section === "todas" || purchase.section === financeFilters.section)
     && (!financeFilters.month || purchase.date.slice(5, 7) === financeFilters.month)
     && (!financeFilters.year || purchase.date.slice(0, 4) === financeFilters.year))
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -7694,8 +8123,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
       index: row.purchaseIndex,
     });
   };
-  const totalDesejado = withKind.filter((s) => s._kind === "desejo" && !isClosedItem("wishStatus", s.status)).reduce((sum, s) => sum + Number(s.price || 0), 0);
-  const toRebuy = withKind.filter((s) => (s._kind === "rotina" || s._kind === "produto") && isClosedItem("productStatus", s._status)).length;
+  const totalDesejado = inSection.filter((s) => s._kind === "desejo" && !isClosedItem("wishStatus", s.status)).reduce((sum, s) => sum + Number(s.price || 0), 0);
   const originalOf = (s) => shopping.find((x) => x.id === s.id);
 
   const byCategory = () => {
@@ -7718,33 +8146,44 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
     const daysUntil = Math.ceil((Date.parse(`${due}T00:00:00Z`) - Date.parse(`${todayStr()}T00:00:00Z`)) / 86400000);
     return daysUntil <= 7;
   });
+  const renderCard = (s) => (
+    <ShoppingCard key={s.id} s={s} settings={settings} sectionId={tab} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)}
+      onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={filterKind === "recomprar"} />
+  );
 
   return (
     <div>
-      <div className="cr-row" style={{ justifyContent: "space-between" }}>
-        <div>
-          <h1 className="cr-h1 cr-serif">Wishlist</h1>
+      <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <p className="cr-label" style={{ margin: 0 }}>Wishlist</p>
+          <h1 className="cr-h1 cr-serif" style={{ overflowWrap: "break-word" }}>{activeSection ? activeSection.name : "Financeiro"}</h1>
           <p className="cr-sub">
-            {tab === "desejo" ? (showEssentials ? `${filtered.length} item(ns) marcados como essenciais.` : `${fmtBRL(totalDesejado)} em itens desejados.`) : `${purchaseRows.length} compra(s) registrada(s), somando ${fmtBRL(purchaseRows.reduce((sum, purchase) => sum + purchase.amount, 0))}.`}
+            {activeSection
+              ? `${inSection.length} item(ns)${totalDesejado > 0 ? ` · ${fmtBRL(totalDesejado)} em itens desejados` : ""}.`
+              : `${purchaseRows.length} compra(s) registrada(s), somando ${fmtBRL(purchaseRows.reduce((sum, purchase) => sum + purchase.amount, 0))}.`}
           </p>
         </div>
-        {tab !== "finance" && (
-          <div className="cr-row">
+        {activeSection && (
+          <div className="cr-row" style={{ flexWrap: "wrap" }}>
             <button className="cr-btn" onClick={() => setCustomizingCards(true)}><Palette size={13} /> Personalizar cards</button>
             <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
           </div>
         )}
       </div>
 
-      <div className="cr-tabbar" style={{ marginTop: 14 }}>
-        <button className={`cr-tabbtn ${tab === "desejo" && !showEssentials ? "active" : ""}`}
-          onClick={() => { setTab("desejo"); setShowEssentials(false); setFilter("todos"); setFilterCategory("todas"); }}>Minha Wishlist</button>
-        <button className={`cr-tabbtn ${tab === "desejo" && showEssentials ? "active" : ""}`}
-          onClick={() => { setTab("desejo"); setShowEssentials(true); setFilterKind("todos"); setFilter("todos"); setFilterCategory("todas"); }}>Meus essenciais</button>
+      <div className="cr-tabbar cr-section-tabs" style={{ marginTop: 14 }}>
+        {sections.map((section) => (
+          <span key={section.id} className={`cr-section-tab ${tab === section.id ? "active" : ""}`}>
+            <button type="button" className="cr-section-tab-main" onClick={() => setTab(section.id)} aria-pressed={tab === section.id}>{section.name}</button>
+            <button type="button" className="cr-section-tab-edit" aria-label={`Renomear ${section.name}`} title="Renomear"
+              onClick={() => setNamingSection({ id: section.id, name: section.name, custom: !!section.custom })}><Pencil size={12} /></button>
+          </span>
+        ))}
+        <button type="button" className="cr-tabbtn" title="Criar nova seção" onClick={() => setNamingSection({ name: "" })}><Plus size={12} /> Nova seção</button>
         <button className={`cr-tabbtn ${tab === "finance" ? "active" : ""}`} onClick={() => setTab("finance")}>Financeiro</button>
       </div>
 
-      {tab !== "finance" && restockDue.length > 0 && (
+      {activeSection && restockDue.length > 0 && (
         <div className="cr-card" role="status" style={{ marginTop: 14, borderColor: "#E3B5AB", color: "#7A1712" }}>
           <strong>Seu produto deve estar acabando! Está na hora de recomprar. Como estão os seus gastos?</strong>
           <p className="cr-sub" style={{ marginBottom: 0 }}>{restockDue.map((item) => item.name).join(" · ")}</p>
@@ -7762,6 +8201,11 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
               <input className="cr-input" aria-label="Buscar compras" value={financeFilters.query}
                 onChange={(event) => setFinanceFilters({ ...financeFilters, query: event.target.value })}
                 placeholder="Buscar produto ou observação" style={{ flex: "1 1 200px" }} />
+              <select className="cr-select" aria-label="Filtrar compras por seção" value={financeFilters.section}
+                onChange={(event) => setFinanceFilters({ ...financeFilters, section: event.target.value })}>
+                <option value="todas">Todas as seções</option>
+                {sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
+              </select>
               <select className="cr-select" aria-label="Filtrar compras por categoria" value={financeFilters.category}
                 onChange={(event) => setFinanceFilters({ ...financeFilters, category: event.target.value })}>
                 <option value="todas">Todas as categorias</option>
@@ -7771,11 +8215,6 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
                 onChange={(event) => setFinanceFilters({ ...financeFilters, purchaseClass: event.target.value })}>
                 <option value="todas">Todas as classes</option>
                 {PURCHASE_CLASS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-              <select className="cr-select" aria-label="Filtrar compras por essenciais" value={financeFilters.essential ? "essentials" : "all"}
-                onChange={(event) => setFinanceFilters({ ...financeFilters, essential: event.target.value === "essentials" })}>
-                <option value="all">Todos os itens</option>
-                <option value="essentials">Meus essenciais</option>
               </select>
               <select className="cr-select" aria-label="Filtrar compras por mês" value={financeFilters.month}
                 onChange={(event) => setFinanceFilters({ ...financeFilters, month: event.target.value })}>
@@ -7809,6 +8248,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
                 <div className="cr-list-row" key={purchase.id}>
                   <span className="cr-chip">{fmtDateShort(purchase.date)}</span>
                   <span className="cr-list-title" style={{ flex: 1 }}>{purchase.itemName}{purchase.description ? ` · ${purchase.description}` : ""}</span>
+                  <span className="cr-chip">{sectionName(purchase.section)}</span>
                   <span className="cr-chip">{purchase.category || "Sem categoria"}</span>
                   <span className="cr-chip">{purchaseClassLabel(purchase.purchaseClass)}</span>
                   <strong>{fmtBRL(purchase.amount)}</strong>
@@ -7821,49 +8261,53 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
       ) : (
       <>
       <div className="cr-row" style={{ margin: "14px 0", flexWrap: "wrap" }}>
-        <select className="cr-select" aria-label="Filtrar por tipo" style={{ maxWidth: 190 }} value={filterKind} onChange={(e) => setFilterKind(e.target.value)}>
-          <option value="todos">Todos</option>
+        <select className="cr-select" aria-label={`Filtrar ${activeSection?.name || ""} por tipo`} style={{ maxWidth: 190 }} value={filterKind} onChange={(e) => setSF({ kind: e.target.value })}>
+          <option value="todos">Todos os tipos</option>
           <option value="desejos">Desejos</option>
           <option value="produtos">Produtos</option>
           <option value="rotinas">Rotinas</option>
           <option value="recomprar">Recomprar</option>
         </select>
-        <select className="cr-select" aria-label="Filtrar por status" style={{ maxWidth: 190 }} value={filter} onChange={(e) => setFilter(e.target.value)}>
+        <select className="cr-select" aria-label={`Filtrar ${activeSection?.name || ""} por status`} style={{ maxWidth: 190 }} value={filter} onChange={(e) => setSF({ status: e.target.value })}>
           <option value="todos">Todos os status</option>
-          {wishStatuses.map((status) => <option key={status.id} value={status.id}>{status.name}</option>)}
+          {sectionStatuses.map((status) => <option key={status.id} value={status.id}>{status.name}</option>)}
         </select>
-        <select className="cr-select" style={{ maxWidth: 200 }} value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+        <select className="cr-select" aria-label={`Filtrar ${activeSection?.name || ""} por categoria`} style={{ maxWidth: 200 }} value={filterCategory} onChange={(e) => setSF({ category: e.target.value })}>
           <option value="todas">Todas as categorias</option>
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         <button className="cr-btn" title="Gerenciar opções (criar, renomear, excluir, reordenar)" onClick={() => ctx.openManager("wishCategory")}><SettingsIcon size={13} /> Gerenciar categorias</button>
         <button className="cr-btn" title="Adicionar, renomear, excluir e reordenar status" onClick={() => ctx.openManager("wishStatus")}><SettingsIcon size={13} /> Gerenciar status</button>
-        <button className="cr-btn ghost" onClick={() => setViewAll(!viewAll)}>{viewAll ? "Ver por categoria" : "Visualizar todos"}</button>
+        <button className="cr-btn ghost" onClick={() => setSF({ viewAll: !viewAll })}>{viewAll ? "Ver por categoria" : "Visualizar todos"}</button>
       </div>
 
-      {filtered.length === 0 && <p className="cr-empty">Nenhum item encontrado.</p>}
+      {inSection.length === 0 && <p className="cr-empty">Nenhum item em {activeSection?.name} ainda. Use “Novo item” para adicionar.</p>}
+      {inSection.length > 0 && filtered.length === 0 && <p className="cr-empty">Nenhum item encontrado com esses filtros.</p>}
 
       {viewAll || filterCategory !== "todas" ? (
-        <div className="cr-grid cr-grid-3">
-          {filtered.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={filterKind === "recomprar"} />)}
-        </div>
+        <div className="cr-grid cr-grid-3">{filtered.map(renderCard)}</div>
       ) : (
         byCategory().map(([cat, items]) => (
           <div key={cat} style={{ marginBottom: 22 }}>
             <SectionTitle title={cat} count={`${items.length} ${items.length === 1 ? "item" : "itens"}`} />
-            <div className="cr-grid cr-grid-3">
-              {items.map((s) => <ShoppingCard key={s.id} s={s} settings={settings} onEdit={() => setEditing(originalOf(s))} onRemove={() => remove(s.id)} onPurchase={() => setPurchasing(originalOf(s))} onCustomize={(patch) => save({ ...originalOf(s), ...patch })} forcePurchase={filterKind === "recomprar"} />)}
-            </div>
+            <div className="cr-grid cr-grid-3">{items.map(renderCard)}</div>
           </div>
         ))
       )}
       </>
       )}
 
-      {editing && <ShoppingModal item={editing === "new" ? null : editing} defaultEssential={editing === "new" && showEssentials}
+      {editing && <ShoppingModal item={editing === "new" ? null : editing} sections={sections}
+        defaultSection={activeSection?.id || "wishlist"}
         defaultKind={filterKind === "produtos" ? "produto" : filterKind === "rotinas" || filterKind === "recomprar" ? "rotina" : "desejo"}
         onSave={save} onClose={() => setEditing(null)} />}
-      {customizingCards && <WishlistCardFieldsModal settings={settings || {}} setSettings={setSettings} onClose={() => setCustomizingCards(false)} />}
+      {customizingCards && activeSection && <WishlistCardFieldsModal settings={settings || {}} setSettings={setSettings}
+        sectionId={activeSection.id} sectionName={activeSection.name} onClose={() => setCustomizingCards(false)} />}
+      {namingSection && (
+        <SectionNameModal section={namingSection} itemCount={namingSection.id ? withKind.filter((item) => item._section === namingSection.id).length : 0}
+          onSave={saveSectionName} onDelete={namingSection.custom ? () => deleteSection(namingSection.id) : null}
+          onClose={() => setNamingSection(null)} />
+      )}
       {purchasing && <SourceExpenseModal item={purchasing} title={`Confirmar compra: ${purchasing.name}`} amount={purchasing.price}
         allowNoAmount categoryOptions={purchaseCategories}
         onSave={(entry) => registerPurchase(purchasing, entry)} onClose={() => setPurchasing(null)} />}
@@ -7872,6 +8316,32 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
         title={`Editar gasto: ${editingPurchase.item.name}`}
         onSave={(entry) => updatePurchase(editingPurchase.item, entry, editingPurchase.index)} onClose={() => setEditingPurchase(null)} />}
     </div>
+  );
+}
+
+function SectionNameModal({ section, itemCount, onSave, onDelete, onClose }) {
+  const [name, setName] = useState(section.name || "");
+  const isNew = !section.id;
+  return (
+    <Modal size="small" title={isNew ? "Nova seção" : "Renomear seção"} onClose={onClose}>
+      <div className="cr-field">
+        <label className="cr-label" htmlFor="wishlist-section-name">Nome da seção</label>
+        <input id="wishlist-section-name" className="cr-input" autoFocus value={name} maxLength={40}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter") onSave({ id: section.id, name }); }} />
+      </div>
+      {!isNew && <p className="cr-sub" style={{ marginTop: 0 }}>Só o nome muda: os {itemCount} item(ns) desta seção continuam nela.</p>}
+      <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+        {onDelete
+          ? <button type="button" className="cr-btn ghost danger" disabled={itemCount > 0}
+            title={itemCount > 0 ? "Mova ou exclua os itens antes de excluir a seção" : "Excluir seção"} onClick={onDelete}><Trash2 size={13} /> Excluir seção</button>
+          : <span />}
+        <div className="cr-row">
+          <button type="button" className="cr-btn" onClick={onClose}>Cancelar</button>
+          <button type="button" className="cr-btn primary" disabled={!name.trim()} onClick={() => onSave({ id: section.id, name })}>{isNew ? "Criar" : "Salvar nome"}</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -7889,25 +8359,31 @@ const WISHLIST_CARD_FIELDS = [
   { key: "actions", label: "Botão de confirmar compra/recompra", def: true },
 ];
 
-function wishlistCardFieldOn(settings, key) {
-  const value = (settings.wishlistCardFields || {})[key];
-  if (value !== undefined) return value;
+// Personalização por seção (settings.wishlistCardFieldsBySection[sectionId]).
+// Enquanto a seção não tiver configuração própria, vale a configuração antiga (compartilhada).
+function wishlistCardFieldOn(settings, key, sectionId) {
+  const own = sectionId ? (settings.wishlistCardFieldsBySection || {})[sectionId]?.[key] : undefined;
+  if (own !== undefined) return own;
+  const legacy = (settings.wishlistCardFields || {})[key];
+  if (legacy !== undefined) return legacy;
   return WISHLIST_CARD_FIELDS.find((field) => field.key === key)?.def ?? true;
 }
 
-function WishlistCardFieldsModal({ settings, setSettings, onClose }) {
-  const toggle = (key) => setSettings({
+function WishlistCardFieldsModal({ settings, setSettings, sectionId, sectionName, onClose }) {
+  const setSectionFields = (fields) => setSettings({
     ...settings,
-    wishlistCardFields: { ...(settings.wishlistCardFields || {}), [key]: !wishlistCardFieldOn(settings, key) },
+    wishlistCardFieldsBySection: { ...(settings.wishlistCardFieldsBySection || {}), [sectionId]: fields },
   });
-  const restore = () => setSettings({ ...settings, wishlistCardFields: {} });
-  const showAll = () => setSettings({ ...settings, wishlistCardFields: Object.fromEntries(WISHLIST_CARD_FIELDS.map((field) => [field.key, true])) });
+  const current = () => Object.fromEntries(WISHLIST_CARD_FIELDS.map((field) => [field.key, wishlistCardFieldOn(settings, field.key, sectionId)]));
+  const toggle = (key) => setSectionFields({ ...current(), [key]: !wishlistCardFieldOn(settings, key, sectionId) });
+  const restore = () => setSectionFields(Object.fromEntries(WISHLIST_CARD_FIELDS.map((field) => [field.key, field.def])));
+  const showAll = () => setSectionFields(Object.fromEntries(WISHLIST_CARD_FIELDS.map((field) => [field.key, true])));
   return (
-    <Modal size="small" title="Personalizar cards da Wishlist" onClose={onClose}>
-      <p className="cr-sub" style={{ marginTop: 0 }}>Escolha o que será exibido em todos os cards da Wishlist.</p>
+    <Modal size="small" title={`Personalizar cards · ${sectionName}`} onClose={onClose}>
+      <p className="cr-sub" style={{ marginTop: 0 }}>Escolha o que aparece nos cards de <strong>{sectionName}</strong>. As outras seções não mudam.</p>
       {WISHLIST_CARD_FIELDS.map((field) => (
         <label key={field.key} className="cr-row" style={{ cursor: "pointer", marginBottom: 6, flexWrap: "nowrap" }}>
-          <input type="checkbox" checked={wishlistCardFieldOn(settings, field.key)} onChange={() => toggle(field.key)} />
+          <input type="checkbox" checked={wishlistCardFieldOn(settings, field.key, sectionId)} onChange={() => toggle(field.key)} />
           <span style={{ fontSize: 14 }}>{field.label}</span>
         </label>
       ))}
@@ -7922,10 +8398,10 @@ function WishlistCardFieldsModal({ settings, setSettings, onClose }) {
   );
 }
 
-function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onCustomize, forcePurchase }) {
+function ShoppingCard({ s, settings, sectionId, onEdit, onRemove, onPurchase, onCustomize, forcePurchase }) {
   const isRoutine = s._kind === "rotina" || s._kind === "produto";
   const st = s._status || s.status;
-  const show = (key) => wishlistCardFieldOn(settings || {}, key);
+  const show = (key) => wishlistCardFieldOn(settings || {}, key, sectionId);
   return (
     <div className={`cr-card ${personalizedCardClass(s)}`} style={personalizedCardStyle(s)}>
       {show("image") && (s.image
@@ -7941,8 +8417,7 @@ function ShoppingCard({ s, settings, onEdit, onRemove, onPurchase, onCustomize, 
       </div>
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
         {show("category") && s.category && <span className="cr-chip">{s.category}</span>}
-          {s.essential && <span className="cr-chip"><Star size={12} fill="currentColor" /> Essencial</span>}
-          {show("priority") && <PriorityChip id={s.priority} />}
+        {show("priority") && <PriorityChip id={s.priority} />}
         {show("topic") && <CardTopicChip item={s} />}
       </div>
       {show("notes") && <CardExtraText item={s} />}
@@ -8002,12 +8477,13 @@ function SourceExpenseModal({ item, title, amount, onSave, onClose, allowNoAmoun
   );
 }
 
-function ShoppingModal({ item, defaultKind, defaultEssential = false, onSave, onClose }) {
+function ShoppingModal({ item, defaultKind, defaultSection = "wishlist", sections = DEFAULT_WISHLIST_SECTIONS, onSave, onClose }) {
   const [form, setForm] = useState(item
-    ? { ...item, kind: inferShoppingKind(item), purchaseClass: item.purchaseClass || (item.purchaseFrequency === "pontual" ? "unico" : "periodico"), status: inferShoppingKind(item) === "rotina" || inferShoppingKind(item) === "produto" ? productStatus(item) : item.status }
-    : { name: "", category: "", store: "", price: "", priority: "media", link: "", image: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" || defaultKind === "produto" ? "ainda tem" : "desejado"), essential: defaultEssential, desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
+    ? { ...item, section: shoppingSectionOf(item, sections), kind: inferShoppingKind(item), purchaseClass: item.purchaseClass || (item.purchaseFrequency === "pontual" ? "unico" : "periodico"), status: inferShoppingKind(item) === "rotina" || inferShoppingKind(item) === "produto" ? productStatus(item) : item.status }
+    : { name: "", section: defaultSection, category: "", store: "", price: "", priority: "media", link: "", image: "", kind: defaultKind || "desejo", purchaseClass: "periodico", status: (defaultKind === "rotina" || defaultKind === "produto" ? "ainda tem" : "desejado"), desiredDate: "", purchaseFrequency: "pontual", productDurationDays: "", nextPurchaseDate: "", notes: "" });
   const autoStatus = useAutoSave(form, onSave, (form) => ({
     ...form,
+    essential: form.section === "essenciais",
     price: Number(form.price) || 0,
     productDurationDays: Number(form.productDurationDays) || 0,
   }));
@@ -8015,6 +8491,10 @@ function ShoppingModal({ item, defaultKind, defaultEssential = false, onSave, on
   const changeKind = (k) => setForm({ ...form, kind: k, status: k === "rotina" || k === "produto" ? "ainda tem" : "desejado" });
   return (
     <Modal title={item ? "Editar item" : "Novo item"} onClose={onClose}>
+      <div className="cr-field"><label className="cr-label">Seção</label>
+        <select className="cr-select" value={form.section} onChange={(e) => setForm({ ...form, section: e.target.value })}>
+          {sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}
+        </select></div>
       <div className="cr-field"><label className="cr-label">Tipo</label>
         <select className="cr-select" value={form.kind} onChange={(e) => changeKind(e.target.value)}>
           <option value="desejo">Desejo (quero comprar)</option>
@@ -8047,10 +8527,6 @@ function ShoppingModal({ item, defaultKind, defaultEssential = false, onSave, on
         <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
       <div className="cr-field"><label className="cr-label">Status</label>
         <ManagedSelect listKey={isRoutine ? "productStatus" : "wishStatus"} value={form.status} onChange={(v) => setForm({ ...form, status: v })} /></div>
-      <label className="cr-row" style={{ cursor: "pointer", marginBottom: 12, justifyContent: "flex-start" }}>
-        <input type="checkbox" checked={!!form.essential} onChange={(event) => setForm({ ...form, essential: event.target.checked })} />
-        <span className="cr-label" style={{ margin: 0 }}>Marcar como essencial</span>
-      </label>
       <div className="cr-field"><label className="cr-label">{isRoutine ? "Frequência de reposição" : "Frequência de compra"}</label>
         <select className="cr-select" value={form.purchaseFrequency || "pontual"}
           onChange={(event) => setForm({ ...form, purchaseFrequency: event.target.value })}>
