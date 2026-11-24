@@ -122,3 +122,28 @@ describe("summarizeFinanceMonth", () => {
     expect(summary).toMatchObject({ reserved: 600, reservedRemaining: 400, transferPaid: 200, available: 400 });
   });
 });
+
+describe("summarizeFinanceMonth lists", () => {
+  it("as listas de detalhe somam exatamente os valores dos blocos", () => {
+    const sum = (list) => list.reduce((t, tx) => t + Number(tx.amount), 0);
+    const summary = summarizeFinanceMonth([
+      { date: "2026-10-01", type: "entrada", amount: 3000, status: "pago" },
+      { date: "2026-10-03", type: "saida", amount: 1200, status: "pago", expenseClass: "fixed" },
+      { date: "2026-10-04", type: "saida", amount: 80.5, status: "pago", expenseClass: "variable" },
+      { date: "2026-10-10", type: "saida", amount: 200, status: "agendado", expenseClass: "fixed" },
+      { date: "2026-10-11", type: "saida", amount: 150.13, status: "agendado", paymentMethod: "Crédito", cardId: "c1" },
+      { date: "2026-10-12", type: "saida", amount: 70, status: "pendente", expenseClass: "variable" },
+      { date: "2026-10-13", type: "saida", amount: 300, status: "pago", expenseClass: "reserve", category: "Reserva" },
+      { date: "2026-10-14", type: "saida", amount: 50.5, status: "projetado", sourceKind: "previsao" },
+    ], { allocations: [{ category: "Reserva", mode: "fixed", amount: 500, protected: true }] }, "2026-10");
+    const p = summary.lists.projectedSpending;
+    expect(sum(p.paid) + sum(p.card) + sum(p.fixed) + sum(p.pending) + sum(p.estimated)).toBeCloseTo(summary.projectedSpending, 10);
+    expect(sum(p.card)).toBeCloseTo(150.13);
+    expect(sum(p.fixed)).toBe(200);
+    expect(sum(p.pending)).toBe(70);
+    expect(sum(summary.lists.variableCommitments)).toBeCloseTo(summary.variableCommitments, 10);
+    expect(sum(summary.lists.protectedLines)).toBe(summary.reservedRemaining);
+    expect(summary.reservedRemaining).toBe(200);
+    expect(summary.receivedIncome - summary.spent - summary.commitments - summary.transferPaid - summary.reservedRemaining).toBeCloseTo(summary.available, 10);
+  });
+});

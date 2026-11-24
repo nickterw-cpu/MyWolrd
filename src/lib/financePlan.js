@@ -27,41 +27,41 @@ export function allocationValue(allocation, receivedIncome) {
   return allocation.mode === "percent" ? receivedIncome * amount / 100 : amount;
 }
 
+const sumOf = (list) => list.reduce((total, tx) => total + amountOf(tx.amount), 0);
+
 export function summarizeFinanceMonth(transactions, plan, month) {
+  // Cada número sai da soma de uma lista: as mesmas listas alimentam o detalhe dos blocos.
   const monthTransactions = transactions.filter((tx) =>
     typeof tx.date === "string"
     && tx.date.slice(0, 7) === month
     && tx.status !== "cancelado");
-  const receivedIncome = monthTransactions
-    .filter((tx) => tx.type === "entrada" && (!tx.status || tx.status === "pago"))
-    .reduce((total, tx) => total + amountOf(tx.amount), 0);
-  const expenses = monthTransactions.filter((tx) => tx.type === "saida");
-  const consumptionExpenses = expenses.filter((tx) => !isTransfer(tx));
   const paid = (tx) => !tx.status || tx.status === "pago";
   const pending = (tx) => tx.status && tx.status !== "pago" && tx.status !== "cancelado";
   const projected = (tx) => tx.sourceKind === "previsao";
+  const incomeList = monthTransactions.filter((tx) => tx.type === "entrada" && paid(tx));
+  const receivedIncome = sumOf(incomeList);
+  const expenses = monthTransactions.filter((tx) => tx.type === "saida");
+  const consumptionExpenses = expenses.filter((tx) => !isTransfer(tx));
   const plannedExpenses = expenses.filter(projected);
-  const spent = consumptionExpenses
-    .filter(paid)
-    .reduce((total, tx) => total + amountOf(tx.amount), 0);
-  const commitments = expenses
-    .filter((tx) => pending(tx) && !projected(tx))
-    .reduce((total, tx) => total + amountOf(tx.amount), 0);
-  const fixedSpent = consumptionExpenses
-    .filter((tx) => paid(tx) && tx.expenseClass === "fixed")
-    .reduce((total, tx) => total + amountOf(tx.amount), 0);
-  const fixedCommitments = consumptionExpenses
-    .filter((tx) => pending(tx) && tx.expenseClass === "fixed")
-    .reduce((total, tx) => total + amountOf(tx.amount), 0);
+  const spentList = consumptionExpenses.filter(paid);
+  const spent = sumOf(spentList);
+  const commitmentList = expenses.filter((tx) => pending(tx) && !projected(tx));
+  const commitments = sumOf(commitmentList);
+  const fixedSpentList = spentList.filter((tx) => tx.expenseClass === "fixed");
+  const fixedSpent = sumOf(fixedSpentList);
+  const variableSpentList = spentList.filter((tx) => tx.expenseClass !== "fixed");
+  const fixedCommitmentList = consumptionExpenses.filter((tx) => pending(tx) && tx.expenseClass === "fixed");
+  const fixedCommitments = sumOf(fixedCommitmentList);
   const transfers = expenses.filter(isTransfer);
-  const transferPaid = transfers
-    .filter(paid)
-    .reduce((total, tx) => total + amountOf(tx.amount), 0);
-  const transferCommitments = transfers
-    .filter((tx) => pending(tx) && !projected(tx))
-    .reduce((total, tx) => total + amountOf(tx.amount), 0);
-  const variableSpent = spent - fixedSpent;
-  const variableCommitments = commitments - fixedCommitments - transferCommitments;
+  const transferPaidList = transfers.filter(paid);
+  const transferPaid = sumOf(transferPaidList);
+  const transferCommitmentList = transfers.filter((tx) => pending(tx) && !projected(tx));
+  const transferCommitments = sumOf(transferCommitmentList);
+  const variableSpent = sumOf(variableSpentList);
+  const variableCommitmentList = commitmentList.filter((tx) => !isTransfer(tx) && tx.expenseClass !== "fixed");
+  const variableCommitments = sumOf(variableCommitmentList);
+  const consumptionCommitmentList = commitmentList.filter((tx) => !isTransfer(tx));
+  const estimatedPurchases = sumOf(plannedExpenses);
   const allocations = Array.isArray(plan?.allocations) ? plan.allocations : [];
   const allocationTotal = allocations.reduce((total, allocation) =>
     total + allocationValue(allocation, receivedIncome), 0);
@@ -99,11 +99,49 @@ export function summarizeFinanceMonth(transactions, plan, month) {
     };
   });
 
+  // Previsão de gastos: já pago + pendentes de consumo (cartão, fixas/recorrentes e outras) + estimativas.
+  const isCard = (tx) => tx.paymentMethod === "Crédito" || !!tx.cardId;
+  const isFixedOrRecurring = (tx) => tx.expenseClass === "fixed" || tx.expenseClass === "recurring" || !!tx.recurringId;
+  const protectedLines = [];
+  {
+    const targets = new Map();
+    allocations.filter((allocation) => allocation.protected === true).forEach((allocation) => {
+      const category = allocation.category || "";
+      targets.set(category, (targets.get(category) || 0) + allocationValue(allocation, receivedIncome));
+    });
+    targets.forEach((target, category) => {
+      const done = sumOf(transfers.filter((tx) => tx.status !== "cancelado" && (tx.category || "") === category));
+      const remaining = Math.max(0, target - done);
+      if (remaining > 0) protectedLines.push({ label: `${category || "Sem categoria"}: meta ${target.toFixed(2)} − transferido ${done.toFixed(2)}`, amount: remaining, category, target, done });
+    });
+  }
+  const lists = {
+    income: incomeList,
+    spent: spentList,
+    commitments: commitmentList,
+    fixedSpent: fixedSpentList,
+    variableSpent: variableSpentList,
+    fixedCommitments: fixedCommitmentList,
+    variableCommitments: variableCommitmentList,
+    transferPaid: transferPaidList,
+    transferCommitments: transferCommitmentList,
+    estimated: plannedExpenses,
+    projectedSpending: {
+      paid: spentList,
+      card: consumptionCommitmentList.filter(isCard),
+      fixed: consumptionCommitmentList.filter((tx) => !isCard(tx) && isFixedOrRecurring(tx)),
+      pending: consumptionCommitmentList.filter((tx) => !isCard(tx) && !isFixedOrRecurring(tx)),
+      estimated: plannedExpenses,
+    },
+    protectedLines,
+  };
+
   return {
+    lists,
     receivedIncome,
     spent,
     commitments,
-    estimatedPurchases: plannedExpenses.reduce((total, tx) => total + amountOf(tx.amount), 0),
+    estimatedPurchases,
     fixedSpent,
     fixedCommitments,
     variableSpent,
@@ -115,7 +153,7 @@ export function summarizeFinanceMonth(transactions, plan, month) {
     allocationTotal,
     unallocated: receivedIncome - allocationTotal,
     available: receivedIncome - spent - commitments - transferPaid - reservedRemaining,
-    projectedSpending: spent + commitments - transferCommitments + plannedExpenses.reduce((total, tx) => total + amountOf(tx.amount), 0),
+    projectedSpending: spent + sumOf(consumptionCommitmentList) + estimatedPurchases,
     byCategory,
   };
 }

@@ -7,6 +7,7 @@ import {
   financeLinkKey, groupEntries, isProcedureExpense, linkedCardFor, planInstallments, shiftMonth as shiftMonthStr,
   syncCardFromFinance, syncFinanceFromCard,
 } from "./src/lib/procedureLink.js";
+import { cleanSelfCareTitle, syncSelfCareSessions } from "./src/lib/selfCareSync.js";
 import { countInWeek, normalizeTarget, numericGoalProgress, shiftDays, weekStartOf, weeklyMessage, weeklyStreak } from "./src/lib/workoutWeek.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, summarizeFinanceMonth } from "./src/lib/financePlan.js";
@@ -1456,6 +1457,10 @@ const GlobalStyle = () => (
     .cr-installment-preview ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
     .cr-installment-preview li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; padding: 4px 6px; border-radius: 8px; }
     .cr-installment-preview li.is-current { background: #F7E9E4; }
+    .cr-gcal-badge { display: inline-flex; vertical-align: 0; margin-left: 6px; color: #3F6C9E; }
+    .cr-gcal-sessions { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #F4F7FB; }
+    .cr-gcal-session { display: grid; gap: 1px; padding: 4px 0; font-size: 13px; }
+    .cr-gcal-session span { color: var(--ink-soft); font-size: 12px; overflow-wrap: anywhere; }
     .cr-finance-link-badge { display: inline-flex; vertical-align: 1px; margin-left: 6px; color: var(--ink-soft); }
     .cr-proc-alerts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; margin: 14px 0 4px; }
     .cr-proc-alerts.is-empty { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 14px; border: 1px dashed var(--line); border-radius: 12px; }
@@ -1477,6 +1482,39 @@ const GlobalStyle = () => (
     .central-root .cr-proc-alert-action { padding: 4px 10px; font-size: 12.5px; min-height: 34px; }
     .cr-proc-alerts-warn { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
     .central-root .cr-proc-alerts-warn input { width: 64px; padding: 4px 8px; min-height: 32px; font-size: 14px; }
+    .cr-summary-block {
+      position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 0; width: 100%; min-width: 0;
+      text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    .cr-summary-block .cr-label { padding-right: 18px; }
+    .cr-summary-value { font-size: 20px; margin: 4px 0 0; overflow-wrap: anywhere; }
+    .cr-summary-value.is-compact { font-size: 15px; font-weight: 700; }
+    .cr-summary-block.is-compact { padding: 10px 12px; }
+    .cr-summary-arrow { position: absolute; top: 12px; right: 10px; color: var(--ink-soft); opacity: 0.6; transition: opacity 0.15s, transform 0.15s; }
+    .cr-summary-block:hover, .cr-summary-block:focus-visible { border-color: var(--ink-soft); box-shadow: 0 4px 14px rgb(33 29 26 / 8%); outline: none; }
+    .cr-summary-block:hover .cr-summary-arrow, .cr-summary-block:focus-visible .cr-summary-arrow { opacity: 1; transform: translateX(2px); }
+    .cr-summary-inline { width: 100%; font: inherit; color: inherit; cursor: pointer; border: 0; background: transparent; text-align: left; border-radius: 10px; }
+    .cr-summary-inline:hover, .cr-summary-inline:focus-visible { background: #F6F1EA; outline: none; }
+    .cr-summary-arrow-inline { vertical-align: -1px; color: var(--ink-soft); }
+    .cr-detail { display: grid; gap: 4px; }
+    .cr-detail-group { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--line); }
+    .cr-detail-group:first-of-type { border-top: 0; }
+    .cr-detail-group-head { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; padding: 2px 0 4px; }
+    .cr-detail-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-width: 0; padding: 8px 10px;
+      border: 0; border-radius: 8px; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer;
+    }
+    .cr-detail-row:hover, .cr-detail-row:focus-visible { background: #F6F1EA; outline: none; }
+    .cr-detail-row.is-info { cursor: default; }
+    .cr-detail-row.is-info:hover { background: transparent; }
+    .cr-detail-desc { display: grid; gap: 2px; min-width: 0; }
+    .cr-detail-desc strong { font-size: 13.5px; overflow-wrap: anywhere; }
+    .cr-detail-desc span { font-size: 12px; color: var(--ink-soft); overflow-wrap: anywhere; }
+    .cr-detail-amount { font-weight: 700; font-size: 13.5px; white-space: nowrap; }
+    .cr-detail-total { display: flex; justify-content: space-between; gap: 10px; padding: 10px; margin-top: 4px; border-radius: 10px; background: #F7E9E4; font-size: 14px; }
+    .cr-catchart-legend-btn { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px; border: 0; border-radius: 6px; background: transparent; font: inherit; color: inherit; cursor: pointer; min-width: 0; }
+    .central-root .cr-catchart-legend-btn { min-height: 32px; }
+    .cr-catchart-legend-btn:hover, .cr-catchart-legend-btn:focus-visible { background: #F6F1EA; outline: none; }
     /* Treino semanal */
     .cr-training { display: grid; gap: 16px; margin-top: 14px; min-width: 0; }
     .cr-training-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; align-items: start; min-width: 0; }
@@ -1861,7 +1899,7 @@ function piePath(cx, cy, r, inner, start, end) {
 
 // Gráfico "Gastos por categoria": o mesmo componente no Dashboard e em Finanças.
 // A visualização escolhida fica salva em settings.categoryChartType (vale para os dois lugares).
-function CategoryExpenseChart({ data, settings, setSettings, size = 220 }) {
+function CategoryExpenseChart({ data, settings, setSettings, size = 220, onCategoryClick }) {
   const [hover, setHover] = useState(null);
   const [tip, setTip] = useState(null); // { i, x, y } em px relativos à área do gráfico
   const areaRef = useRef(null);
@@ -2005,8 +2043,18 @@ function CategoryExpenseChart({ data, settings, setSettings, size = 220 }) {
           {items.map((entry, i) => (
             <li key={entry.label} style={{ opacity: hover === null || hover === i ? 1 : 0.5 }}
               onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
-              <span className="cr-catchart-dot" style={{ background: entry.color }} />
-              <span className="cr-catchart-name">{entry.label}</span>
+              {onCategoryClick ? (
+                <button type="button" className="cr-catchart-legend-btn" title={`Ver os lançamentos de ${entry.label}`} onClick={() => onCategoryClick(entry.label)}>
+                  <span className="cr-catchart-dot" style={{ background: entry.color }} />
+                  <span className="cr-catchart-name">{entry.label}</span>
+                  <ChevronRight size={12} aria-hidden="true" />
+                </button>
+              ) : (
+                <>
+                  <span className="cr-catchart-dot" style={{ background: entry.color }} />
+                  <span className="cr-catchart-name">{entry.label}</span>
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -2032,7 +2080,8 @@ function useToday() {
   return today;
 }
 
-function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev, gcal, setGcal, setTasks, setHabits, setSettings, goTo }) {
+function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev, gcal, setGcal, setTasks, setHabits, setSettings, goTo, onOrigin, accounts, cards }) {
+  const [financeDetail, setFinanceDetail] = useState(null);
   const today = todayStr();
   const now = new Date();
   const hour = now.getHours();
@@ -2217,7 +2266,10 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
             </div>
             {catData.length === 0
               ? <p className="cr-empty">Nenhum gasto registrado este mês ainda.</p>
-              : <CategoryExpenseChart data={catData} settings={settings} setSettings={setSettings} />}
+              : <CategoryExpenseChart data={catData} settings={settings} setSettings={setSettings}
+                onCategoryClick={(label) => setFinanceDetail(categoryDetail(finance, todayStr().slice(0, 7), label))} />}
+            {financeDetail && <FinanceDetailModal detail={financeDetail} accounts={accounts} cards={cards} onClose={() => setFinanceDetail(null)}
+              onOpenEntry={(tx) => { setFinanceDetail(null); if (onOrigin) onOrigin(tx.sourceRef || { type: "financeEdit", sourceId: tx.id }); }} />}
           </div>
         );
       }
@@ -2969,14 +3021,25 @@ const EXPENSE_CLASS_LABEL = {
   investment: "Investimento",
 };
 
-function expenseCategoryData(finance, month) {
-  const monthTx = finance.filter((f) => f.date?.slice(0, 7) === month && f.status !== "cancelado");
-  const catMap = {};
-  monthTx.filter((f) =>
-    f.type === "saida"
+// Mesma regra para o gráfico e para a lista de lançamentos de cada categoria.
+function categoryExpenseEntries(finance, month) {
+  return finance.filter((f) => f.date?.slice(0, 7) === month && f.status !== "cancelado"
+    && f.type === "saida"
     && (!f.status || f.status === "pago")
-    && !["reserve", "investment"].includes(f.expenseClass)
-  ).forEach((f) => {
+    && !["reserve", "investment"].includes(f.expenseClass));
+}
+
+function categoryDetail(finance, month, label) {
+  return {
+    title: `${label} · ${monthLabel(month)}`,
+    note: "Saídas pagas desta categoria no mês (as mesmas do gráfico).",
+    groups: [{ label: "", sign: 1, items: categoryExpenseEntries(finance, month).filter((f) => (f.category || "Outros") === label) }],
+  };
+}
+
+function expenseCategoryData(finance, month) {
+  const catMap = {};
+  categoryExpenseEntries(finance, month).forEach((f) => {
     const cat = f.category || "Outros";
     catMap[cat] = (catMap[cat] || 0) + Number(f.amount);
   });
@@ -3112,6 +3175,12 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const [invoiceCard, setInvoiceCard] = useState(cards[0]?.id || "");
   const [invoicePaymentAmount, setInvoicePaymentAmount] = useState("");
   const [invoicePaymentDate, setInvoicePaymentDate] = useState(todayStr());
+  useEffect(() => {
+    if (originTarget?.type !== "financeEdit") return;
+    const entry = manualFinance.find((item) => item.id === originTarget.sourceId);
+    clearOriginTarget();
+    if (entry) { setTab("lancamentos"); openEdit(entry); }
+  }, [originTarget]);
   useEffect(() => {
     if (originTarget?.type !== "receiptSchedule") return;
     setTab("planejamento");
@@ -3427,17 +3496,89 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const expense = planSummary.spent;
   const balance = income - expense;
   const invoiceTotal = invoiceDetails?.total || 0;
-  const futureInstallments = finance.filter((f) => f.installmentGroup && f.date.slice(0, 7) > selectedMonth).reduce((s, f) => s + Number(f.amount), 0);
+  const futureInstallmentList = finance.filter((f) => f.installmentGroup && f.date.slice(0, 7) > selectedMonth);
+  const futureInstallments = futureInstallmentList.reduce((s, f) => s + Number(f.amount), 0);
   const installmentGroups = new Map();
   finance.filter((transaction) => transaction.installmentGroup).forEach((transaction) => {
     const group = transaction.installmentGroup;
     if (group.id && !installmentGroups.has(group.id)) {
-      installmentGroups.set(group.id, Number(group.totalAmount) || Number(transaction.amount) * Number(group.total || 1));
+      installmentGroups.set(group.id, { entry: transaction, amount: Number(group.totalAmount) || Number(transaction.amount) * Number(group.total || 1) });
     }
   });
-  const installmentTotal = [...installmentGroups.values()].reduce((sum, amount) => sum + amount, 0);
-  const currentMonthInstallments = monthTx.filter((transaction) => transaction.installmentGroup)
+  const installmentTotal = [...installmentGroups.values()].reduce((sum, item) => sum + item.amount, 0);
+  const currentMonthInstallmentList = monthTx.filter((transaction) => transaction.installmentGroup);
+  const currentMonthInstallments = currentMonthInstallmentList
     .reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+
+  // Detalhe dos blocos: as mesmas listas usadas para calcular cada número.
+  const [detail, setDetail] = useState(null);
+  const L = planSummary.lists;
+  const openEntryFromDetail = (tx) => {
+    setDetail(null);
+    if (tx.sourceRef) { if (onOrigin) onOrigin(tx.sourceRef); else goTo("finance"); return; }
+    openEdit(manualFinance.find((entry) => entry.id === tx.id) || tx);
+  };
+  const monthName = monthLabel(selectedMonth);
+  const detailFor = (key) => {
+    const g = (label, items, sign = 1, extra = {}) => ({ label, items, sign, ...extra });
+    switch (key) {
+      case "income": return { title: `Renda recebida · ${monthName}`, groups: [g("", L.income)], note: "Entradas com status pago neste mês." };
+      case "spent": return { title: `Gastos realizados · ${monthName}`, groups: [g("", L.spent)], note: "Saídas pagas, sem transferências para reserva/investimento." };
+      case "balance": return { title: `Saldo após gastos de consumo · ${monthName}`, groups: [g("Renda recebida", L.income), g("Gastos realizados", L.spent, -1)], totalLabel: "Saldo" };
+      case "commitments": return { title: `Comprometido (pendente) · ${monthName}`, groups: [g("", L.commitments)], note: "Saídas pendentes ou agendadas do mês, inclusive transferências; não inclui estimativas." };
+      case "fixedCommitments": return { title: `Despesas fixas pendentes · ${monthName}`, groups: [g("", L.fixedCommitments)] };
+      case "fixedSpent": return { title: `Gastos fixos realizados · ${monthName}`, groups: [g("", L.fixedSpent)] };
+      case "variableSpent": return { title: `Gastos variáveis realizados · ${monthName}`, groups: [g("", L.variableSpent)] };
+      case "variableCommitments": return { title: `Outras despesas pendentes · ${monthName}`, groups: [g("", L.variableCommitments)], note: "Saídas pendentes que não são fixas nem transferências." };
+      case "reservedRemaining": return { title: `Reserva protegida ainda pendente · ${monthName}`, noSort: true,
+        groups: [g("", [], 1, { lines: L.protectedLines.map((line) => ({ label: line.category || "Sem categoria", sub: `meta ${fmtBRL(line.target)} − já transferido ${fmtBRL(line.done)}`, amount: line.amount })) })],
+        note: "Metas protegidas da aba Planejamento menos o que já foi transferido neste mês." };
+      case "transferPaid": return { title: `Reservas e investimentos realizados · ${monthName}`, groups: [g("", L.transferPaid)] };
+      case "projectedSpending": {
+        const P = L.projectedSpending;
+        return { title: `Previsão de gastos do mês · ${monthName}`, groups: [
+          g("Já pago", P.paid), g("Pendente", P.pending), g("Fatura do cartão (a pagar)", P.card),
+          g("Contas fixas/recorrentes (a pagar)", P.fixed), g("Estimativas das outras abas", P.estimated),
+        ] };
+      }
+      case "estimated": return { title: `Despesas estimadas · ${monthName}`, groups: [g("", L.estimated)], note: "Previsões de Wishlist, Procedimentos e Hobbies; não são gastos reais." };
+      case "available": return { title: `Disponível sem comprometer metas · ${monthName}`, totalLabel: "Disponível", groups: [
+        g("Renda recebida", L.income), g("Gastos realizados", L.spent, -1), g("Compromissos pendentes", L.commitments, -1),
+        g("Transferências realizadas", L.transferPaid, -1),
+        g("Reserva protegida pendente", [], -1, { lines: L.protectedLines.map((line) => ({ label: line.category || "Sem categoria", sub: `meta ${fmtBRL(line.target)} − já transferido ${fmtBRL(line.done)}`, amount: line.amount })) }),
+      ] };
+      case "percent": return { title: `Percentual da renda recebido já gasto · ${monthName}`, totalLabel: "Gasto ÷ renda recebida",
+        groups: [g("Renda recebida", L.income), g("Gastos realizados", L.spent)],
+        formatTotal: (_total, groups) => (groups[0].subtotal > 0 ? `${Math.round((groups[1].subtotal / groups[0].subtotal) * 100)}%` : "—") };
+      case "invoice": return invoiceDetails
+        ? { title: `Fatura ${invoiceDetails.card.name} · ${monthName}`, groups: [
+          g("Compras na fatura", invoiceDetails.purchases),
+          g("Saldo informado manualmente", [], 1, { lines: invoiceDetails.informed > 0 ? [{ label: "Saldo informado", amount: invoiceDetails.informed }] : [] }),
+        ] }
+        : { title: "Fatura do cartão", groups: [g("", [])], note: "Cadastre um cartão em Contas & Cartões." };
+      case "invoicePaid": return invoiceDetails
+        ? { title: `Já pago · fatura ${invoiceDetails.card.name} ${monthName}`, noSort: true, groups: [g("", [], 1, { lines: invoiceDetails.payments.map((payment) => ({ label: payment.auto ? "Pagamento automático" : "Pagamento", sub: fmtDateBR(payment.date), amount: Number(payment.amount) || 0 })) })] }
+        : null;
+      case "invoiceRemaining": return invoiceDetails
+        ? { title: `Saldo a pagar · fatura ${invoiceDetails.card.name} ${monthName}`, totalLabel: "Saldo a pagar", groups: [
+          g("Compras na fatura", invoiceDetails.purchases),
+          g("Saldo informado manualmente", [], 1, { lines: invoiceDetails.informed > 0 ? [{ label: "Saldo informado", amount: invoiceDetails.informed }] : [] }),
+          g("Pagamentos", [], -1, { lines: invoiceDetails.payments.map((payment) => ({ label: "Pagamento", sub: fmtDateBR(payment.date), amount: Number(payment.amount) || 0 })) }),
+        ], formatTotal: (total) => fmtBRL(Math.max(0, total)) }
+        : null;
+      case "invoiceCount": return invoiceDetails
+        ? { title: `Lançamentos · fatura ${invoiceDetails.card.name} ${monthName}`, groups: [g("", invoiceDetails.purchases)], formatTotal: () => `${invoiceDetails.purchases.length} lançamento(s)` }
+        : null;
+      case "futureInstallments": return { title: `Parcelas futuras (depois de ${monthName})`, groups: [g("", futureInstallmentList)] };
+      case "installmentTotal": return { title: "Valor original parcelado", noSort: true, note: "Valor total de cada compra parcelada (uma linha por compra).",
+        groups: [g("", [...installmentGroups.values()].map((item) => ({ ...item.entry, amount: item.amount, desc: `${item.entry.desc || item.entry.category || "Compra"} · ${item.entry.installmentGroup.total}x` })))] };
+      case "monthInstallments": return { title: `Parcelas com vencimento em ${monthName}`, groups: [g("", currentMonthInstallmentList)] };
+      case "monthCount": return { title: `Lançamentos de ${monthName}`, groups: [g("Entradas", monthTx.filter((tx) => tx.type === "entrada")), g("Saídas", monthTx.filter((tx) => tx.type !== "entrada"))],
+        formatTotal: () => `${monthTx.length} lançamento(s)`, totalLabel: "Quantidade" };
+      default: return null;
+    }
+  };
+  const showDetail = (key) => { const d = detailFor(key); if (d) setDetail(d); };
   const forecastHorizon = (months) => forecast.slice(0, months).reduce((sum, entry) => ({
     planned: sum.planned + entry.plannedBalance,
     probable: sum.probable + entry.probableBalance,
@@ -3496,24 +3637,24 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             );
           })()}
           <div className="cr-grid cr-grid-3" style={{ marginBottom: 16 }}>
-            <div className="cr-card"><p className="cr-label">Renda efetivamente recebida</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(income)}</p></div>
-            <div className="cr-card"><p className="cr-label">Gastos efetivamente realizados</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(expense)}</p></div>
-            <div className="cr-card"><p className="cr-label">Saldo após gastos de consumo</p><p className="cr-serif" style={{ fontSize: 20, color: balance >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(balance)}</p></div>
-            <div className="cr-card"><p className="cr-label">Despesas fixas pendentes</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.fixedCommitments)}</p></div>
-            <div className="cr-card"><p className="cr-label">Gastos fixos realizados</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.fixedSpent)}</p></div>
-            <div className="cr-card"><p className="cr-label">Gastos variáveis realizados</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.variableSpent)}</p></div>
-            <div className="cr-card"><p className="cr-label">Outras despesas pendentes</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.variableCommitments)}</p></div>
-            <div className="cr-card"><p className="cr-label">Reserva protegida ainda pendente</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.reservedRemaining)}</p></div>
-            <div className="cr-card"><p className="cr-label">Reservas e investimentos realizados</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.transferPaid)}</p></div>
-            <div className="cr-card"><p className="cr-label">Previsão de gastos do mês</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.projectedSpending)}</p></div>
-            <div className="cr-card"><p className="cr-label">Despesas estimadas (não realizadas)</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(planSummary.estimatedPurchases)}</p></div>
-            <div className="cr-card"><p className="cr-label">Disponível sem comprometer metas</p><p className="cr-serif" style={{ fontSize: 20, color: planSummary.available >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(planSummary.available)}</p></div>
-            <div className="cr-card"><p className="cr-label">Percentual da renda recebido já gasto</p><p className="cr-serif" style={{ fontSize: 20 }}>{income > 0 ? `${Math.round((expense / income) * 100)}%` : "—"}</p></div>
-            <div className="cr-card"><p className="cr-label">Fatura do cartão (crédito)</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(invoiceTotal)}</p></div>
-            <div className="cr-card"><p className="cr-label">Parcelas futuras</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(futureInstallments)}</p></div>
-            <div className="cr-card"><p className="cr-label">Valor original parcelado</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(installmentTotal)}</p></div>
-            <div className="cr-card"><p className="cr-label">Parcelas com vencimento no mês</p><p className="cr-serif" style={{ fontSize: 20 }}>{fmtBRL(currentMonthInstallments)}</p></div>
-            <div className="cr-card"><p className="cr-label">Lançamentos no mês</p><p className="cr-serif" style={{ fontSize: 20 }}>{monthTx.length}</p></div>
+            <SummaryBlock label="Renda efetivamente recebida" value={fmtBRL(income)} onClick={() => showDetail("income")} />
+            <SummaryBlock label="Gastos efetivamente realizados" value={fmtBRL(expense)} onClick={() => showDetail("spent")} />
+            <SummaryBlock label="Saldo após gastos de consumo" value={fmtBRL(balance)} valueStyle={{ color: balance >= 0 ? "#5C7A56" : "#A1493C" }} onClick={() => showDetail("balance")} />
+            <SummaryBlock label="Despesas fixas pendentes" value={fmtBRL(planSummary.fixedCommitments)} onClick={() => showDetail("fixedCommitments")} />
+            <SummaryBlock label="Gastos fixos realizados" value={fmtBRL(planSummary.fixedSpent)} onClick={() => showDetail("fixedSpent")} />
+            <SummaryBlock label="Gastos variáveis realizados" value={fmtBRL(planSummary.variableSpent)} onClick={() => showDetail("variableSpent")} />
+            <SummaryBlock label="Outras despesas pendentes" value={fmtBRL(planSummary.variableCommitments)} onClick={() => showDetail("variableCommitments")} />
+            <SummaryBlock label="Reserva protegida ainda pendente" value={fmtBRL(planSummary.reservedRemaining)} onClick={() => showDetail("reservedRemaining")} />
+            <SummaryBlock label="Reservas e investimentos realizados" value={fmtBRL(planSummary.transferPaid)} onClick={() => showDetail("transferPaid")} />
+            <SummaryBlock label="Previsão de gastos do mês" value={fmtBRL(planSummary.projectedSpending)} onClick={() => showDetail("projectedSpending")} />
+            <SummaryBlock label="Despesas estimadas (não realizadas)" value={fmtBRL(planSummary.estimatedPurchases)} onClick={() => showDetail("estimated")} />
+            <SummaryBlock label="Disponível sem comprometer metas" value={fmtBRL(planSummary.available)} valueStyle={{ color: planSummary.available >= 0 ? "#5C7A56" : "#A1493C" }} onClick={() => showDetail("available")} />
+            <SummaryBlock label="Percentual da renda recebido já gasto" value={income > 0 ? `${Math.round((expense / income) * 100)}%` : "—"} onClick={() => showDetail("percent")} />
+            <SummaryBlock label="Fatura do cartão (crédito)" value={fmtBRL(invoiceTotal)} onClick={() => showDetail("invoice")} />
+            <SummaryBlock label="Parcelas futuras" value={fmtBRL(futureInstallments)} onClick={() => showDetail("futureInstallments")} />
+            <SummaryBlock label="Valor original parcelado" value={fmtBRL(installmentTotal)} onClick={() => showDetail("installmentTotal")} />
+            <SummaryBlock label="Parcelas com vencimento no mês" value={fmtBRL(currentMonthInstallments)} onClick={() => showDetail("monthInstallments")} />
+            <SummaryBlock label="Lançamentos no mês" value={monthTx.length} onClick={() => showDetail("monthCount")} />
           </div>
           <div className="cr-card" style={{ marginBottom: 16 }}>
             <h2 className="cr-serif" style={{ margin: "0 0 10px", fontSize: 17 }}>Previsão financeira e cenários</h2>
@@ -3523,13 +3664,21 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             <div className="cr-grid cr-grid-3">
               {[3, 6, 12].map((months) => {
                 const totals = forecastHorizon(months);
+                const monthsList = forecast.slice(0, months);
+                const scenario = (label, field) => ({ label, sign: 1, items: [], lines: monthsList.map((entry) => ({ label: monthLabel(entry.month), amount: entry[field] })) });
                 return (
-                  <div className="cr-card" key={months}>
-                    <p className="cr-label">Próximos {months} meses · saldo previsto acumulado</p>
-                    <p className="cr-sub" style={{ margin: "4px 0" }}>Planejado: {fmtBRL(totals.planned)}</p>
-                    <p className="cr-sub" style={{ margin: "4px 0" }}>Provável (sem opcionais baixos): {fmtBRL(totals.probable)}</p>
-                    <p className="cr-sub" style={{ margin: "4px 0" }}>Atenção (sem salário futuro presumido): {fmtBRL(totals.attention)}</p>
-                  </div>
+                  <button type="button" className="cr-card cr-summary-block" key={months} title="Ver o saldo previsto mês a mês"
+                    onClick={() => setDetail({
+                      title: `Próximos ${months} meses · saldo previsto`, noSort: true, hideTotal: true,
+                      note: "Saldo previsto de cada mês (renda prevista menos saídas previstas). O subtotal de cada cenário é o valor do bloco.",
+                      groups: [scenario("Planejado", "plannedBalance"), scenario("Provável (sem opcionais baixos)", "probableBalance"), scenario("Atenção (sem salário futuro presumido)", "attentionBalance")],
+                    })}>
+                    <span className="cr-label">Próximos {months} meses · saldo previsto acumulado</span>
+                    <span className="cr-sub" style={{ margin: "4px 0" }}>Planejado: {fmtBRL(totals.planned)}</span>
+                    <span className="cr-sub" style={{ margin: "4px 0" }}>Provável (sem opcionais baixos): {fmtBRL(totals.probable)}</span>
+                    <span className="cr-sub" style={{ margin: "4px 0" }}>Atenção (sem salário futuro presumido): {fmtBRL(totals.attention)}</span>
+                    <ChevronRight size={15} className="cr-summary-arrow" aria-hidden="true" />
+                  </button>
                 );
               })}
             </div>
@@ -3579,7 +3728,8 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             return (
               <div className="cr-card" style={{ marginBottom: 16 }}>
                 <p className="cr-label" style={{ marginBottom: 10 }}>Gastos por categoria — {monthLabel(selectedMonth)}</p>
-                <CategoryExpenseChart data={catData} settings={settings} setSettings={setSettings} />
+                <CategoryExpenseChart data={catData} settings={settings} setSettings={setSettings}
+                  onCategoryClick={(label) => setDetail(categoryDetail(finance, selectedMonth, label))} />
               </div>
             );
           })()}
@@ -3614,7 +3764,8 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
 
       {tab === "planejamento" && (
         <FinancePlanningPanel finance={finance} manualFinance={manualFinance} setFinance={setFinance} month={selectedMonth} settings={settings} setSettings={setSettings} summary={planSummary}
-          receiptTarget={receiptTarget} onReceiptTargetHandled={() => setReceiptTarget("")} />
+          receiptTarget={receiptTarget} onReceiptTargetHandled={() => setReceiptTarget("")}
+          onDetail={(keyOrDetail) => (typeof keyOrDetail === "string" ? showDetail(keyOrDetail) : setDetail(keyOrDetail))} />
       )}
 
       {tab === "fatura" && (
@@ -3660,14 +3811,14 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                       {status === "paga" ? "Paga" : "Aberta"}
                     </span>
                   </div>
-                  <div className="cr-invoice-total">
+                  <button type="button" className="cr-invoice-total cr-summary-inline" onClick={() => showDetail("invoice")} title="Ver de onde vem este valor">
                     <span className="cr-serif" style={{ fontSize: 16 }}>Total da fatura</span>
-                    <span className="cr-serif" style={{ fontSize: 22 }}>{fmtBRL(total)}</span>
-                  </div>
+                    <span className="cr-serif" style={{ fontSize: 22 }}>{fmtBRL(total)} <ChevronRight size={15} className="cr-summary-arrow-inline" aria-hidden="true" /></span>
+                  </button>
                   <div className="cr-grid cr-grid-3" style={{ marginBottom: 12, gap: 10 }}>
-                    <div><p className="cr-label">Já pago</p><strong>{fmtBRL(paid)}</strong></div>
-                    <div><p className="cr-label">Saldo a pagar</p><strong>{fmtBRL(remaining)}</strong></div>
-                    <div><p className="cr-label">Lançamentos</p><strong>{purchases.length}</strong></div>
+                    <SummaryBlock compact label="Já pago" value={fmtBRL(paid)} onClick={() => showDetail("invoicePaid")} />
+                    <SummaryBlock compact label="Saldo a pagar" value={fmtBRL(remaining)} onClick={() => showDetail("invoiceRemaining")} />
+                    <SummaryBlock compact label="Lançamentos" value={purchases.length} onClick={() => showDetail("invoiceCount")} />
                   </div>
                   <div className="cr-row" style={{ flexWrap: "wrap", marginBottom: 6 }}>
                     {status === "paga"
@@ -3776,6 +3927,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           accounts={accounts} cards={cards} paymentMethods={settings.paymentMethods || DEFAULT_SETTINGS.paymentMethods}
           categories={settings.financeCategories || DEFAULT_SETTINGS.financeCategories} />
       )}
+      {detail && <FinanceDetailModal detail={detail} accounts={accounts} cards={cards} onOpenEntry={openEntryFromDetail} onClose={() => setDetail(null)} />}
       {editScopeAsk && (
         <Modal size="small" title="Editar parcela" onClose={() => setEditScopeAsk(null)}>
           <p style={{ fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>
@@ -3792,6 +3944,94 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
         onConfirm={(options) => { executeRemove({ entry: confirmRemove, ...options }); setConfirmRemove(null); }} />}
       {editingInvoiceCard && <CardModal item={editingInvoiceCard} invoiceMonth={selectedMonth} onSave={(data) => setCards(upsertById(cards, data))} onClose={() => setEditingInvoiceCard(null)} />}
     </div>
+  );
+}
+
+// Bloco de resumo clicável: abre a lista de lançamentos que compõem o valor.
+function SummaryBlock({ label, value, valueStyle, onClick, compact = false }) {
+  return (
+    <button type="button" className={`cr-card cr-summary-block ${compact ? "is-compact" : ""}`} onClick={onClick}
+      title="Ver de onde vem este valor" aria-label={`${label}: ver os lançamentos que compõem este valor`}>
+      <span className="cr-label">{label}</span>
+      <span className={compact ? "cr-summary-value is-compact" : "cr-serif cr-summary-value"} style={valueStyle}>{value}</span>
+      <ChevronRight size={15} className="cr-summary-arrow" aria-hidden="true" />
+    </button>
+  );
+}
+
+const sumAmounts = (list) => (list || []).reduce((total, tx) => total + (Number(tx.amount) > 0 ? Number(tx.amount) : 0), 0);
+
+function financePaymentLabel(tx, accounts, cards) {
+  if (tx.cardId) return `Cartão ${(cards || []).find((c) => c.id === tx.cardId)?.name || ""}`.trim();
+  if (tx.accountId) return (accounts || []).find((a) => a.id === tx.accountId)?.name || tx.paymentMethod || "";
+  if (tx.sourceRef) return tx.sourceKind === "previsao" ? "Estimativa" : "Integrado";
+  return tx.paymentMethod || "";
+}
+
+// Painel com os lançamentos de um bloco, agrupados e com subtotal; o total final é a soma das mesmas listas do bloco.
+// groups: [{ label, sign: 1 | -1, items: [lançamentos], lines: [{ label, amount }] }]
+function FinanceDetailModal({ detail, accounts, cards, onOpenEntry, onClose }) {
+  const [sortBy, setSortBy] = useState("data");
+  const today = todayStr();
+  const distance = (date) => Math.abs(new Date(`${date || today}T00:00:00`) - new Date(`${today}T00:00:00`));
+  const sortItems = (items) => [...items].sort((a, b) => (sortBy === "valor"
+    ? Number(b.amount) - Number(a.amount)
+    : distance(a.date) - distance(b.date) || String(a.date).localeCompare(String(b.date))));
+  const groups = (detail.groups || []).map((group) => {
+    const subtotal = sumAmounts(group.items) + (group.lines || []).reduce((t, line) => t + line.amount, 0);
+    return { ...group, subtotal };
+  });
+  const total = groups.reduce((t, group) => t + (group.sign ?? 1) * group.subtotal, 0);
+  const empty = groups.every((group) => !(group.items || []).length && !(group.lines || []).length);
+  const showGroupHeads = groups.length > 1 || groups.some((group) => group.label);
+  const fmt = detail.format || fmtBRL;
+  return (
+    <Modal size="small" title={detail.title} onClose={onClose}>
+      <div className="cr-detail">
+        {detail.note && <p className="cr-sub" style={{ marginTop: 0 }}>{detail.note}</p>}
+        {!empty && !detail.noSort && (
+          <div className="cr-row" style={{ gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+            <span className="cr-sub" style={{ margin: 0 }}>Ordenar:</span>
+            <button type="button" className={`cr-tabbtn ${sortBy === "data" ? "active" : ""}`} onClick={() => setSortBy("data")}>Data mais próxima</button>
+            <button type="button" className={`cr-tabbtn ${sortBy === "valor" ? "active" : ""}`} onClick={() => setSortBy("valor")}>Valor</button>
+          </div>
+        )}
+        {empty && <p className="cr-empty">Nenhum lançamento neste valor.</p>}
+        {!empty && groups.map((group, gi) => ((group.items || []).length || (group.lines || []).length || group.showEmpty) ? (
+          <section key={group.label || gi} className="cr-detail-group">
+            {showGroupHeads && (
+              <div className="cr-detail-group-head">
+                <strong>{group.sign === -1 ? "− " : groups.length > 1 && gi > 0 ? "+ " : ""}{group.label || "Lançamentos"}</strong>
+                <span>{group.countOnly ? `${(group.items || []).length}` : fmt(group.subtotal)}</span>
+              </div>
+            )}
+            {!(group.items || []).length && !(group.lines || []).length && <p className="cr-sub" style={{ margin: "2px 0 6px" }}>Nenhum lançamento.</p>}
+            {sortItems(group.items || []).map((tx) => (
+              <button key={tx.id} type="button" className="cr-detail-row" onClick={() => onOpenEntry(tx)}
+                title={tx.sourceRef ? "Abrir na área de origem" : "Abrir para editar"}>
+                <span className="cr-detail-desc">
+                  <strong>{tx.desc || tx.category || "Lançamento"}{tx.installmentGroup ? ` (${tx.installmentGroup.index}/${tx.installmentGroup.total})` : ""}</strong>
+                  <span>{[tx.category, fmtDateBR(tx.date), financePaymentLabel(tx, accounts, cards)].filter(Boolean).join(" · ")}</span>
+                </span>
+                <span className="cr-detail-amount">{fmtBRL(Number(tx.amount) || 0)}</span>
+              </button>
+            ))}
+            {(group.lines || []).map((line, li) => (
+              <div key={li} className="cr-detail-row is-info">
+                <span className="cr-detail-desc"><strong>{line.label}</strong>{line.sub && <span>{line.sub}</span>}</span>
+                <span className="cr-detail-amount">{fmtBRL(line.amount)}</span>
+              </div>
+            ))}
+          </section>
+        ) : null)}
+        {!empty && !detail.hideTotal && (
+          <div className="cr-detail-total">
+            <span>{detail.totalLabel || "Total"}</span>
+            <strong>{detail.formatTotal ? detail.formatTotal(total, groups) : fmt(total)}</strong>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -3833,7 +4073,7 @@ function FinanceRemoveModal({ entry, card, onConfirm, onCancel }) {
   );
 }
 
-function FinancePlanningPanel({ finance, manualFinance, setFinance, month, settings, setSettings, summary, receiptTarget, onReceiptTargetHandled }) {
+function FinancePlanningPanel({ finance, manualFinance, setFinance, month, settings, setSettings, summary, receiptTarget, onReceiptTargetHandled, onDetail = () => {} }) {
   const plan = settings.financePlan || { grossSalary: "", extraIncome: "", deductions: "", netSalary: "", payday: "5", allocations: [] };
   const allocations = Array.isArray(plan.allocations) ? plan.allocations : [];
   const receipts = Array.isArray(plan.receipts) ? plan.receipts : [];
@@ -4092,15 +4332,24 @@ function FinancePlanningPanel({ finance, manualFinance, setFinance, month, setti
           Só lançamentos de entrada com status pago contam como renda recebida. Despesas pendentes são compromissos, não gastos realizados. Ao registrar uma despesa, marque-a como paga quando o pagamento acontecer para que os valores não sejam contados duas vezes.
         </p>
         <div className="cr-grid cr-grid-3">
-          <div><p className="cr-label">Recebido</p><strong>{fmtBRL(summary.receivedIncome)}</strong></div>
-          <div><p className="cr-label">Gasto</p><strong>{fmtBRL(summary.spent)}</strong></div>
-          <div><p className="cr-label">Comprometido</p><strong>{fmtBRL(summary.commitments)}</strong></div>
-          <div><p className="cr-label">Protegido para objetivos (ainda não transferido)</p><strong>{fmtBRL(summary.reservedRemaining)}</strong></div>
-          <div><p className="cr-label">Transferido para reserva/investimento</p><strong>{fmtBRL(summary.transferPaid)}</strong></div>
-          <div><p className="cr-label">Disponível sem comprometer metas</p>
-            <strong style={{ color: summary.available >= 0 ? "#5C7A56" : "#A1493C" }}>{fmtBRL(summary.available)}</strong>
-          </div>
-          <div><p className="cr-label">Líquido esperado (não recebido)</p><strong>{fmtBRL(expectedNet)}</strong></div>
+          <SummaryBlock compact label="Recebido" value={fmtBRL(summary.receivedIncome)} onClick={() => onDetail("income")} />
+          <SummaryBlock compact label="Gasto" value={fmtBRL(summary.spent)} onClick={() => onDetail("spent")} />
+          <SummaryBlock compact label="Comprometido" value={fmtBRL(summary.commitments)} onClick={() => onDetail("commitments")} />
+          <SummaryBlock compact label="Protegido para objetivos (ainda não transferido)" value={fmtBRL(summary.reservedRemaining)} onClick={() => onDetail("reservedRemaining")} />
+          <SummaryBlock compact label="Transferido para reserva/investimento" value={fmtBRL(summary.transferPaid)} onClick={() => onDetail("transferPaid")} />
+          <SummaryBlock compact label="Disponível sem comprometer metas" value={fmtBRL(summary.available)}
+            valueStyle={{ color: summary.available >= 0 ? "#5C7A56" : "#A1493C" }} onClick={() => onDetail("available")} />
+          <SummaryBlock compact label="Líquido esperado (não recebido)" value={fmtBRL(expectedNet)} onClick={() => onDetail({
+            title: "Líquido esperado (não recebido)", noSort: true, totalLabel: "Líquido esperado",
+            note: "Vem dos valores informados acima no Planejamento, não de lançamentos.",
+            groups: Number(plan.netSalary) > 0
+              ? [{ label: "", sign: 1, items: [], lines: [{ label: "Salário líquido informado", amount: Number(plan.netSalary) }] }]
+              : [
+                { label: "Renda", sign: 1, items: [], lines: [{ label: "Salário bruto", amount: grossSalary }, { label: "Renda extra prevista", amount: extraIncome }].filter((line) => line.amount > 0) },
+                { label: "Descontos", sign: -1, items: [], lines: deductionRows.map((row) => ({ label: row.description || "Desconto", amount: Number(row.amount) || 0 })).filter((line) => line.amount > 0) },
+              ],
+            formatTotal: (total) => fmtBRL(Math.max(0, total)),
+          })} />
         </div>
         {summary.available < 0 && (
           <p role="alert" style={{ color: "#A1493C", marginBottom: 0 }}>
@@ -5693,7 +5942,7 @@ function parseICS(text) {
   raw.forEach((r) => {
     if (!r.start || r.status === "CANCELLED") return;
     const dur = r.end ? r.end.date.getTime() - r.start.date.getTime() : 0;
-    const base = { t: r.t || "(sem título)", ad: r.start.allDay, loc: r.loc || "", meet: findMeetLink((r.desc || "") + " " + (r.loc || "")), url: r.url || "" };
+    const base = { t: r.t || "(sem título)", ad: r.start.allDay, loc: r.loc || "", meet: findMeetLink((r.desc || "") + " " + (r.loc || "")), url: r.url || "", uid: r.uid || "", rec: !!(r.rrule || r.recId) };
     const make = (d, i) => {
       const s = r.start.allDay ? gcalDateStr(d) : gcalLocalStr(d);
       const e = r.start.allDay ? gcalDateStr(new Date(d.getTime() + (dur || 86400000))) : gcalLocalStr(new Date(d.getTime() + dur));
@@ -7912,13 +8161,28 @@ function procedureDueDate(b) {
   return due;
 }
 
+// Sessões do Google Agenda ainda por vir (de hoje em diante)
+function upcomingGcalSessions(b, today = todayStr()) {
+  return (b.gcalSessions || []).filter((session) => (session.start || "").slice(0, 10) >= today)
+    .sort((x, y) => x.start.localeCompare(y.start));
+}
+
 function buildProcedureAlerts(procedures, today, warnDays) {
-  const upcoming = procedures
-    .filter((b) => b.scheduledDate && b.scheduledDate >= today)
-    .map((b) => ({ b, date: b.scheduledDate, time: b.scheduledTime || "", days: daysBetween(today, b.scheduledDate) }))
+  const upcoming = [
+    ...procedures
+      .filter((b) => b.scheduledDate && b.scheduledDate >= today)
+      .map((b) => ({ key: `app:${b.id}`, b, date: b.scheduledDate, time: b.scheduledTime || "", days: daysBetween(today, b.scheduledDate), place: b._place || b.clinic || "" })),
+    ...procedures.flatMap((b) => upcomingGcalSessions(b, today).map((session) => {
+      const date = session.start.slice(0, 10);
+      return { key: `gcal:${session.key}`, b, date, time: session.allDay ? "" : gcalTimeOf(session.start), days: daysBetween(today, date),
+        place: session.loc || b._place || b.clinic || "", fromGoogle: true, title: cleanSelfCareTitle(session.title) };
+    })),
+  ]
+    // a mesma sessão marcada no app e no Google (mesmo dia) aparece uma vez só
+    .filter((item, index, all) => !(item.fromGoogle === undefined && all.some((other) => other.fromGoogle && other.b.id === item.b.id && other.date === item.date)))
     .sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time));
   const toBook = procedures
-    .filter((b) => !(b.scheduledDate && b.scheduledDate >= today))
+    .filter((b) => !(b.scheduledDate && b.scheduledDate >= today) && upcomingGcalSessions(b, today).length === 0)
     .map((b) => ({ b, date: procedureDueDate(b) }))
     .filter((x) => x.date)
     .map((x) => ({ ...x, days: daysBetween(today, x.date) }))
@@ -7952,12 +8216,15 @@ function ProcedureAlertsStrip({ procedures, warnDays, onWarnDays, onOpen, onSche
       <section className="cr-proc-alerts-col" aria-label="Próximas sessões">
         <h3 className="cr-serif"><CalendarDays size={15} /> Próximas sessões</h3>
         {upcoming.length === 0 && <p className="cr-sub" style={{ margin: 0 }}>Nenhuma sessão agendada.</p>}
-        {upcoming.map(({ b, date, time, days }) => (
-          <button key={b.id} type="button" className={`cr-proc-alert-item ${days <= 7 ? "is-soon" : ""}`} onClick={() => onOpen(b)}>
-            <span className="cr-proc-alert-name">{b.name || "Procedimento"}</span>
+        {upcoming.map(({ key, b, date, time, days, place, fromGoogle }) => (
+          <button key={key} type="button" className={`cr-proc-alert-item ${days <= 7 ? "is-soon" : ""}`} onClick={() => onOpen(b)}>
+            <span className="cr-proc-alert-name">
+              {b.name || "Procedimento"}
+              {fromGoogle && <span className="cr-gcal-badge" title="Sessão vinda do Google Agenda" aria-label="Do Google Agenda"><CalendarDays size={12} /></span>}
+            </span>
             <span className="cr-proc-alert-meta">
               {when(days) && <strong className="cr-proc-alert-badge">{when(days)}</strong>}
-              {fmtDateBR(date)}{time ? ` às ${time}` : ""}{(b._place || b.clinic) ? ` · ${b._place || b.clinic}` : ""}
+              {fmtDateBR(date)}{time ? ` às ${time}` : ""}{place ? ` · ${place}` : ""}
             </span>
           </button>
         ))}
@@ -8065,7 +8332,8 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
   const linkedFinanceOf = (item) => (item?.financeLink?.key ? (finance || []).filter((entry) => financeLinkKey(entry) === item.financeLink.key) : []);
   const removeNow = (id) => setBeauty(beauty.flatMap((item) => {
     if (item.id !== id) return [item];
-    if ((item.history || []).length > 0) return [{ ...item, archived: true, recurring: false }];
+    // com sessões do Google Agenda o card fica arquivado (oculto), para a sincronização não recriá-lo
+    if ((item.history || []).length > 0 || (item.gcalSessions || []).length > 0) return [{ ...item, archived: true, recurring: false }];
     return [];
   }));
   const remove = (id) => {
@@ -8345,6 +8613,11 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
     on("cost") && b.cost > 0 && <span className="cr-chip" key="c">{fmtBRL(b.cost)}</span>,
     b.financeLink?.installments > 1 && <span className="cr-chip" key="p">{b.financeLink.installments}x de {fmtBRL(b.financeLink.installmentAmount)}</span>,
     b.scheduledDate && b.scheduledDate >= todayStr() && <span className="cr-chip" key="s">agendado: {fmtDateShort(b.scheduledDate)}{b.scheduledTime ? ` ${b.scheduledTime}` : ""}</span>,
+    ...upcomingGcalSessions(b).slice(0, 2).map((session) => (
+      <span className="cr-chip" key={`g-${session.key}`} title="Sessão vinda do Google Agenda">
+        <CalendarDays size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />{fmtDateShort(session.start.slice(0, 10))}{session.allDay ? "" : ` ${gcalTimeOf(session.start)}`}
+      </span>
+    )),
   ].filter(Boolean);
   return (
     <div className={`cr-card ${personalizedCardClass(b)}`} style={{ cursor: "pointer", ...personalizedCardStyle(b) }} onClick={onEdit} title="Clique para abrir o procedimento completo">
@@ -8571,6 +8844,30 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
         <div className="cr-field" style={{ flex: "1 1 110px" }}><label className="cr-label">Horário</label>
           <input type="time" className="cr-input" value={form.scheduledTime || ""} onChange={(event) => setForm({ ...form, scheduledTime: event.target.value })} /></div>
       </div>
+      {(item?.gcalSessions || []).length > 0 && (
+        <div className="cr-gcal-sessions">
+          <p className="cr-label" style={{ margin: "0 0 6px" }}><CalendarDays size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />Sessões do Google Agenda</p>
+          {item.gcalSessions.map((session) => (
+            <div key={session.key} className="cr-gcal-session">
+              <strong>{fmtDateBR(session.start.slice(0, 10))}{session.allDay ? "" : ` às ${gcalTimeOf(session.start)}`}</strong>
+              <span>{[cleanSelfCareTitle(session.title), session.loc].filter(Boolean).join(" · ")}</span>
+            </div>
+          ))}
+          <p className="cr-sub" style={{ margin: "6px 0 0" }}>
+            Estas sessões vêm do Google Agenda e se atualizam sozinhas. Para mudar data ou horário, altere o evento no Google Agenda:
+            o app só lê a agenda e não consegue mudar o evento lá.
+          </p>
+          <button type="button" className="cr-btn" style={{ marginTop: 6 }}
+            onClick={() => openExternalLink(`https://calendar.google.com/calendar/r/day/${(upcomingGcalSessions(item)[0] || item.gcalSessions[0]).start.slice(0, 10).replace(/-/g, "/")}`)}>
+            <CalendarDays size={13} /> Abrir no Google Agenda
+          </button>
+        </div>
+      )}
+      {(item?.gcalSessions || []).length > 0 && form.scheduledDate && form.scheduledDate !== (item.scheduledDate || "") && (
+        <p className="cr-sub" role="alert" style={{ color: "#A1493C", marginTop: 0 }}>
+          Você mudou a data agendada pelo app. Lembre-se de mudar também no Google Agenda, senão as duas datas vão aparecer.
+        </p>
+      )}
       {form.financeLink && (
         <p className="cr-sub" style={{ marginTop: 0 }}><Link2 size={12} style={{ verticalAlign: "-1px" }} /> Vinculado a um lançamento em Finanças{form.financeLink.installments > 1 ? ` (${form.financeLink.installments}x de ${fmtBRL(form.financeLink.installmentAmount)})` : ""}: o valor e a data atualizam o lançamento.</p>
       )}
@@ -10436,7 +10733,7 @@ export default function App({ onSignOut }) {
   const [originTarget, setOriginTarget] = useState(null);
   const clearOriginTarget = useCallback(() => setOriginTarget(null), []);
   const navigateToOrigin = useCallback((sourceRef) => {
-    const sourceTabs = { shopping: "shopping", beauty: "beauty", hobbies: "hobbies", receiptSchedule: "finance" };
+    const sourceTabs = { shopping: "shopping", beauty: "beauty", hobbies: "hobbies", receiptSchedule: "finance", financeEdit: "finance" };
     const destination = sourceTabs[sourceRef.type];
     if (!destination) return;
     setOriginTarget(sourceRef);
@@ -10761,6 +11058,12 @@ export default function App({ onSignOut }) {
     };
     void refresh();
   }, [gcal, loaded, setGcal]);
+  // Google Agenda → Procedimentos estéticos: eventos "Self care" viram sessões agendadas nos cards.
+  useEffect(() => {
+    if (!loaded) return;
+    const next = syncSelfCareSessions(beauty, gcalMergedEvents(gcal), { newId: uid });
+    if (next !== beauty) setBeauty(next);
+  }, [loaded, gcal, beauty, setBeauty]);
   const setStudyAreas = useCallback((v) => { setStudyAreasState(v); return storageSet(KEYS.studyareas, v); }, []);
   const setPages = useCallback((v) => { setPagesState(v); return storageSet(KEYS.pages, v); }, []);
   const setPlaces = useCallback((v) => { setPlacesState(v); return storageSet(KEYS.places, v); }, []);
@@ -11011,7 +11314,8 @@ export default function App({ onSignOut }) {
         </div>
       )}
       <div className="cr-main">
-        {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={integratedFinance} areas={areas} settings={settings} personaldev={personaldev} gcal={gcal} setGcal={setGcal} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab} />}
+        {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={integratedFinance} areas={areas} settings={settings} personaldev={personaldev} gcal={gcal} setGcal={setGcal} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab}
+          onOrigin={navigateToOrigin} accounts={accounts} cards={cards} />}
         {tab === "search" && <GlobalSearchView query={searchQuery} setQuery={setSearchQuery} all={searchData} goTo={setTab} />}
         {tab === "tasks" && <PlanningHub tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="tarefas" gcal={gcal} setGcal={setGcal} fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} />}
         {tab === "routines" && <PlanningHub key="routines" tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="rotinas" gcal={gcal} setGcal={setGcal} fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} />}
