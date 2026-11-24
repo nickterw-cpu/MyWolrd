@@ -3,6 +3,7 @@ import { reloadUserData, storageDelete, storageGet, storageSet } from "./src/lib
 import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
 import { habitStreak } from "./src/lib/habitStreak.js";
+import { countInWeek, normalizeTarget, numericGoalProgress, shiftDays, weekStartOf, weeklyMessage, weeklyStreak } from "./src/lib/workoutWeek.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, summarizeFinanceMonth } from "./src/lib/financePlan.js";
 import {
@@ -17,7 +18,7 @@ import {
   Plus, Trash2, Pencil, X, Check, Search, Download, Upload, Sparkles, Flame, ChevronLeft, ChevronRight,
   GraduationCap, Briefcase, Sparkle, Image as ImageIcon, BookHeart, SearchCheck, Compass,
   HardDrive, Mail, FileText, BookOpen, ShoppingBag, ShoppingCart, Heart, Bot, Palette, ListChecks,
-  Music2, Play, Pause, SkipBack, SkipForward, Star, Instagram
+  Music2, Play, Pause, SkipBack, SkipForward, Star, Instagram, Camera, Ruler, Trophy, Dumbbell, ExternalLink
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -52,6 +53,8 @@ const KEYS = {
   investments: "central:investments",
   studyareas: "central:studyareas",
   gcal: "central:gcal",
+  fitness: "central:fitness",
+  fitnessMedia: "central:fitness-media",
 };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -593,9 +596,9 @@ function CardPersonalizationButton({ item, onSave, hasImage = false, imageSrc = 
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button type="button" className="cr-btn ghost" title="Personalizar card" aria-label="Personalizar card"
+      <button type="button" className="cr-btn ghost" title="Personalizar" aria-label="Personalizar"
         onClick={(event) => { event.stopPropagation(); setOpen(true); }}>
-        <Palette size={13} /> <span className="cr-card-customize-label">Personalizar</span>
+        <Palette size={14} />
       </button>
       {open && <CardPersonalizationModal item={item} imageSrc={imageSrc} onSave={onSave} hasImage={hasImage} onClose={() => setOpen(false)} />}
     </>
@@ -1376,17 +1379,16 @@ const GlobalStyle = () => (
     .beauty-contact { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 100%; margin-top: 6px; }
     .beauty-contact-names { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; font-size: 13px; color: var(--ink-soft); }
     .beauty-contact .cr-btn { flex-shrink: 0; }
-    /* Player à esquerda, frase alinhada à direita; em telas estreitas a frase desce para baixo do player */
-    .dashboard-music { display: flex; align-items: center; justify-content: space-between; gap: 16px 24px; flex-wrap: wrap; margin-top: 16px; min-width: 0; }
+    /* Player e frase formam um conjunto alinhado à esquerda; em telas estreitas a frase desce para baixo do player */
+    .dashboard-music { display: flex; align-items: center; justify-content: flex-start; gap: 12px 14px; flex-wrap: wrap; margin-top: 16px; min-width: 0; }
     .dashboard-music-player {
       width: 112px; height: 112px; flex: 0 0 auto; border-radius: 10px;
       background: linear-gradient(145deg, #F0D9CF, #C77B6C); color: #68100D; display: grid; place-items: center;
     }
-    .dashboard-music-copy { flex: 1 1 260px; min-width: 0; display: flex; justify-content: flex-end; }
-    .dashboard-music-copy p { margin: 0; max-width: 520px; line-height: 1.7; font-weight: 700; text-align: right; overflow-wrap: break-word; }
-    @media (max-width: 520px) {
-      .dashboard-music-copy { justify-content: flex-start; flex-basis: 100%; }
-      .dashboard-music-copy p { text-align: left; }
+    .dashboard-music-copy { flex: 1 1 200px; min-width: 0; max-width: 520px; display: flex; justify-content: flex-start; }
+    .dashboard-music-copy p { margin: 0; line-height: 1.7; font-weight: 700; text-align: left; overflow-wrap: break-word; }
+    @media (max-width: 420px) {
+      .dashboard-music-copy { flex-basis: 100%; max-width: 100%; }
     }
     .cr-card-image-placeholder {
       width: calc(100% + 40px); aspect-ratio: 16 / 9; margin: -18px -20px 8px;
@@ -1433,24 +1435,75 @@ const GlobalStyle = () => (
     .cr-catchart { display: grid; gap: 12px; min-width: 0; }
     .cr-catchart-types { display: flex; flex-wrap: wrap; gap: 6px; }
     .cr-catchart-types .cr-tabbtn { padding: 5px 12px; font-size: 12.5px; }
-    .cr-catchart-body { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; min-width: 0; }
-    .cr-catchart-chart { flex: 0 1 auto; min-width: 0; max-width: 100%; display: flex; justify-content: center; }
-    .cr-catchart-body.is-bars .cr-catchart-chart { flex: 1 1 280px; display: block; }
-    .cr-catchart-legend { list-style: none; margin: 0; padding: 0; flex: 1 1 220px; min-width: 0; display: grid; gap: 6px; }
-    .cr-catchart-legend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; font-size: 13px; cursor: default; }
-    .cr-catchart-dot { width: 10px; height: 10px; border-radius: 3px; }
-    .cr-catchart-name { overflow-wrap: break-word; min-width: 0; }
-    .cr-catchart-value { font-weight: 600; white-space: nowrap; }
-    .cr-catchart-pct { color: var(--ink-soft); white-space: nowrap; min-width: 44px; text-align: right; }
+    .cr-catchart-body { display: flex; flex-direction: column; align-items: center; gap: 14px; min-width: 0; }
+    .cr-catchart-chart { position: relative; min-width: 0; max-width: 100%; display: flex; justify-content: center; }
+    .cr-catchart-body.is-bars .cr-catchart-chart { width: 100%; display: block; }
+    /* Legenda sempre abaixo do gráfico, centralizada e quebrando linha quando faltar espaço */
+    .cr-catchart-legend { list-style: none; margin: 0; padding: 0; width: 100%; min-width: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; }
+    .cr-catchart-legend li { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: default; min-width: 0; max-width: 100%; }
+    .cr-catchart-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+    .cr-catchart-name { overflow-wrap: anywhere; min-width: 0; }
+    .cr-catchart-tip {
+      position: absolute; z-index: 5; transform: translate(-50%, calc(-100% - 10px)); pointer-events: none;
+      display: grid; gap: 2px; padding: 6px 10px; border-radius: 8px; white-space: nowrap; font-size: 12px; text-align: center;
+      background: var(--ink); color: #FFFDF8; box-shadow: 0 6px 18px rgb(33 29 26 / 18%);
+    }
+    /* Treino semanal */
+    .cr-training { display: grid; gap: 16px; margin-top: 14px; min-width: 0; }
+    .cr-training-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; align-items: start; min-width: 0; }
+    .cr-streak-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+    .cr-streak-count { margin: 2px 0 0; font-size: 34px; line-height: 1.1; }
+    .cr-streak-count span { font-size: 16px; color: var(--ink-soft); }
+    .cr-streak-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: #F7E9E4; color: #8F1111; font-size: 13px; }
+    .cr-streak-badge strong { font-size: 16px; }
+    .cr-streak-card.is-met { border-color: #3E9A5A; }
+    .cr-streak-message { margin: 10px 0 0; font-size: 14px; font-weight: 600; line-height: 1.5; }
+    .cr-streak-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+    .cr-streak-day {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 0; min-height: 52px;
+      border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer;
+    }
+    .cr-streak-day.today { border-color: var(--ink); border-width: 2px; }
+    .cr-streak-day.done { background: #8F1111; border-color: #8F1111; color: #FFFDF8; }
+    .cr-streak-day:disabled { opacity: 0.45; cursor: default; }
+    .cr-streak-day-num { color: var(--ink-soft); font-size: 11px; }
+    .cr-media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+    .cr-media-item { position: relative; display: grid; gap: 4px; min-width: 0; }
+    .cr-media-thumb {
+      position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+      width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px;
+      background: #EFE8DE; color: var(--ink); cursor: pointer; font: inherit; font-size: 11px; text-decoration: none;
+    }
+    .cr-media-thumb img, .cr-media-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .cr-media-link img { position: absolute; inset: 0; opacity: 0.85; }
+    .cr-media-link span { position: relative; padding: 2px 6px; border-radius: 6px; background: rgb(255 253 248 / 92%); max-width: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cr-media-play { position: absolute; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: rgb(33 29 26 / 65%); color: #FFFDF8; }
+    .cr-media-caption { font-size: 12px; padding: 6px 8px; }
+    .cr-media-item .cr-media-remove { position: absolute; top: 4px; right: 4px; padding: 5px; background: rgb(255 253 248 / 92%); }
+    .cr-lightbox { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgb(20 16 14 / 92%); }
+    .cr-lightbox-body { display: grid; gap: 10px; justify-items: center; max-width: 100%; max-height: 100%; }
+    .cr-lightbox-body img, .cr-lightbox-body video { max-width: min(92vw, 1100px); max-height: 78dvh; border-radius: 10px; background: #000; }
+    .cr-lightbox-caption { margin: 0; color: #FFFDF8; font-size: 14px; text-align: center; max-width: 92vw; white-space: pre-wrap; }
+    .cr-lightbox .cr-lightbox-close { position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 10px; background: rgb(255 253 248 / 92%); }
+    .cr-measure-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+    .cr-measure-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; }
+    .cr-measure-photo { width: 56px; flex: 0 0 56px; }
     .cr-catchart-hbars { display: grid; gap: 8px; width: 100%; }
-    .cr-catchart-hbar { display: grid; grid-template-columns: minmax(70px, 30%) 1fr; align-items: center; gap: 8px; font-size: 12.5px; }
+    .cr-catchart-hbar { display: grid; grid-template-columns: minmax(64px, 26%) minmax(40px, 1fr) auto; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer; }
     .cr-catchart-hbar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cr-catchart-hbar-track { height: 14px; background: #EFE8DE; border-radius: 7px; overflow: hidden; }
-    .cr-catchart-hbar-track > div { height: 100%; border-radius: 7px; }
+    .cr-catchart-hbar-fill { height: 100%; border-radius: 7px; }
+    .cr-catchart-hbar-value { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+    @media (max-width: 420px) {
+      .cr-catchart-hbar { grid-template-columns: minmax(0, 1fr) auto; }
+      .cr-catchart-hbar-track { grid-column: 1 / -1; grid-row: 2; }
+    }
     .cr-catchart-vbars { display: flex; align-items: flex-end; gap: 8px; width: 100%; padding-top: 4px; border-bottom: 1px solid var(--line); }
-    .cr-catchart-vbar { flex: 1 1 0; min-width: 0; max-width: 56px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; }
+    .cr-catchart-vbars { justify-content: center; }
+    .cr-catchart-vbar { flex: 1 1 0; min-width: 0; max-width: 64px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; cursor: pointer; }
     .cr-catchart-vbar > div { width: 100%; border-radius: 6px 6px 0 0; }
-    .cr-catchart-vbar-value { font-size: 10.5px; color: var(--ink-soft); white-space: nowrap; }
+    .cr-catchart-vbar-value { display: flex; flex-direction: column; align-items: center; font-size: 10.5px; line-height: 1.25; color: var(--ink-soft); white-space: nowrap; }
+    .cr-catchart-vbar-value strong { color: var(--ink); font-weight: 700; }
     .cr-section-tabs { align-items: center; }
     .cr-section-tab {
       display: inline-flex; align-items: stretch; max-width: 100%; border: 1px solid var(--line); border-radius: 100px;
@@ -1574,7 +1627,6 @@ const GlobalStyle = () => (
       .central-root .cr-textarea { min-height: 90px; }
     }
     @media (max-width: 520px) {
-      .cr-card-heading-actions .cr-card-customize-label { display: none; }
       .cr-card-image-placeholder { width: calc(100% + 40px); }
     }
   `}</style>
@@ -1780,14 +1832,38 @@ function piePath(cx, cy, r, inner, start, end) {
 
 // Gráfico "Gastos por categoria": o mesmo componente no Dashboard e em Finanças.
 // A visualização escolhida fica salva em settings.categoryChartType (vale para os dois lugares).
-function CategoryExpenseChart({ data, settings, setSettings, size = 200 }) {
+function CategoryExpenseChart({ data, settings, setSettings, size = 220 }) {
   const [hover, setHover] = useState(null);
+  const [tip, setTip] = useState(null); // { i, x, y } em px relativos à área do gráfico
+  const areaRef = useRef(null);
   const type = CATEGORY_CHART_TYPES.some((option) => option.id === settings?.categoryChartType) ? settings.categoryChartType : "pizza";
   const total = data.reduce((sum, entry) => sum + entry.value, 0) || 1;
   const max = Math.max(1, ...data.map((entry) => entry.value));
   const items = data.map((entry) => ({ ...entry, pct: (entry.value / total) * 100 }));
   const pctLabel = (pct) => `${pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+  const compactBRL = (n) => n >= 1000
+    ? `R$ ${(n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil`
+    : `R$ ${Math.round(n).toLocaleString("pt-BR")}`;
   const dim = (i) => (hover === null || hover === i ? 1 : 0.4);
+  // Tooltip: aparece ao passar o mouse ou tocar; mostra o valor das fatias/barras pequenas demais para o texto.
+  const showTip = (i, event) => {
+    setHover(i);
+    const box = areaRef.current?.getBoundingClientRect();
+    if (!box) return;
+    const point = event && "clientX" in event && event.clientX ? event : null;
+    const target = event?.currentTarget?.getBoundingClientRect?.();
+    const x = point ? point.clientX - box.left : target ? target.left + target.width / 2 - box.left : box.width / 2;
+    const y = point ? point.clientY - box.top : target ? target.top - box.top : box.height / 2;
+    setTip({ i, x, y });
+  };
+  const hideTip = () => { setHover(null); setTip(null); };
+  const handlers = (i) => ({
+    onMouseEnter: (event) => showTip(i, event),
+    onMouseMove: (event) => showTip(i, event),
+    onMouseLeave: hideTip,
+    // no celular o toque mostra o tooltip; tocar fora dele (na área do gráfico) fecha
+    onClick: (event) => { event.stopPropagation(); showTip(i, event); },
+  });
   const r = size / 2;
   let cumulative = 0;
   const slices = items.map((entry) => {
@@ -1799,23 +1875,47 @@ function CategoryExpenseChart({ data, settings, setSettings, size = 200 }) {
 
   let chart;
   if (type === "pizza" || type === "rosca") {
-    const inner = type === "rosca" ? r - 34 : 0;
+    const inner = type === "rosca" ? r - 38 : 0;
+    const labelRadius = type === "rosca" ? (r - 1 + inner) / 2 : r * 0.62;
     chart = (
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Gastos por categoria" style={{ maxWidth: "100%", height: "auto", flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Gastos por categoria" style={{ maxWidth: "100%", height: "auto", flexShrink: 0, overflow: "visible" }}>
         {slices.map((slice, i) => (
           <path key={slice.label} d={piePath(r, r, r - 1, inner, slice.start, slice.end)} fill={slice.color} stroke="#fff" strokeWidth={2}
-            fillRule="evenodd" opacity={dim(i)} style={{ cursor: "pointer", transition: "opacity 0.15s" }}
-            onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} onClick={() => setHover(hover === i ? null : i)}>
+            fillRule="evenodd" opacity={dim(i)} style={{ cursor: "pointer", transition: "opacity 0.15s" }} {...handlers(i)}>
             <title>{`${slice.label}: ${fmtBRL(slice.value)} (${pctLabel(slice.pct)})`}</title>
           </path>
         ))}
+        {slices.map((slice, i) => {
+          const angle = slice.end - slice.start;
+          // só escreve dentro da fatia quando o texto cabe; senão o valor fica no tooltip
+          const arcRoom = angle * labelRadius;
+          const fitsPct = items.length === 1 || arcRoom >= 34;
+          // na rosca o anel é estreito: só a porcentagem; o valor aparece no centro ao passar/tocar
+          const fitsValue = type === "pizza" && (items.length === 1 || arcRoom >= 70);
+          if (!fitsPct) return null;
+          const mid = items.length === 1 ? -Math.PI / 2 : (slice.start + slice.end) / 2;
+          const cx = items.length === 1 && type === "pizza" ? r : r + labelRadius * Math.cos(mid);
+          const cy = items.length === 1 && type === "pizza" ? r : r + labelRadius * Math.sin(mid);
+          const fill = readableText(slice.color);
+          return (
+            <text key={`t-${slice.label}`} x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" opacity={dim(i)}
+              style={{ fontSize: 11.5, fontWeight: 700, fill, pointerEvents: "none" }}>
+              {fitsValue ? (
+                <>
+                  <tspan x={cx} dy="-0.55em">{pctLabel(slice.pct)}</tspan>
+                  <tspan x={cx} dy="1.2em" style={{ fontSize: 10.5, fontWeight: 600 }}>{compactBRL(slice.value)}</tspan>
+                </>
+              ) : pctLabel(slice.pct)}
+            </text>
+          );
+        })}
         {type === "rosca" && (
           <>
             <text x={r} y={r - 2} textAnchor="middle" className="cr-serif" style={{ fontSize: 16, fill: "var(--ink)" }}>
-              {hover !== null ? pctLabel(items[hover].pct) : fmtBRL(total)}
+              {hover !== null ? fmtBRL(items[hover].value) : fmtBRL(total)}
             </text>
             <text x={r} y={r + 16} textAnchor="middle" style={{ fontSize: 11, fill: "var(--ink-soft)" }}>
-              {hover !== null ? items[hover].label : "total"}
+              {hover !== null ? `${items[hover].label} · ${pctLabel(items[hover].pct)}` : "total"}
             </text>
           </>
         )}
@@ -1825,30 +1925,34 @@ function CategoryExpenseChart({ data, settings, setSettings, size = 200 }) {
     chart = (
       <div className="cr-catchart-hbars">
         {items.map((entry, i) => (
-          <div key={entry.label} className="cr-catchart-hbar" style={{ opacity: dim(i) }}
-            onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} title={`${entry.label}: ${fmtBRL(entry.value)}`}>
+          <div key={entry.label} className="cr-catchart-hbar" style={{ opacity: dim(i) }} {...handlers(i)}>
             <span className="cr-catchart-hbar-label">{entry.label}</span>
             <div className="cr-catchart-hbar-track">
-              <div style={{ width: `${Math.max(2, (entry.value / max) * 100)}%`, background: entry.color }} />
+              <div className="cr-catchart-hbar-fill" style={{ width: `${Math.max(2, (entry.value / max) * 100)}%`, background: entry.color }} />
             </div>
+            <span className="cr-catchart-hbar-value">{fmtBRL(entry.value)} · {pctLabel(entry.pct)}</span>
           </div>
         ))}
       </div>
     );
   } else {
+    const showValues = items.length <= 6;
     chart = (
       <div className="cr-catchart-vbars" style={{ height: size }}>
         {items.map((entry, i) => (
-          <div key={entry.label} className="cr-catchart-vbar" style={{ opacity: dim(i) }}
-            onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} title={`${entry.label}: ${fmtBRL(entry.value)}`}>
-            <span className="cr-catchart-vbar-value">{pctLabel(entry.pct)}</span>
-            <div style={{ height: `${Math.max(2, (entry.value / max) * 82)}%`, background: entry.color }} />
+          <div key={entry.label} className="cr-catchart-vbar" style={{ opacity: dim(i) }} {...handlers(i)}>
+            <span className="cr-catchart-vbar-value">
+              {showValues && <strong>{compactBRL(entry.value)}</strong>}
+              <span>{pctLabel(entry.pct)}</span>
+            </span>
+            <div style={{ height: `${Math.max(2, (entry.value / max) * 72)}%`, background: entry.color }} />
           </div>
         ))}
       </div>
     );
   }
 
+  const tipItem = tip ? items[tip.i] : null;
   return (
     <div className="cr-catchart">
       <div className="cr-catchart-types" role="group" aria-label="Tipo de gráfico">
@@ -1858,15 +1962,22 @@ function CategoryExpenseChart({ data, settings, setSettings, size = 200 }) {
         ))}
       </div>
       <div className={`cr-catchart-body ${type.startsWith("barras") ? "is-bars" : ""}`}>
-        <div className="cr-catchart-chart">{chart}</div>
+        <div className="cr-catchart-chart" ref={areaRef} onMouseLeave={hideTip} onClick={hideTip}>
+          {chart}
+          {tipItem && (
+            <div className="cr-catchart-tip" role="status"
+              style={{ left: Math.min(Math.max(tip.x, 70), Math.max(70, (areaRef.current?.clientWidth || 0) - 70)), top: tip.y }}>
+              <strong>{tipItem.label}</strong>
+              <span>{fmtBRL(tipItem.value)} · {pctLabel(tipItem.pct)}</span>
+            </div>
+          )}
+        </div>
         <ul className="cr-catchart-legend">
           {items.map((entry, i) => (
             <li key={entry.label} style={{ opacity: hover === null || hover === i ? 1 : 0.5 }}
               onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
               <span className="cr-catchart-dot" style={{ background: entry.color }} />
               <span className="cr-catchart-name">{entry.label}</span>
-              <span className="cr-catchart-value">{fmtBRL(entry.value)}</span>
-              <span className="cr-catchart-pct">{pctLabel(entry.pct)}</span>
             </li>
           ))}
         </ul>
@@ -6081,7 +6192,7 @@ function RoutinesCalendar({ routines, onEdit, onToggle, onRemoveStep }) {
   );
 }
 
-function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal }) {
+function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal, fitness, setFitness, fitnessMedia, setFitnessMedia }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
   const [view, setView] = useState("calendario");
@@ -6117,8 +6228,9 @@ function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal }) {
         <button className={`cr-tabbtn ${view === "calendario" ? "active" : ""}`} onClick={() => setView("calendario")}>Calendário de Rotinas (planejado)</button>
         <button className={`cr-tabbtn ${view === "google" ? "active" : ""}`} onClick={() => setView("google")}>Google Agenda (agendado de verdade)</button>
         <button className={`cr-tabbtn ${view === "lista" ? "active" : ""}`} onClick={() => setView("lista")}>Lista</button>
+        <button className={`cr-tabbtn ${view === "treino" ? "active" : ""}`} onClick={() => setView("treino")}>Treino semanal</button>
       </div>
-      {view !== "google" && (
+      {view !== "google" && view !== "treino" && (
         <div className="cr-row" style={{ marginTop: 12, flexWrap: "wrap" }}>
           <select className="cr-select" style={{ maxWidth: 240 }} aria-label="Filtrar rotinas por categoria"
             value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)}>
@@ -6132,6 +6244,9 @@ function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal }) {
 
       {view === "google" ? (
         <GoogleAgendaView gcal={gcal} setGcal={setGcal} />
+      ) : view === "treino" ? (
+        <WeeklyTrainingView routines={routines} fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia}
+          onOpenDay={setDayOpen} />
       ) : view === "calendario" ? (
         filteredRoutines.length === 0 ? <p className="cr-empty">Nenhuma rotina nesta categoria ainda.</p> : <RoutinesCalendar routines={filteredRoutines} onEdit={setEditing} onToggle={toggleStep}
           onRemoveStep={(routine, stepId) => setRoutines(routines.map((r) => r.id === routine.id ? { ...r, steps: (r.steps || []).filter((s) => s.id !== stepId) } : r))} />
@@ -6185,6 +6300,7 @@ function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal }) {
         const st = rt && rt.steps.find((x) => x.id === dayOpen.stepId);
         if (!st) return null;
         return <WorkoutDayPage routine={rt} step={st} onClose={() => setDayOpen(null)}
+          fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia}
           onChange={(updated) => setRoutines(routines.map((x) => x.id === rt.id ? { ...x, steps: x.steps.map((y) => y.id === updated.id ? updated : y) } : x))} />;
       })()}
       {confirmDel && (
@@ -6297,7 +6413,7 @@ function PlanningTracker({ tasks, setTasks, routines }) {
   );
 }
 
-function PlanningHub({ tasks, setTasks, routines, setRoutines, areas, initial, gcal, setGcal }) {
+function PlanningHub({ tasks, setTasks, routines, setRoutines, areas, initial, gcal, setGcal, fitness, setFitness, fitnessMedia, setFitnessMedia }) {
   const [section, setSection] = useState(initial || "tarefas");
   return (
     <div>
@@ -6311,7 +6427,8 @@ function PlanningHub({ tasks, setTasks, routines, setRoutines, areas, initial, g
         <button className={`cr-tabbtn ${section === "acompanhamento" ? "active" : ""}`} onClick={() => setSection("acompanhamento")}>Acompanhamento</button>
       </div>
       {section === "tarefas" && <TasksView embedded tasks={tasks} setTasks={setTasks} areas={areas} />}
-      {section === "rotinas" && <RoutinesView embedded routines={routines} setRoutines={setRoutines} gcal={gcal} setGcal={setGcal} />}
+      {section === "rotinas" && <RoutinesView embedded routines={routines} setRoutines={setRoutines} gcal={gcal} setGcal={setGcal}
+        fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} />}
       {section === "acompanhamento" && <PlanningTracker tasks={tasks} setTasks={setTasks} routines={routines} />}
     </div>
   );
@@ -6416,7 +6533,7 @@ function PageNameModal({ item, onSave, onClose }) {
 }
 
 // Página de um dia de treino: registre exercícios, séries, repetições, carga, duração e o que mais quiser
-function WorkoutDayPage({ routine, step, onChange, onClose }) {
+function WorkoutDayPage({ routine, step, onChange, onClose, fitness, setFitness, fitnessMedia, setFitnessMedia }) {
   const [date, setDate] = useState(todayStr());
   const sessions = step.sessions || {};
   const day = sessions[date] || { exercises: [], notes: "", extras: [] };
@@ -6482,7 +6599,24 @@ function WorkoutDayPage({ routine, step, onChange, onClose }) {
         <button className="cr-btn" onClick={() => setDay({ ...day, extras: [...extras, { id: uid(), label: "", value: "" }] })}><Plus size={13} /> Adicionar detalhe</button>
       </div>
       <div className="cr-field"><label className="cr-label">Observações do treino</label>
-        <textarea className="cr-textarea" value={day.notes || ""} onChange={(e) => setDay({ ...day, notes: e.target.value })} placeholder="Como foi o treino, o que melhorar…" /></div>
+        <textarea className="cr-textarea" value={day.notes || ""} onChange={(e) => setDay({ ...day, notes: e.target.value })} placeholder="Como me senti, carga usada, o que melhorar…" /></div>
+      {fitnessMedia && setFitnessMedia && (
+        <MediaAttachments mediaKey={workoutMediaKey(routine.id, step.id, date)} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia}
+          label="Fotos e vídeos do treino" />
+      )}
+      {fitness && setFitness && date <= todayStr() && (
+        <div className="cr-row" style={{ marginBottom: 14, flexWrap: "wrap" }}>
+          <button type="button" className={`cr-btn ${fitness.done?.[date] ? "" : "primary"}`} aria-pressed={!!fitness.done?.[date]}
+            onClick={() => setFitness((current) => {
+              const done = { ...(current.done || {}) };
+              if (done[date]) delete done[date]; else done[date] = true;
+              return { ...current, done };
+            })}>
+            <Check size={14} /> {fitness.done?.[date] ? "Treino feito neste dia (desmarcar)" : "Marcar treino deste dia como feito"}
+          </button>
+          <span className="cr-sub" style={{ margin: 0 }}>Conta para a meta semanal em Treino semanal.</span>
+        </div>
+      )}
 
       {allDates.length > 0 && (
         <div className="cr-field"><label className="cr-label">Histórico deste dia da semana</label>
@@ -6497,6 +6631,593 @@ function WorkoutDayPage({ routine, step, onChange, onClose }) {
       )}
       <p className="cr-sub" style={{ marginTop: 14 }}>✓ Tudo é salvo automaticamente.</p>
     </Modal>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* TREINO SEMANAL: registro com fotos/vídeos, medidas, objetivos e streak  */
+/* ---------------------------------------------------------------------- */
+
+const DEFAULT_MEASURE_TYPES = [
+  { id: "peso", name: "Peso", unit: "kg" },
+  { id: "cintura", name: "Cintura", unit: "cm" },
+  { id: "quadril", name: "Quadril", unit: "cm" },
+  { id: "coxa", name: "Coxa", unit: "cm" },
+  { id: "braco", name: "Braço", unit: "cm" },
+];
+
+// Dados leves (toques, medidas, objetivos) ficam em central:fitness;
+// fotos e vídeos ficam à parte em central:fitness-media para não reenviar arquivos a cada toque.
+function normalizeFitness(raw) {
+  const v = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  return {
+    weeklyTarget: normalizeTarget(v.weeklyTarget),
+    done: v.done && typeof v.done === "object" ? v.done : {},
+    measureTypes: Array.isArray(v.measureTypes) ? v.measureTypes : DEFAULT_MEASURE_TYPES,
+    measures: Array.isArray(v.measures) ? v.measures : [],
+    goals: Array.isArray(v.goals) ? v.goals : [],
+  };
+}
+
+function normalizeFitnessMedia(raw) {
+  const v = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  return { items: v.items && typeof v.items === "object" ? v.items : {} };
+}
+
+const workoutMediaKey = (routineId, stepId, date) => `workout:${routineId}:${stepId}:${date}`;
+const measureMediaKey = (measureId) => `measure:${measureId}`;
+
+// Reduz a foto (lado maior até 1280px, JPEG) para caber bem no armazenamento.
+function compressImageFile(file, maxSide = 1280, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Não consegui ler esse arquivo."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => resolve(reader.result); // formato que o navegador não desenha: guarda como veio
+      img.onload = () => {
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const c2d = canvas.getContext("2d");
+        if (!c2d) { resolve(reader.result); return; }
+        c2d.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const out = canvas.toDataURL("image/jpeg", quality);
+        resolve(out.length < String(reader.result).length ? out : reader.result);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+const fmtDateBR = (d) => (d ? d.split("-").reverse().join("/") : "");
+const MAX_VIDEO_MB = 4;
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Não consegui ler esse arquivo."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function linkHost(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "link"; }
+}
+
+function youTubeThumb(url) {
+  const m = String(url || "").match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{6,})/);
+  return m ? `https://img.youtube.com/vi/${m[1]}/hqdefault.jpg` : "";
+}
+
+// Visualizador em tamanho maior (foto ou vídeo), com navegação entre os anexos.
+function MediaLightbox({ items, index, onClose, onIndex }) {
+  const item = items[index];
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") onClose();
+      if (event.key === "ArrowRight" && index < items.length - 1) onIndex(index + 1);
+      if (event.key === "ArrowLeft" && index > 0) onIndex(index - 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [index, items.length, onClose, onIndex]);
+  if (!item) return null;
+  return (
+    <div className="cr-lightbox" role="dialog" aria-modal="true" aria-label="Anexo em tamanho maior" onClick={onClose}>
+      <button type="button" className="cr-btn ghost cr-lightbox-close" aria-label="Fechar" title="Fechar" onClick={onClose}><X size={18} /></button>
+      <div className="cr-lightbox-body" onClick={(event) => event.stopPropagation()}>
+        {item.kind === "video"
+          ? <video src={item.src} controls autoPlay playsInline />
+          : <img src={item.src} alt={item.caption || "Foto do treino"} />}
+        {item.caption && <p className="cr-lightbox-caption">{item.caption}</p>}
+        {items.length > 1 && (
+          <div className="cr-row" style={{ justifyContent: "center", gap: 8 }}>
+            <button type="button" className="cr-btn" disabled={index === 0} aria-label="Anterior" onClick={() => onIndex(index - 1)}><ChevronLeft size={16} /></button>
+            <span style={{ color: "#FFFDF8", fontSize: 13 }}>{index + 1} de {items.length}</span>
+            <button type="button" className="cr-btn" disabled={index === items.length - 1} aria-label="Próximo" onClick={() => onIndex(index + 1)}><ChevronRight size={16} /></button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Galeria pequena com anexos (fotos, vídeos curtos e links) + observação por anexo.
+function MediaAttachments({ mediaKey, fitnessMedia, setFitnessMedia, allowVideo = true, allowLinks = true, label = "Fotos e vídeos" }) {
+  const items = fitnessMedia?.items?.[mediaKey] || [];
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [link, setLink] = useState("");
+  const [viewing, setViewing] = useState(null);
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  const setItems = (update) => setFitnessMedia((current) => {
+    const list = current.items?.[mediaKey] || [];
+    const next = update(list);
+    const all = { ...(current.items || {}) };
+    if (next.length) all[mediaKey] = next; else delete all[mediaKey];
+    return { ...current, items: all };
+  });
+  const addFiles = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+    setError(""); setBusy(true);
+    const added = [];
+    for (const file of files) {
+      try {
+        if (file.type.startsWith("video/")) {
+          if (!allowVideo) { setError("Aqui só cabem fotos."); continue; }
+          if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
+            setError(`O vídeo "${file.name}" passa de ${MAX_VIDEO_MB}MB. Envie para o YouTube, Instagram ou Drive e cole o link abaixo.`);
+            continue;
+          }
+          added.push({ id: uid(), kind: "video", src: await readFileAsDataURL(file), caption: "", createdAt: new Date().toISOString() });
+        } else if (!file.type || file.type.startsWith("image/")) {
+          if (file.size > 15 * 1024 * 1024) { setError(`A foto "${file.name}" é grande demais (máx. 15MB).`); continue; }
+          added.push({ id: uid(), kind: "image", src: await compressImageFile(file), caption: "", createdAt: new Date().toISOString() });
+        } else {
+          setError("Escolha uma foto ou um vídeo.");
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Não consegui ler esse arquivo.");
+      }
+    }
+    if (added.length) setItems((list) => [...list, ...added]);
+    setBusy(false);
+  };
+  const addLink = () => {
+    const url = link.trim();
+    if (!/^https?:\/\/\S+$/i.test(url)) { setError("Cole um link completo, começando com https://"); return; }
+    setError("");
+    setItems((list) => [...list, { id: uid(), kind: "link", src: url, caption: "", createdAt: new Date().toISOString() }]);
+    setLink("");
+  };
+  const viewable = items.filter((x) => x.kind !== "link");
+  return (
+    <div className="cr-field">
+      <label className="cr-label">{label}</label>
+      {items.length > 0 && (
+        <div className="cr-media-grid">
+          {items.map((item) => (
+            <div key={item.id} className="cr-media-item">
+              {item.kind === "link" ? (
+                <a className="cr-media-thumb cr-media-link" href={item.src} target="_blank" rel="noopener noreferrer" title={item.src}>
+                  {youTubeThumb(item.src) ? <img src={youTubeThumb(item.src)} alt="" /> : <ExternalLink size={20} />}
+                  <span>{linkHost(item.src)}</span>
+                </a>
+              ) : (
+                <button type="button" className="cr-media-thumb" aria-label="Abrir em tamanho maior"
+                  onClick={() => setViewing(viewable.findIndex((x) => x.id === item.id))}>
+                  {item.kind === "video"
+                    ? <><video src={item.src} muted playsInline preload="metadata" /><span className="cr-media-play"><Play size={16} /></span></>
+                    : <img src={item.src} alt={item.caption || ""} />}
+                </button>
+              )}
+              <input className="cr-input cr-media-caption" placeholder="Observação" aria-label="Observação do anexo" value={item.caption || ""}
+                onChange={(event) => setItems((list) => list.map((x) => x.id === item.id ? { ...x, caption: event.target.value } : x))} />
+              <button type="button" className="cr-btn ghost danger cr-media-remove" aria-label="Excluir anexo" title="Excluir"
+                onClick={() => setConfirmRemove(item)}><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="cr-row" style={{ flexWrap: "wrap", marginTop: items.length ? 8 : 0 }}>
+        <label className="cr-btn" style={{ cursor: "pointer" }}>
+          <Camera size={14} /> {busy ? "Carregando…" : allowVideo ? "Adicionar fotos ou vídeos" : "Adicionar foto"}
+          <input type="file" accept={allowVideo ? "image/*,video/*" : "image/*"} multiple style={{ display: "none" }} onChange={addFiles} disabled={busy} />
+        </label>
+      </div>
+      {allowLinks && (
+        <div className="cr-row" style={{ marginTop: 8, flexWrap: "wrap" }}>
+          <input className="cr-input" style={{ flex: "1 1 220px" }} placeholder="Link do vídeo (YouTube, Instagram, Drive)" value={link}
+            onChange={(event) => setLink(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addLink(); } }} />
+          <button type="button" className="cr-btn" onClick={addLink}><Link2 size={14} /> Adicionar link</button>
+        </div>
+      )}
+      {allowVideo && <p className="cr-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>Vídeos até {MAX_VIDEO_MB}MB; para vídeos maiores, use o link.</p>}
+      {error && <p className="cr-sub" style={{ color: "#A1493C", margin: "6px 0 0" }}>{error}</p>}
+      {viewing !== null && viewing >= 0 && <MediaLightbox items={viewable} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)} />}
+      {confirmRemove && (
+        <ConfirmModal title="Excluir anexo" message="Excluir este anexo do treino?"
+          onConfirm={() => { setItems((list) => list.filter((x) => x.id !== confirmRemove.id)); setConfirmRemove(null); }}
+          onCancel={() => setConfirmRemove(null)} />
+      )}
+    </div>
+  );
+}
+
+// Contador da semana, streak e mensagem motivacional.
+function WeeklyStreakCard({ fitness, setFitness }) {
+  const today = useToday();
+  const target = normalizeTarget(fitness.weeklyTarget);
+  const weekStart = weekStartOf(today);
+  const count = countInWeek(fitness.done, today);
+  const streak = weeklyStreak(fitness.done, target, today);
+  const met = count >= target;
+  const toggle = (date) => setFitness((current) => {
+    const done = { ...(current.done || {}) };
+    if (done[date]) delete done[date]; else done[date] = true;
+    return { ...current, done };
+  });
+  const setTarget = (value) => setFitness((current) => ({ ...current, weeklyTarget: normalizeTarget(value) }));
+  return (
+    <div className={`cr-card cr-streak-card ${met ? "is-met" : ""}`}>
+      <div className="cr-streak-top">
+        <div>
+          <p className="cr-label" style={{ margin: 0 }}>Treinos desta semana</p>
+          <p className="cr-serif cr-streak-count">{count} <span>de {target}</span></p>
+        </div>
+        <div className="cr-streak-badge" title="Semanas seguidas cumprindo a meta">
+          <Flame size={18} /> <strong>{streak}</strong> <span>{streak === 1 ? "semana seguida" : "semanas seguidas"}</span>
+        </div>
+      </div>
+      <div className="cr-progress-track" style={{ marginTop: 10 }}>
+        <div className="cr-progress-fill" style={{ width: `${Math.min(100, (count / target) * 100)}%`, background: progressColor((count / target) * 100) }} />
+      </div>
+      <p className="cr-streak-message" role="status">{met && <Trophy size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />}{weeklyMessage(count, target, streak)}</p>
+      <div className="cr-streak-days" role="group" aria-label="Marque os dias em que treinou">
+        {WEEKDAY_LABELS.map((label, i) => {
+          const date = shiftDays(weekStart, i);
+          const done = !!fitness.done?.[date];
+          const future = date > today;
+          return (
+            <button key={date} type="button" className={`cr-streak-day ${done ? "done" : ""} ${date === today ? "today" : ""}`}
+              aria-pressed={done} disabled={future} title={future ? "Dia ainda não chegou" : done ? "Desmarcar treino" : "Marcar treino como feito"}
+              onClick={() => toggle(date)}>
+              <span>{label}</span>
+              {done ? <Check size={15} /> : <span className="cr-streak-day-num">{date.slice(8)}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap", marginTop: 12 }}>
+        <button type="button" className={`cr-btn ${fitness.done?.[today] ? "" : "primary"}`} onClick={() => toggle(today)}>
+          <Check size={14} /> {fitness.done?.[today] ? "Treino de hoje feito (desmarcar)" : "Treinei hoje"}
+        </button>
+        <div className="cr-row" style={{ gap: 6 }}>
+          <span className="cr-sub" style={{ margin: 0 }}>Meta semanal:</span>
+          <button type="button" className="cr-btn ghost" aria-label="Diminuir meta semanal" disabled={target <= 1} onClick={() => setTarget(target - 1)}>−</button>
+          <strong aria-live="polite">{target}x</strong>
+          <button type="button" className="cr-btn ghost" aria-label="Aumentar meta semanal" disabled={target >= 7} onClick={() => setTarget(target + 1)}>+</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Gráfico de linha simples com a evolução de uma medida.
+function MeasureLineChart({ points, unit }) {
+  if (points.length === 0) return <p className="cr-empty">Nenhum registro desta medida ainda.</p>;
+  const W = 520, H = 190, P = { l: 40, r: 14, t: 26, b: 28 };
+  const values = points.map((p) => p.value);
+  let min = Math.min(...values), max = Math.max(...values);
+  if (min === max) { min -= 1; max += 1; }
+  const x = (i) => points.length === 1 ? (W + P.l - P.r) / 2 : P.l + (i * (W - P.l - P.r)) / (points.length - 1);
+  const y = (v) => P.t + (1 - (v - min) / (max - min)) * (H - P.t - P.b);
+  const line = points.map((p, i) => `${i ? "L" : "M"} ${x(i)} ${y(p.value)}`).join(" ");
+  const fmtV = (v) => v.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+  const step = Math.max(1, Math.ceil(points.length / 6));
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Evolução da medida" style={{ width: "100%", height: "auto", display: "block" }}>
+      <line x1={P.l} x2={W - P.r} y1={H - P.b} y2={H - P.b} stroke="var(--line)" />
+      <text x={P.l - 6} y={y(max)} textAnchor="end" dominantBaseline="middle" style={{ fontSize: 10, fill: "var(--ink-soft)" }}>{fmtV(max)}</text>
+      <text x={P.l - 6} y={y(min)} textAnchor="end" dominantBaseline="middle" style={{ fontSize: 10, fill: "var(--ink-soft)" }}>{fmtV(min)}</text>
+      <path d={line} fill="none" stroke="#8F1111" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+      {points.map((p, i) => (
+        <g key={p.date + i}>
+          <circle cx={x(i)} cy={y(p.value)} r={4} fill="#FFFDF8" stroke="#8F1111" strokeWidth={2}>
+            <title>{`${fmtDateShort(p.date)}: ${fmtV(p.value)} ${unit || ""}`}</title>
+          </circle>
+          {(i % step === 0 || i === points.length - 1) && (
+            <text x={x(i)} y={H - 10} textAnchor="middle" style={{ fontSize: 10, fill: "var(--ink-soft)" }}>{fmtDateShort(p.date)}</text>
+          )}
+        </g>
+      ))}
+      <text x={x(points.length - 1)} y={y(points[points.length - 1].value) - 10} textAnchor={points.length > 1 ? "end" : "middle"} style={{ fontSize: 11, fontWeight: 700, fill: "var(--ink)" }}>
+        {fmtV(points[points.length - 1].value)} {unit}
+      </text>
+    </svg>
+  );
+}
+
+function MeasureTypesModal({ types, onSave, onClose }) {
+  const [list, setList] = useState(types);
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  const update = (id, field, value) => setList(list.map((t) => t.id === id ? { ...t, [field]: value } : t));
+  const save = () => { onSave(list.filter((t) => t.name.trim()).map((t) => ({ ...t, name: t.name.trim(), unit: (t.unit || "").trim() }))); onClose(); };
+  return (
+    <Modal size="small" title="Tipos de medida" onClose={onClose}>
+      {list.map((t) => (
+        <div key={t.id} className="cr-row" style={{ marginBottom: 6 }}>
+          <input className="cr-input" aria-label="Nome da medida" placeholder="Nome (ex: Panturrilha)" value={t.name} onChange={(e) => update(t.id, "name", e.target.value)} />
+          <input className="cr-input" aria-label="Unidade" placeholder="cm" style={{ maxWidth: 80 }} value={t.unit || ""} onChange={(e) => update(t.id, "unit", e.target.value)} />
+          <button type="button" className="cr-btn ghost danger" aria-label={`Excluir ${t.name || "medida"}`} title="Excluir" onClick={() => setConfirmRemove(t)}><Trash2 size={14} /></button>
+        </div>
+      ))}
+      <button type="button" className="cr-btn" onClick={() => setList([...list, { id: uid(), name: "", unit: "cm" }])}><Plus size={14} /> Novo tipo de medida</button>
+      <p className="cr-sub" style={{ fontSize: 12 }}>Excluir um tipo só o tira da tela; os valores já registrados continuam guardados nos registros.</p>
+      <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 10 }}>
+        <button type="button" className="cr-btn" onClick={onClose}>Cancelar</button>
+        <button type="button" className="cr-btn primary" onClick={save}>Salvar</button>
+      </div>
+      {confirmRemove && (
+        <ConfirmModal title="Excluir tipo de medida" message={`Excluir "${confirmRemove.name || "sem nome"}"?`}
+          onConfirm={() => { setList(list.filter((t) => t.id !== confirmRemove.id)); setConfirmRemove(null); }} onCancel={() => setConfirmRemove(null)} />
+      )}
+    </Modal>
+  );
+}
+
+function MeasureEntryModal({ entry, types, fitnessMedia, setFitnessMedia, onSave, onClose }) {
+  const [form, setForm] = useState(() => entry || { id: uid(), date: todayStr(), values: {}, notes: "" });
+  const save = () => { onSave({ ...form, values: Object.fromEntries(Object.entries(form.values || {}).filter(([, v]) => v !== "" && v !== null && v !== undefined)) }); onClose(); };
+  return (
+    <Modal size="small" title={entry ? "Editar medidas" : "Registrar medidas"} onClose={onClose}>
+      <div className="cr-field"><label className="cr-label">Data</label>
+        <input type="date" className="cr-input" value={form.date} onChange={(e) => e.target.value && setForm({ ...form, date: e.target.value })} /></div>
+      <div className="cr-measure-fields">
+        {types.map((t) => (
+          <div className="cr-field" key={t.id} style={{ margin: 0 }}>
+            <label className="cr-label">{t.name}{t.unit ? ` (${t.unit})` : ""}</label>
+            <input type="number" inputMode="decimal" step="0.1" className="cr-input" value={form.values?.[t.id] ?? ""}
+              onChange={(e) => setForm({ ...form, values: { ...(form.values || {}), [t.id]: e.target.value === "" ? "" : Number(e.target.value) } })} />
+          </div>
+        ))}
+      </div>
+      <div className="cr-field" style={{ marginTop: 10 }}><label className="cr-label">Observação</label>
+        <textarea className="cr-textarea" value={form.notes || ""} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Como estou me sentindo, ciclo, horário da medição…" /></div>
+      <MediaAttachments mediaKey={measureMediaKey(form.id)} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia}
+        allowVideo={false} allowLinks={false} label="Foto de progresso" />
+      <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 10 }}>
+        <button type="button" className="cr-btn" onClick={onClose}>Cancelar</button>
+        <button type="button" className="cr-btn primary" onClick={save}>Salvar</button>
+      </div>
+    </Modal>
+  );
+}
+
+function MeasuresSection({ fitness, setFitness, fitnessMedia, setFitnessMedia }) {
+  const types = fitness.measureTypes;
+  const [chartType, setChartType] = useState(types[0]?.id || "");
+  const [editing, setEditing] = useState(null);
+  const [managing, setManaging] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  const [viewing, setViewing] = useState(null);
+  const activeType = types.find((t) => t.id === chartType) || types[0];
+  const sorted = [...fitness.measures].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const points = activeType ? [...sorted].reverse()
+    .filter((m) => Number.isFinite(Number(m.values?.[activeType.id])) && m.values?.[activeType.id] !== "")
+    .map((m) => ({ date: m.date, value: Number(m.values[activeType.id]) })) : [];
+  const saveEntry = (entry) => setFitness((current) => ({
+    ...current,
+    measures: current.measures.some((m) => m.id === entry.id) ? current.measures.map((m) => m.id === entry.id ? entry : m) : [...current.measures, entry],
+  }));
+  const removeEntry = (entry) => {
+    setFitness((current) => ({ ...current, measures: current.measures.filter((m) => m.id !== entry.id) }));
+    setFitnessMedia((current) => { const items = { ...(current.items || {}) }; delete items[measureMediaKey(entry.id)]; return { ...current, items }; });
+  };
+  return (
+    <div className="cr-card">
+      <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+        <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}><Ruler size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />Medidas</h3>
+        <div className="cr-row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <button type="button" className="cr-btn" onClick={() => setManaging(true)}><SettingsIcon size={13} /> Tipos de medida</button>
+          <button type="button" className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Registrar medidas</button>
+        </div>
+      </div>
+      {types.length > 0 && (
+        <>
+          <div className="cr-catchart-types" role="group" aria-label="Medida no gráfico" style={{ marginTop: 12 }}>
+            {types.map((t) => (
+              <button key={t.id} type="button" className={`cr-tabbtn ${activeType?.id === t.id ? "active" : ""}`} aria-pressed={activeType?.id === t.id}
+                onClick={() => setChartType(t.id)}>{t.name}</button>
+            ))}
+          </div>
+          <div style={{ marginTop: 10 }}><MeasureLineChart points={points} unit={activeType?.unit} /></div>
+        </>
+      )}
+      <p className="cr-label" style={{ margin: "14px 0 6px" }}>Histórico</p>
+      {sorted.length === 0 && <p className="cr-empty">Nenhuma medida registrada ainda.</p>}
+      {sorted.map((m) => {
+        const photos = (fitnessMedia.items?.[measureMediaKey(m.id)] || []).filter((x) => x.kind === "image");
+        return (
+          <div key={m.id} className="cr-measure-row">
+            {photos[0]
+              ? <button type="button" className="cr-media-thumb cr-measure-photo" aria-label="Ver foto de progresso" onClick={() => setViewing({ items: photos, index: 0 })}><img src={photos[0].src} alt="" /></button>
+              : null}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <strong style={{ fontSize: 13.5 }}>{fmtDateBR(m.date)}</strong>
+              <div className="cr-row" style={{ flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                {types.filter((t) => m.values?.[t.id] !== undefined && m.values?.[t.id] !== "").map((t) => (
+                  <span key={t.id} className="cr-chip">{t.name}: {Number(m.values[t.id]).toLocaleString("pt-BR")} {t.unit}</span>
+                ))}
+              </div>
+              {m.notes && <p className="cr-sub" style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{m.notes}</p>}
+            </div>
+            <div className="cr-row" style={{ gap: 2, flex: "0 0 auto" }}>
+              <button type="button" className="cr-btn ghost" aria-label="Editar registro" title="Editar" onClick={() => setEditing(m)}><Pencil size={14} /></button>
+              <button type="button" className="cr-btn ghost danger" aria-label="Excluir registro" title="Excluir" onClick={() => setConfirmRemove(m)}><Trash2 size={14} /></button>
+            </div>
+          </div>
+        );
+      })}
+      {editing && <MeasureEntryModal entry={editing === "new" ? null : editing} types={types} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia}
+        onSave={saveEntry} onClose={() => setEditing(null)} />}
+      {managing && <MeasureTypesModal types={types} onSave={(list) => setFitness((current) => ({ ...current, measureTypes: list }))} onClose={() => setManaging(false)} />}
+      {confirmRemove && (
+        <ConfirmModal title="Excluir registro" message={`Excluir as medidas de ${fmtDateBR(confirmRemove.date)} (e a foto de progresso)?`}
+          onConfirm={() => { removeEntry(confirmRemove); setConfirmRemove(null); }} onCancel={() => setConfirmRemove(null)} />
+      )}
+      {viewing && <MediaLightbox items={viewing.items} index={viewing.index} onIndex={(i) => setViewing({ ...viewing, index: i })} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+function FitnessGoalModal({ goal, types, onSave, onClose }) {
+  const [form, setForm] = useState(() => goal || { id: uid(), name: "", deadline: "", status: "andamento", numeric: false, unit: "", start: "", current: "", target: "", measureTypeId: "" });
+  const num = (v) => (v === "" ? "" : Number(v));
+  const save = () => { if (!form.name.trim()) return; onSave({ ...form, name: form.name.trim() }); onClose(); };
+  return (
+    <Modal size="small" title={goal ? "Editar objetivo" : "Novo objetivo"} onClose={onClose}>
+      <div className="cr-field"><label className="cr-label">Objetivo</label>
+        <input className="cr-input" autoFocus placeholder="ex: treinar 4x por semana, fazer o heel stretch" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+      <div className="cr-row" style={{ flexWrap: "wrap" }}>
+        <div className="cr-field" style={{ flex: "1 1 150px" }}><label className="cr-label">Prazo (opcional)</label>
+          <input type="date" className="cr-input" value={form.deadline || ""} onChange={(e) => setForm({ ...form, deadline: e.target.value })} /></div>
+        <div className="cr-field" style={{ flex: "1 1 150px" }}><label className="cr-label">Status</label>
+          <select className="cr-select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            <option value="andamento">Em andamento</option><option value="concluido">Concluído</option>
+          </select></div>
+      </div>
+      <label className="cr-row" style={{ gap: 8, fontSize: 13.5, cursor: "pointer", margin: "4px 0 10px" }}>
+        <input type="checkbox" checked={!!form.numeric} onChange={(e) => setForm({ ...form, numeric: e.target.checked })} style={{ minHeight: 0 }} />
+        Meta numérica (mostra barra de progresso)
+      </label>
+      {form.numeric && (
+        <>
+          <div className="cr-field"><label className="cr-label">Usar uma medida como valor atual (opcional)</label>
+            <select className="cr-select" value={form.measureTypeId || ""} onChange={(e) => {
+              const t = types.find((x) => x.id === e.target.value);
+              setForm({ ...form, measureTypeId: e.target.value, unit: t ? t.unit : form.unit });
+            }}>
+              <option value="">Não, vou atualizar à mão</option>
+              {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select></div>
+          <div className="cr-measure-fields">
+            <div className="cr-field" style={{ margin: 0 }}><label className="cr-label">Valor inicial</label>
+              <input type="number" inputMode="decimal" className="cr-input" value={form.start} onChange={(e) => setForm({ ...form, start: num(e.target.value) })} /></div>
+            {!form.measureTypeId && (
+              <div className="cr-field" style={{ margin: 0 }}><label className="cr-label">Valor atual</label>
+                <input type="number" inputMode="decimal" className="cr-input" value={form.current} onChange={(e) => setForm({ ...form, current: num(e.target.value) })} /></div>
+            )}
+            <div className="cr-field" style={{ margin: 0 }}><label className="cr-label">Meta</label>
+              <input type="number" inputMode="decimal" className="cr-input" value={form.target} onChange={(e) => setForm({ ...form, target: num(e.target.value) })} /></div>
+            <div className="cr-field" style={{ margin: 0 }}><label className="cr-label">Unidade</label>
+              <input className="cr-input" placeholder="cm, kg, vezes…" value={form.unit || ""} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></div>
+          </div>
+        </>
+      )}
+      <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+        <button type="button" className="cr-btn" onClick={onClose}>Cancelar</button>
+        <button type="button" className="cr-btn primary" disabled={!form.name.trim()} onClick={save}>Salvar</button>
+      </div>
+    </Modal>
+  );
+}
+
+function FitnessGoalsSection({ fitness, setFitness }) {
+  const [editing, setEditing] = useState(null);
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  const latestMeasure = (typeId) => {
+    const found = [...fitness.measures].sort((a, b) => (a.date < b.date ? 1 : -1)).find((m) => m.values?.[typeId] !== undefined && m.values?.[typeId] !== "");
+    return found ? Number(found.values[typeId]) : "";
+  };
+  const save = (goal) => setFitness((current) => ({
+    ...current,
+    goals: current.goals.some((g) => g.id === goal.id) ? current.goals.map((g) => g.id === goal.id ? goal : g) : [...current.goals, goal],
+  }));
+  const toggleStatus = (goal) => save({ ...goal, status: goal.status === "concluido" ? "andamento" : "concluido" });
+  const goals = [...fitness.goals].sort((a, b) => (a.status === "concluido") - (b.status === "concluido"));
+  return (
+    <div className="cr-card">
+      <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+        <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}><Target size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />Objetivos</h3>
+        <button type="button" className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo objetivo</button>
+      </div>
+      {goals.length === 0 && <p className="cr-empty" style={{ marginTop: 10 }}>Nenhum objetivo ainda. Ex.: "treinar 4x por semana", "fazer o heel stretch".</p>}
+      <div style={{ marginTop: 8 }}>
+        {goals.map((g) => {
+          const current = g.numeric && g.measureTypeId ? latestMeasure(g.measureTypeId) : g.current;
+          const pct = g.numeric ? numericGoalProgress(g.start, current, g.target) : null;
+          const doneStatus = g.status === "concluido";
+          return (
+            <div key={g.id} className="cr-list-row" style={{ alignItems: "flex-start" }}>
+              <div className={`cr-checkbox ${doneStatus ? "checked" : ""}`} role="checkbox" aria-checked={doneStatus} tabIndex={0}
+                aria-label={doneStatus ? "Marcar como em andamento" : "Marcar como concluído"}
+                onClick={() => toggleStatus(g)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleStatus(g); } }}>
+                {doneStatus && <Check size={13} />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, textDecoration: doneStatus ? "line-through" : "none", overflowWrap: "anywhere" }}>{g.name}</div>
+                <div className="cr-row" style={{ flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                  <span className="cr-chip">{doneStatus ? "Concluído" : "Em andamento"}</span>
+                  {g.deadline && <span className="cr-chip">até {fmtDateShort(g.deadline)}</span>}
+                  {g.numeric && current !== "" && <span className="cr-chip">{Number(current).toLocaleString("pt-BR")} → {Number(g.target).toLocaleString("pt-BR")} {g.unit}</span>}
+                </div>
+                {pct !== null && (
+                  <div style={{ marginTop: 6 }}>
+                    <div className="cr-progress-track"><div className="cr-progress-fill" style={{ width: `${pct}%`, background: progressColor(pct) }} /></div>
+                    <p className="cr-sub" style={{ margin: "4px 0 0", fontSize: 12 }}>{pct}% do caminho</p>
+                  </div>
+                )}
+              </div>
+              <div className="cr-row" style={{ gap: 2, flex: "0 0 auto" }}>
+                <button type="button" className="cr-btn ghost" aria-label="Editar objetivo" title="Editar" onClick={() => setEditing(g)}><Pencil size={14} /></button>
+                <button type="button" className="cr-btn ghost danger" aria-label="Excluir objetivo" title="Excluir" onClick={() => setConfirmRemove(g)}><Trash2 size={14} /></button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {editing && <FitnessGoalModal goal={editing === "new" ? null : editing} types={fitness.measureTypes} onSave={save} onClose={() => setEditing(null)} />}
+      {confirmRemove && (
+        <ConfirmModal title="Excluir objetivo" message={`Excluir o objetivo "${confirmRemove.name}"?`}
+          onConfirm={() => { setFitness((current) => ({ ...current, goals: current.goals.filter((g) => g.id !== confirmRemove.id) })); setConfirmRemove(null); }}
+          onCancel={() => setConfirmRemove(null)} />
+      )}
+    </div>
+  );
+}
+
+// Aba "Treino semanal" dentro de Planejamento > Rotinas.
+function WeeklyTrainingView({ routines, fitness, setFitness, fitnessMedia, setFitnessMedia, onOpenDay }) {
+  const workoutSteps = [];
+  routines.forEach((r) => (r.steps || []).forEach((s) => {
+    if (stepCategoryId(s) === "treino" || routineCategoryId(r) === "treino") workoutSteps.push({ routine: r, step: s });
+  }));
+  return (
+    <div className="cr-training">
+      <WeeklyStreakCard fitness={fitness} setFitness={setFitness} />
+      <div className="cr-card">
+        <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}><Dumbbell size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />Registro dos treinos</h3>
+        <p className="cr-sub" style={{ margin: "4px 0 10px" }}>Abra um treino para registrar exercícios, observações, fotos e vídeos do dia.</p>
+        {workoutSteps.length === 0 && <p className="cr-empty">Nenhuma etapa de rotina na categoria Treino. Crie ou edite uma rotina e escolha a categoria Treino.</p>}
+        <div className="cr-row" style={{ flexWrap: "wrap", gap: 6 }}>
+          {workoutSteps.map(({ routine, step }) => (
+            <button key={routine.id + step.id} type="button" className="cr-btn" onClick={() => onOpenDay({ routineId: routine.id, stepId: step.id })}>
+              {step.text || routine.name}{stepRangeLabel(step) ? ` · ${stepRangeLabel(step)}` : ""}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="cr-training-grid">
+        <FitnessGoalsSection fitness={fitness} setFitness={setFitness} />
+        <MeasuresSection fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} />
+      </div>
+    </div>
   );
 }
 
@@ -7008,7 +7729,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
         <div><h1 className="cr-h1 cr-serif">Procedimentos Estéticos</h1><p className="cr-sub">{fmtBRL(realizedTotal)} realizados · {fmtBRL(plannedTotal)} planejados no período selecionado.</p></div>
         {section === "procedimentos" && (
           <div className="cr-row" style={{ flexWrap: "wrap" }}>
-            <button className="cr-btn" onClick={() => setCustomize(true)}><SettingsIcon size={13} /> Personalizar card</button>
+            <button className="cr-btn ghost" title="Personalizar" aria-label="Personalizar" onClick={() => setCustomize(true)}><Palette size={14} /></button>
             <button className="cr-btn" onClick={() => ctx.openManager("procStatus")}><Plus size={14} /> Novo título</button>
             <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo procedimento</button>
           </div>
@@ -8165,7 +8886,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
         </div>
         {activeSection && (
           <div className="cr-row" style={{ flexWrap: "wrap" }}>
-            <button className="cr-btn" onClick={() => setCustomizingCards(true)}><Palette size={13} /> Personalizar cards</button>
+            <button className="cr-btn ghost" title="Personalizar" aria-label="Personalizar" onClick={() => setCustomizingCards(true)}><Palette size={14} /></button>
             <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
           </div>
         )}
@@ -9286,6 +10007,10 @@ export default function App({ onSignOut }) {
   const [investments, setInvestmentsState] = useState([]);
   const [studyAreas, setStudyAreasState] = useState([]);
   const [gcal, setGcalState] = useState({ calendars: [], updatedAt: "" });
+  const [fitness, setFitnessState] = useState(() => normalizeFitness(null));
+  const [fitnessMedia, setFitnessMediaState] = useState(() => normalizeFitnessMedia(null));
+  const fitnessRef = useRef(fitness);
+  const fitnessMediaRef = useRef(fitnessMedia);
   const [manager, setManager] = useState(null);
   const [navEdit, setNavEdit] = useState(false);
   const [pageModal, setPageModal] = useState(null);
@@ -9305,7 +10030,7 @@ export default function App({ onSignOut }) {
       });
 
       await reloadUserData();
-      const [tk, gl, hb, fn, nt, ar, ap, st, sd, cr, rt, bt, vs, jr, sh, hs, hby, scr, acc, crd, pdv, structureFlag, procWishlistFlag, personaldevFlag, dashLayoutV2Flag, beautyObjFlag, beautyProdFlag, beautyHistFlag, pgs, plc, inv, sar, notesGoneFlag, gcalSaved] = await Promise.all([
+      const [tk, gl, hb, fn, nt, ar, ap, st, sd, cr, rt, bt, vs, jr, sh, hs, hby, scr, acc, crd, pdv, structureFlag, procWishlistFlag, personaldevFlag, dashLayoutV2Flag, beautyObjFlag, beautyProdFlag, beautyHistFlag, pgs, plc, inv, sar, notesGoneFlag, gcalSaved, fitnessSaved, fitnessMediaSaved] = await Promise.all([
         withTimeout(storageGet(KEYS.tasks, DEFAULT_TASKS), DEFAULT_TASKS),
         withTimeout(storageGet(KEYS.goals, DEFAULT_GOALS), DEFAULT_GOALS),
         withTimeout(storageGet(KEYS.habits, DEFAULT_HABITS), DEFAULT_HABITS),
@@ -9340,6 +10065,8 @@ export default function App({ onSignOut }) {
         withTimeout(storageGet(KEYS.studyareas, []), []),
         withTimeout(storageGet(NOTES_PAGE_REMOVED_FLAG_KEY, false), false),
         withTimeout(storageGet(KEYS.gcal, null), null),
+        withTimeout(storageGet(KEYS.fitness, null), null),
+        withTimeout(storageGet(KEYS.fitnessMedia, null), null),
       ]);
       let finalTasks = tk, finalGoals = gl, finalRoutines = rt, finalStudy = sd, finalShopping = sh, finalVision = vs;
       let finalHabits = hb, finalBeauty = bt, finalNotes = nt, finalApps = ap;
@@ -9468,6 +10195,8 @@ export default function App({ onSignOut }) {
         if (changed) bg(storageSet(KEYS.tasks, finalTasks)); }
       // Google Agenda: converte o formato antigo (uma agenda) para a lista de agendas
       setGcalState(normalizeGcal(gcalSaved));
+      setFitnessState(normalizeFitness(fitnessSaved)); fitnessRef.current = normalizeFitness(fitnessSaved);
+      setFitnessMediaState(normalizeFitnessMedia(fitnessMediaSaved)); fitnessMediaRef.current = normalizeFitnessMedia(fitnessMediaSaved);
       setStudyAreasState(finalStudyAreas);
       setPagesState(pgs || []); setPlacesState(plc || []); setInvestmentsState(inv || []);
       setTasksState(finalTasks); setGoalsState(finalGoals); setHabitsState(finalHabits); setFinanceState(finalFinance);
@@ -9542,6 +10271,15 @@ export default function App({ onSignOut }) {
   const setAccounts = useCallback((v) => { setAccountsState(v); return storageSet(KEYS.accounts, v); }, []);
   const setCards = useCallback((v) => { setCardsState(v); return storageSet(KEYS.cards, v); }, []);
   const setGcal = useCallback((v) => { setGcalState(v); return storageSet(KEYS.gcal, v); }, []);
+  // Treino semanal: aceita valor ou função (várias mudanças seguidas não se perdem)
+  const setFitness = useCallback((v) => {
+    const next = typeof v === "function" ? v(fitnessRef.current) : v;
+    fitnessRef.current = next; setFitnessState(next); return storageSet(KEYS.fitness, next);
+  }, []);
+  const setFitnessMedia = useCallback((v) => {
+    const next = typeof v === "function" ? v(fitnessMediaRef.current) : v;
+    fitnessMediaRef.current = next; setFitnessMediaState(next); return storageSet(KEYS.fitnessMedia, next);
+  }, []);
   const automaticCalendarRefresh = useRef(false);
   useEffect(() => {
     if (!loaded || automaticCalendarRefresh.current || !gcal.calendars.some(canRefreshCalendar)) return;
@@ -9599,6 +10337,8 @@ export default function App({ onSignOut }) {
     if (backup.investments) writes.push(setInvestments(backup.investments));
     if (backup.studyAreas) writes.push(setStudyAreas(backup.studyAreas));
     if (backup.gcal) writes.push(setGcal(normalizeGcal(backup.gcal)));
+    if (backup.fitness) writes.push(setFitness(normalizeFitness(backup.fitness)));
+    if (backup.fitnessMedia) writes.push(setFitnessMedia(normalizeFitnessMedia(backup.fitnessMedia)));
     if (writes.length === 0) {
       throw new Error("O arquivo não contém dados reconhecidos da Central.");
     }
@@ -9608,7 +10348,7 @@ export default function App({ onSignOut }) {
     }
   };
 
-  const allData = { tasks, goals, habits, finance, notes, areas, apps, settings, study, career, routines, beauty, vision, journal, shopping, house, hobbies, selfcare, accounts, cards, personaldev, pages, places, investments, studyAreas, gcal };
+  const allData = { tasks, goals, habits, finance, notes, areas, apps, settings, study, career, routines, beauty, vision, journal, shopping, house, hobbies, selfcare, accounts, cards, personaldev, pages, places, investments, studyAreas, gcal, fitness, fitnessMedia };
 
   // se a página aberta foi excluída, vai para a primeira que sobrou
   useEffect(() => {
@@ -9809,8 +10549,8 @@ export default function App({ onSignOut }) {
       <div className="cr-main">
         {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={integratedFinance} areas={areas} settings={settings} personaldev={personaldev} gcal={gcal} setGcal={setGcal} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab} />}
         {tab === "search" && <GlobalSearchView query={searchQuery} setQuery={setSearchQuery} all={searchData} goTo={setTab} />}
-        {tab === "tasks" && <PlanningHub tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="tarefas" gcal={gcal} setGcal={setGcal} />}
-        {tab === "routines" && <PlanningHub key="routines" tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="rotinas" gcal={gcal} setGcal={setGcal} />}
+        {tab === "tasks" && <PlanningHub tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="tarefas" gcal={gcal} setGcal={setGcal} fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} />}
+        {tab === "routines" && <PlanningHub key="routines" tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="rotinas" gcal={gcal} setGcal={setGcal} fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} />}
         {currentPage && <CustomPageView key={currentPage.id} page={currentPage} setPage={(updated) => setPages(pages.map((pg) => pg.id === updated.id ? updated : pg))} />}
         {tab === "goals" && <GoalsView goals={goals} setGoals={setGoals} areas={areas} />}
         {tab === "habits" && <HabitsView habits={habits} setHabits={setHabits} areas={areas} />}
