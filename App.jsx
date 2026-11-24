@@ -3,6 +3,10 @@ import { reloadUserData, storageDelete, storageGet, storageSet } from "./src/lib
 import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
 import { habitStreak } from "./src/lib/habitStreak.js";
+import {
+  financeLinkKey, groupEntries, isProcedureExpense, linkedCardFor, planInstallments, shiftMonth as shiftMonthStr,
+  syncCardFromFinance, syncFinanceFromCard,
+} from "./src/lib/procedureLink.js";
 import { countInWeek, normalizeTarget, numericGoalProgress, shiftDays, weekStartOf, weeklyMessage, weeklyStreak } from "./src/lib/workoutWeek.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, summarizeFinanceMonth } from "./src/lib/financePlan.js";
@@ -18,7 +22,7 @@ import {
   Plus, Trash2, Pencil, X, Check, Search, Download, Upload, Sparkles, Flame, ChevronLeft, ChevronRight,
   GraduationCap, Briefcase, Sparkle, Image as ImageIcon, BookHeart, SearchCheck, Compass,
   HardDrive, Mail, FileText, BookOpen, ShoppingBag, ShoppingCart, Heart, Bot, Palette, ListChecks,
-  Music2, Play, Pause, SkipBack, SkipForward, Star, Instagram, Camera, Ruler, Trophy, Dumbbell, ExternalLink
+  Music2, Play, Pause, SkipBack, SkipForward, Star, Instagram, Camera, Ruler, Trophy, Dumbbell, ExternalLink, Bell
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -1448,6 +1452,31 @@ const GlobalStyle = () => (
       display: grid; gap: 2px; padding: 6px 10px; border-radius: 8px; white-space: nowrap; font-size: 12px; text-align: center;
       background: var(--ink); color: #FFFDF8; box-shadow: 0 6px 18px rgb(33 29 26 / 18%);
     }
+    .cr-installment-preview { margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #FBF8F4; }
+    .cr-installment-preview ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+    .cr-installment-preview li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; padding: 4px 6px; border-radius: 8px; }
+    .cr-installment-preview li.is-current { background: #F7E9E4; }
+    .cr-finance-link-badge { display: inline-flex; vertical-align: 1px; margin-left: 6px; color: var(--ink-soft); }
+    .cr-proc-alerts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; margin: 14px 0 4px; }
+    .cr-proc-alerts.is-empty { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 14px; border: 1px dashed var(--line); border-radius: 12px; }
+    .cr-proc-alerts-col { min-width: 0; display: grid; gap: 8px; align-content: start; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+    .cr-proc-alerts-col.is-attention { border-color: #E3B5AB; background: #FDF5F1; }
+    .cr-proc-alerts-col h3 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 15px; }
+    .cr-proc-alerts-col.is-attention h3 { color: #A1493C; }
+    .cr-proc-alert-item {
+      display: grid; gap: 3px; width: 100%; min-width: 0; padding: 9px 11px; text-align: left; cursor: pointer; font: inherit; color: var(--ink);
+      border: 1px solid var(--line); border-radius: 10px; background: #FBF8F4;
+    }
+    .cr-proc-alert-item:hover, .cr-proc-alert-item:focus-visible { border-color: var(--ink); outline: none; }
+    .cr-proc-alert-item.is-soon { background: #F7E9E4; border-color: #D9A698; }
+    .cr-proc-alert-item.is-book { background: #FFFDF8; border-color: #E8C9A0; border-left: 4px solid #D99A2B; }
+    .cr-proc-alert-item.is-late { border-left-color: #A1493C; }
+    .cr-proc-alert-name { font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
+    .cr-proc-alert-meta { font-size: 12.5px; color: var(--ink-soft); overflow-wrap: anywhere; }
+    .cr-proc-alert-badge { display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 999px; background: #8F1111; color: #FFFDF8; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .central-root .cr-proc-alert-action { padding: 4px 10px; font-size: 12.5px; min-height: 34px; }
+    .cr-proc-alerts-warn { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
+    .central-root .cr-proc-alerts-warn input { width: 64px; padding: 4px 8px; min-height: 32px; font-size: 14px; }
     /* Treino semanal */
     .cr-training { display: grid; gap: 16px; margin-top: 14px; min-width: 0; }
     .cr-training-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; align-items: start; min-width: 0; }
@@ -3105,8 +3134,20 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     const next = months.filter(Boolean).reduce((acc, month) => ensureInvoiceRecord(acc, month, todayStr()), card);
     if (next !== card) setCards(cards.map((entry) => entry.id === cardId ? next : entry));
   };
+  // Beleza + Procedimento: cria/atualiza o card vinculado em Procedimentos estéticos.
+  const syncLinkedCard = (nextFinance, entry) => {
+    if (!entry || entry.type !== "saida" && !linkedCardFor(beauty, entry)) return;
+    if (isProcedureExpense(entry)) {
+      const updated = syncCardFromFinance(beauty, groupEntries(nextFinance, entry), { today: todayStr(), newId: uid });
+      if (updated !== beauty) setBeauty(updated);
+      return;
+    }
+    // deixou de ser Beleza + Procedimento: some com o card criado agora há pouco, se você ainda não mexeu nele
+    const card = linkedCardFor(beauty, entry);
+    if (card && card.financeAuto && !card.userEdited && !(card.history || []).length) setBeauty(beauty.filter((item) => item.id !== card.id));
+  };
   const save = (data) => {
-    const { installmentsCount, recurringEnabled, recurringMonths, invoiceMonthExplicit, ...base } = data;
+    const { installmentsCount, recurringEnabled, recurringMonths, invoiceMonthExplicit, _editScope, paidCount, amountMode, firstInvoiceMonth, ...base } = data;
     if (base.type === "saida" && base.paymentMethod === "Crédito" && base.cardId) {
       const card = cards.find((entry) => entry.id === base.cardId);
       base.invoiceMonthExplicit = !!invoiceMonthExplicit;
@@ -3127,11 +3168,23 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     } else {
       delete base.plannedAmount;
     }
-    return setFinance(upsertById(manualFinance, base));
+    let next = upsertById(manualFinance, base);
+    // parcela editada com "todas as parcelas": leva os dados comuns para as outras parcelas do grupo
+    if (_editScope === "all" && base.installmentGroup?.id) {
+      const groupId = base.installmentGroup.id;
+      const shared = Object.fromEntries(["type", "category", "expenseClass", "desc", "paymentMethod", "cardId", "accountId", "link", "amount", "plannedAmount"]
+        .filter((key) => key in base).map((key) => [key, base[key]]));
+      const total = Number(base.installmentGroup.total) || 1;
+      next = next.map((entry) => entry.installmentGroup?.id === groupId
+        ? { ...entry, ...shared, installmentGroup: { ...entry.installmentGroup, totalAmount: Math.round(Number(base.amount) * total * 100) / 100 } }
+        : entry);
+    }
+    syncLinkedCard(next, base);
+    return setFinance(next);
   };
   // parcelamento e recorrência geram vários lançamentos de uma vez, então têm um botão próprio
   const generate = (data) => {
-    const { installmentsCount, recurringEnabled, recurringMonths, invoiceMonthExplicit, id, ...base } = data;
+    const { installmentsCount, recurringEnabled, recurringMonths, invoiceMonthExplicit, id, _editScope, paidCount, amountMode, firstInvoiceMonth, ...base } = data;
     const explicitInvoiceMonth = invoiceMonthExplicit ? base.invoiceMonth : "";
     delete base.invoiceMonth;
     delete base.invoiceMonthExplicit;
@@ -3140,9 +3193,49 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     const isInstallmentPurchase = base.type === "saida" && base.paymentMethod === "Crédito"
       && !!base.cardId && Number(installmentsCount) > 1;
     const card = cards.find((entry) => entry.id === base.cardId);
-    const generated = isInstallmentPurchase
+    const paid = isInstallmentPurchase ? Math.max(0, Math.min(Number(installmentsCount) - 1, Number(paidCount) || 0)) : 0;
+    // parcelas já pagas ou mês da 1ª parcela ajustado na pré-visualização: cada parcela vai para a fatura do seu mês
+    if (isInstallmentPurchase && (paid > 0 || firstInvoiceMonth)) {
+      const startMonth = firstInvoiceMonth || shiftMonthStr(todayStr().slice(0, 7), -paid);
+      const groupId = `installments:${id}`;
+      const total = Number(base.amount) || 0;
+      const plan = planInstallments({ total, count: Number(installmentsCount), paidCount: paid, purchaseDate: base.date, firstInvoiceMonth: startMonth });
+      const entries = plan.map((p) => ({
+        ...base,
+        id: `${groupId}:${p.index}`,
+        amount: p.amount,
+        plannedAmount: p.amount,
+        date: p.date,
+        invoiceMonth: p.invoiceMonth,
+        invoiceMonthExplicit: true,
+        installmentGroup: { id: groupId, index: p.index, total: p.total, totalAmount: total, purchaseDate: base.date },
+        status: p.paid || (paid === 0 && p.index === 1 && base.status === "pago" && p.date <= todayStr())
+          ? "pago" : base.status === "cancelado" ? "cancelado" : "agendado",
+      }));
+      if (card) {
+        let nextCard = entries.reduce((acc, entry) => ensureInvoiceRecord(acc, entry.invoiceMonth, todayStr()), card);
+        // parcelas já pagas: registra o pagamento delas na fatura do mês para não aparecerem como dívida
+        const paidPayments = entries.filter((entry) => entry.status === "pago").map((entry) => ({
+          id: uid(), invoiceMonth: entry.invoiceMonth, date: entry.date, amount: entry.amount, auto: true, installmentEntryId: entry.id,
+        }));
+        if (paidPayments.length) nextCard = { ...nextCard, payments: [...(nextCard.payments || []), ...paidPayments] };
+        if (nextCard !== card) setCards(cards.map((entry) => entry.id === card.id ? nextCard : entry));
+        if (tab === "fatura") { setInvoiceCard(card.id); setSelectedMonth(entries[paid].invoiceMonth); }
+      }
+      const nextFinance = [...entries, ...rest];
+      setFinance(nextFinance);
+      syncLinkedCard(nextFinance, entries[0]);
+      setEditing(null);
+      setInvoiceExpenseCardId("");
+      setInvoiceExpenseMonth("");
+      return;
+    }
+    const generatedRaw = isInstallmentPurchase
       ? createCardFinanceInstallments(base, Number(installmentsCount), card, explicitInvoiceMonth)
       : generateRecurringOccurrences(base, Number(recurringMonths) || 12);
+    const generated = isInstallmentPurchase
+      ? generatedRaw.map((entry) => ({ ...entry, installmentGroup: { ...entry.installmentGroup, purchaseDate: base.date } }))
+      : generatedRaw;
     const withInvoiceMonths = isInstallmentPurchase && explicitInvoiceMonth
       ? generated.map((entry) => ({ ...entry, invoiceMonthExplicit: true }))
       : base.type === "saida" && base.paymentMethod === "Crédito" && card
@@ -3156,15 +3249,58 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       ensureInvoices(card.id, months);
       if (tab === "fatura" && months[0]) { setInvoiceCard(card.id); setSelectedMonth(months[0]); }
     }
-    setFinance([...withInvoiceMonths, ...rest]);
+    const nextFinance = [...withInvoiceMonths, ...rest];
+    setFinance(nextFinance);
+    if (withInvoiceMonths[0]) syncLinkedCard(nextFinance, withInvoiceMonths[0]);
     setEditing(null);
     setInvoiceExpenseCardId("");
     setInvoiceExpenseMonth("");
   };
-  const discardDraft = (id) => { if (manualFinance.some((x) => x.id === id)) setFinance(manualFinance.filter((x) => x.id !== id)); };
+  const discardDraft = (id) => {
+    if (manualFinance.some((x) => x.id === id)) setFinance(manualFinance.filter((x) => x.id !== id));
+    // o rascunho virou parcelamento: o card criado para ele (ainda intocado) sai também
+    const card = (beauty || []).find((item) => item.financeLink?.key === id);
+    if (card && card.financeAuto && !card.userEdited && !(card.history || []).length) setBeauty(beauty.filter((item) => item.id !== card.id));
+  };
+  // Parcela: pergunta se a edição vale só para ela ou para todas as parcelas da compra.
+  const [editScopeAsk, setEditScopeAsk] = useState(null);
+  const openEdit = (entry) => {
+    if (entry?.installmentGroup && !entry.sourceRef) { setEditScopeAsk(entry); return; }
+    setEditing(entry);
+  };
+  // Exclusão de lançamento manual: parcelas perguntam se é só esta ou todas; card vinculado pergunta se sai junto.
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  const executeRemove = ({ entry, scope, removeCard }) => {
+    const ids = new Set(scope === "all" ? groupEntries(manualFinance, entry).map((item) => item.id) : [entry.id]);
+    const nextFinance = manualFinance.filter((item) => !ids.has(item.id));
+    setFinance(nextFinance);
+    // pagamentos automáticos das parcelas já pagas saem junto
+    if (entry.cardId && cards.some((card) => (card.payments || []).some((payment) => ids.has(payment.installmentEntryId)))) {
+      setCards(cards.map((card) => ({ ...card, payments: (card.payments || []).filter((payment) => !ids.has(payment.installmentEntryId)) })));
+    }
+    const card = linkedCardFor(beauty, entry);
+    if (!card) return;
+    const remaining = nextFinance.filter((item) => financeLinkKey(item) === financeLinkKey(entry));
+    if (remaining.length === 0) {
+      if (removeCard) {
+        setBeauty(beauty.flatMap((item) => item.id !== card.id ? [item] : (item.history || []).length ? [{ ...item, archived: true, recurring: false }] : []));
+      } else {
+        setBeauty(beauty.map((item) => {
+          if (item.id !== card.id) return item;
+          const { financeLink, financeAuto, ...rest } = item;
+          return rest;
+        }));
+      }
+    } else {
+      const updated = syncCardFromFinance(beauty, remaining, { today: todayStr(), newId: uid });
+      if (updated !== beauty) setBeauty(updated);
+    }
+  };
   const remove = (id) => {
     const transaction = finance.find((entry) => entry.id === id);
     if (!transaction?.sourceRef) {
+      const entry = manualFinance.find((item) => item.id === id);
+      if (entry && (entry.installmentGroup || linkedCardFor(beauty, entry))) { setConfirmRemove(entry); return; }
       setFinance(manualFinance.filter((entry) => entry.id !== id));
       return;
     }
@@ -3451,7 +3587,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             <p className="cr-label" style={{ marginBottom: 6 }}>Lançamentos do mês</p>
             {monthTx.length === 0 && <p className="cr-empty">Nada neste mês.</p>}
             {monthTx.slice().sort((a, b) => b.date.localeCompare(a.date)).map((f) => (
-              <FinanceRow key={f.id} f={f} onEdit={() => setEditing(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} />
+              <FinanceRow key={f.id} f={f} onEdit={() => openEdit(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} />
             ))}
           </div>
         </div>
@@ -3470,7 +3606,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           <div className="cr-card">
             {filteredTx.length === 0 && <p className="cr-empty">Nenhum lançamento encontrado.</p>}
             {filteredTx.map((f) => (
-              <FinanceRow key={f.id} f={f} onEdit={() => setEditing(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} />
+              <FinanceRow key={f.id} f={f} onEdit={() => openEdit(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} />
             ))}
           </div>
         </div>
@@ -3550,7 +3686,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                       {f.installmentGroup && <span className="cr-chip">{f.installmentGroup.index}/{f.installmentGroup.total}</span>}
                       <span style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: "nowrap" }}>{fmtBRL(f.amount)}</span>
                       {!f.sourceRef && <>
-                        <button className="cr-btn ghost" aria-label={`Editar ${f.desc || "lançamento"}`} onClick={() => setEditing(manualFinance.find((entry) => entry.id === f.id) || f)}><Pencil size={13} /></button>
+                        <button className="cr-btn ghost" aria-label={`Editar ${f.desc || "lançamento"}`} onClick={() => openEdit(manualFinance.find((entry) => entry.id === f.id) || f)}><Pencil size={13} /></button>
                         <button className="cr-btn ghost danger" aria-label={`Excluir ${f.desc || "lançamento"}`} onClick={() => remove(f.id)}><Trash2 size={13} /></button>
                       </>}
                     </div>
@@ -3640,8 +3776,60 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           accounts={accounts} cards={cards} paymentMethods={settings.paymentMethods || DEFAULT_SETTINGS.paymentMethods}
           categories={settings.financeCategories || DEFAULT_SETTINGS.financeCategories} />
       )}
+      {editScopeAsk && (
+        <Modal size="small" title="Editar parcela" onClose={() => setEditScopeAsk(null)}>
+          <p style={{ fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>
+            Esta é a parcela {editScopeAsk.installmentGroup.index}/{editScopeAsk.installmentGroup.total} de "{editScopeAsk.desc || editScopeAsk.category}". A edição vale para:
+          </p>
+          <div className="cr-row" style={{ justifyContent: "flex-end", flexWrap: "wrap", gap: 8 }}>
+            <button type="button" className="cr-btn" onClick={() => { setEditing({ ...editScopeAsk, _editScope: "one" }); setEditScopeAsk(null); }}>Só esta parcela</button>
+            <button type="button" className="cr-btn primary" onClick={() => { setEditing({ ...editScopeAsk, _editScope: "all" }); setEditScopeAsk(null); }}>Todas as parcelas</button>
+          </div>
+        </Modal>
+      )}
+      {confirmRemove && <FinanceRemoveModal entry={confirmRemove} card={linkedCardFor(beauty, confirmRemove)}
+        onCancel={() => setConfirmRemove(null)}
+        onConfirm={(options) => { executeRemove({ entry: confirmRemove, ...options }); setConfirmRemove(null); }} />}
       {editingInvoiceCard && <CardModal item={editingInvoiceCard} invoiceMonth={selectedMonth} onSave={(data) => setCards(upsertById(cards, data))} onClose={() => setEditingInvoiceCard(null)} />}
     </div>
+  );
+}
+
+function FinanceRemoveModal({ entry, card, onConfirm, onCancel }) {
+  const group = entry.installmentGroup;
+  const [scope, setScope] = useState(group ? "one" : "all");
+  const [removeCard, setRemoveCard] = useState(false);
+  // o card só sai junto quando todo o lançamento (ou todas as parcelas) é excluído
+  const removesAll = !group || scope === "all" || Number(group.total) === 1;
+  return (
+    <Modal size="small" title={group ? "Excluir parcela" : "Excluir lançamento"} onClose={onCancel}>
+      <p style={{ fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>
+        {group ? `"${entry.desc || entry.category}" é a parcela ${group.index}/${group.total}. O que você quer excluir?` : `Excluir "${entry.desc || entry.category}"?`}
+      </p>
+      {group && (
+        <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+          <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap" }}>
+            <input type="radio" name="remove-scope" checked={scope === "one"} onChange={() => setScope("one")} style={{ minHeight: 0 }} />
+            <span style={{ fontSize: 14 }}>Só esta parcela ({group.index}/{group.total})</span>
+          </label>
+          <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap" }}>
+            <input type="radio" name="remove-scope" checked={scope === "all"} onChange={() => setScope("all")} style={{ minHeight: 0 }} />
+            <span style={{ fontSize: 14 }}>Todas as {group.total} parcelas</span>
+          </label>
+        </div>
+      )}
+      {card && removesAll && (
+        <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", marginBottom: 10 }}>
+          <input type="checkbox" checked={removeCard} onChange={(event) => setRemoveCard(event.target.checked)} style={{ minHeight: 0 }} />
+          <span style={{ fontSize: 14 }}>Excluir também o card "{card.name}" em Procedimentos estéticos</span>
+        </label>
+      )}
+      {card && !removesAll && <p className="cr-sub" style={{ marginTop: 0 }}>O card "{card.name}" em Procedimentos continua e o valor dele é atualizado.</p>}
+      <div className="cr-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+        <button type="button" className="cr-btn" onClick={onCancel}>Cancelar</button>
+        <button type="button" className="cr-btn primary" style={{ background: "#A1493C" }} onClick={() => onConfirm({ scope, removeCard: removesAll && removeCard })}>Excluir</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -4177,9 +4365,22 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
     }
   };
   useEffect(() => { if (needsGeneration && onDiscard) onDiscard(draftId.current); }, [needsGeneration]);
+  // Pré-visualização das parcelas (com parcelas já pagas nos meses anteriores)
+  const installmentCount = Number(form.installmentsCount) || 1;
+  const paidInstallments = Number(form.paidCount) || 0;
+  const purchaseTotal = form.amountMode === "parcela" ? (Number(form.amount) || 0) * installmentCount : Number(form.amount) || 0;
+  const planFirstMonth = form.firstInvoiceMonth
+    || (paidInstallments > 0 ? shiftMonthStr(todayStr().slice(0, 7), -paidInstallments) : invoiceMonthForForm || "");
+  const installmentPlan = !isEdit && isCredit && installmentCount > 1 && purchaseTotal > 0 && form.date
+    ? planInstallments({ total: purchaseTotal, count: installmentCount, paidCount: paidInstallments, purchaseDate: form.date, firstInvoiceMonth: planFirstMonth })
+      .map((p) => ({ ...p, status: p.paid || (paidInstallments === 0 && p.index === 1 && form.status === "pago" && p.date <= todayStr()) ? "paga" : "a pagar" }))
+    : [];
 
   return (
-    <Modal title={item ? "Editar lançamento" : "Novo lançamento"} onClose={onClose}>
+    <Modal title={item ? (item._editScope === "all" ? "Editar todas as parcelas" : item.installmentGroup ? `Editar parcela ${item.installmentGroup.index}/${item.installmentGroup.total}` : "Editar lançamento") : "Novo lançamento"} onClose={onClose}>
+      {item?._editScope === "all" && (
+        <p className="cr-sub" style={{ marginTop: 0 }}>Categoria, classificação, descrição, valor da parcela e forma de pagamento valem para todas as parcelas; a data e o status continuam de cada parcela.</p>
+      )}
       <div className="cr-field"><label className="cr-label">Tipo</label>
         <select className="cr-select" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
           <option value="entrada">entrada</option><option value="saida">saída</option>
@@ -4202,7 +4403,9 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
       )}
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}>
-          <label className="cr-label">{form.type === "saida" && form.status === "pago" ? "Valor real pago (R$)" : "Valor do lançamento / previsto (R$)"}</label>
+          <label className="cr-label">{!isEdit && isCredit && Number(form.installmentsCount) > 1
+            ? (form.amountMode === "parcela" ? "Valor de cada parcela (R$)" : "Valor total da compra (R$)")
+            : form.type === "saida" && form.status === "pago" ? "Valor real pago (R$)" : "Valor do lançamento / previsto (R$)"}</label>
           <input type="number" min="0.01" step="0.01" className="cr-input" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
         </div>
         <div className="cr-field" style={{ flex: 1 }}>
@@ -4242,7 +4445,7 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
             {cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select></div>
       )}
-      {isCreditPurchase && form.cardId && (
+      {isCreditPurchase && form.cardId && !(!isEdit && Number(form.installmentsCount) > 1 && Number(form.paidCount) > 0) && (
         <div className="cr-field">
           <label className="cr-label">Data de pagamento da fatura</label>
           <input type="date" className="cr-input" value={invoicePaymentDateForForm || ""}
@@ -4277,11 +4480,55 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
 
       {!isEdit && isCredit && (
         <div className="cr-field"><label className="cr-label">Parcelamento</label>
-          <select className="cr-select" value={form.installmentsCount} onChange={(e) => setForm({ ...form, installmentsCount: Number(e.target.value) })}>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 18, 24].map((n) => <option key={n} value={n}>{n === 1 ? "à vista / 1x" : `${n}x`}</option>)}
+          <select className="cr-select" value={form.installmentsCount} onChange={(e) => setForm({ ...form, installmentsCount: Number(e.target.value), paidCount: 0, firstInvoiceMonth: "" })}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((n) => <option key={n} value={n}>{n === 1 ? "à vista / 1x" : `${n}x`}</option>)}
           </select>
-          {form.installmentsCount > 1 && form.amount && (
-            <p className="cr-sub" style={{ marginTop: 4 }}>{form.installmentsCount}x de {fmtBRL((Number(form.amount) || 0) / form.installmentsCount)}</p>
+          {form.installmentsCount > 1 && (
+            <>
+              <div className="cr-row" style={{ marginTop: 8, flexWrap: "wrap" }}>
+                <div className="cr-field" style={{ flex: "1 1 180px", margin: 0 }}>
+                  <label className="cr-label">O valor informado acima é</label>
+                  <select className="cr-select" value={form.amountMode || "total"} onChange={(e) => setForm({ ...form, amountMode: e.target.value })}>
+                    <option value="total">o valor total da compra</option>
+                    <option value="parcela">o valor de cada parcela</option>
+                  </select>
+                </div>
+                <div className="cr-field" style={{ flex: "1 1 180px", margin: 0 }}>
+                  <label className="cr-label">Já paguei até a parcela</label>
+                  <select className="cr-select" value={Number(form.paidCount) || 0} onChange={(e) => setForm({ ...form, paidCount: Number(e.target.value), firstInvoiceMonth: "" })}>
+                    <option value={0}>Nenhuma (compra nova)</option>
+                    {Array.from({ length: form.installmentsCount - 1 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1} de {form.installmentsCount}</option>)}
+                  </select>
+                </div>
+              </div>
+              {installmentPlan.length > 0 && (
+                <div className="cr-installment-preview">
+                  <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+                    <strong style={{ fontSize: 13.5 }}>
+                      Pré-visualização · {form.installmentsCount}x de {fmtBRL(installmentPlan[0].amount)}{Number(form.paidCount) > 0 ? ` · parcela atual: ${Number(form.paidCount) + 1} de ${form.installmentsCount}` : ""}
+                    </strong>
+                    <label className="cr-row" style={{ gap: 6, fontSize: 12.5 }}>
+                      Fatura da 1ª parcela
+                      <input type="month" className="cr-input" style={{ width: 150, padding: "4px 8px" }} value={planFirstMonth}
+                        onChange={(e) => setForm({ ...form, firstInvoiceMonth: e.target.value })} />
+                    </label>
+                  </div>
+                  {form.firstInvoiceMonth && (
+                    <button type="button" className="cr-btn ghost" style={{ padding: "0 4px", minHeight: 0 }} onClick={() => setForm({ ...form, firstInvoiceMonth: "" })}>usar o mês calculado</button>
+                  )}
+                  <ul>
+                    {installmentPlan.map((p) => (
+                      <li key={p.index} className={p.index === Number(form.paidCount || 0) + 1 ? "is-current" : ""}>
+                        <span className="cr-chip">{p.index}/{p.total}</span>
+                        <span style={{ flex: 1 }}>{p.invoiceMonth ? `fatura de ${monthLabel(p.invoiceMonth)}` : fmtDateShort(p.date)}</span>
+                        <strong>{fmtBRL(p.amount)}</strong>
+                        <span className="cr-chip" style={p.status === "paga" ? { background: "#E3EBDF", color: "#4F6B49" } : undefined}>{p.status}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -4313,7 +4560,7 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
           </p>
           <button className="cr-btn primary" style={{ width: "100%", justifyContent: "center" }}
             disabled={!(Number(form.amount) > 0) || !form.date || (isCredit && !form.cardId)}
-            onClick={() => onGenerate({ ...form, id: draftId.current, amount: Number(form.amount) || 0 })}>
+            onClick={() => onGenerate({ ...form, id: draftId.current, amount: form.recurringEnabled ? Number(form.amount) || 0 : purchaseTotal })}>
             {form.recurringEnabled ? "Criar lançamentos recorrentes" : "Criar parcelas"}
           </button>
         </div>
@@ -6037,7 +6284,7 @@ function layoutLanes(items) {
   flush();
 }
 
-function RoutinesCalendar({ routines, onEdit, onToggle, onRemoveStep }) {
+function RoutinesCalendar({ routines, onEdit, onToggle, onRemoveStep, onOpenDay }) {
   const ctx = useContext(ListsContext);
   const [routineFilter, setRoutineFilter] = useState("todas");
   const [openEvent, setOpenEvent] = useState(null);
@@ -6176,6 +6423,12 @@ function RoutinesCalendar({ routines, onEdit, onToggle, onRemoveStep }) {
             <input type="checkbox" checked={!!current.step.log?.[current.date]} onChange={() => onToggle(current.routine, current.step.id, current.date)} />
             <span style={{ fontSize: 14 }}>Feito neste dia</span>
           </label>
+          {onOpenDay && (stepCategoryId(current.step) === "treino" || Object.keys(current.step.sessions || {}).length > 0) && (
+            <button type="button" className="cr-btn" style={{ marginBottom: 12 }}
+              onClick={() => { setOpenEvent(null); onOpenDay({ routineId: current.routine.id, stepId: current.step.id }); }}>
+              <Dumbbell size={14} /> Abrir registro do dia
+            </button>
+          )}
           <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
             <button type="button" className="cr-btn ghost danger" onClick={() => setConfirmRemove(current)}><Trash2 size={14} /> Excluir</button>
             <button type="button" className="cr-btn primary" onClick={() => { setOpenEvent(null); onEdit(current.routine); }}><Pencil size={14} /> Editar</button>
@@ -6190,6 +6443,49 @@ function RoutinesCalendar({ routines, onEdit, onToggle, onRemoveStep }) {
       )}
     </div>
   );
+}
+
+// Card de uma rotina com as etapas do dia (antes ficava na aba "Lista"; agora em Treino semanal).
+function RoutineListCard({ r, showDoneSteps, onToggle, onEdit, onDelete, onOpenDay }) {
+  return (
+    <div className="cr-card">
+      <div className="cr-row" style={{ justifyContent: "space-between" }}>
+        <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{r.name}</h3>
+        <div className="cr-row" style={{ gap: 2 }}>
+          <button className="cr-btn ghost" onClick={() => onEdit(r)}><Pencil size={13} /></button>
+          <button className="cr-btn ghost danger" onClick={() => onDelete(r)}><Trash2 size={13} /></button>
+        </div>
+        <span className="cr-chip" style={{ marginTop: 6, background: itemColor("routineCategory", routineCategoryId(r)), color: readableText(itemColor("routineCategory", routineCategoryId(r))) }}>
+          {listName("routineCategory", routineCategoryId(r))}
+        </span>
+      </div>
+      <p className="cr-sub" style={{ margin: "2px 0 6px" }}>Marcações valem para hoje e recomeçam amanhã.</p>
+      {r.steps.length > 0 && !showDoneSteps && r.steps.every((x) => x.log && x.log[todayStr()]) && <p className="cr-empty">Tudo feito por hoje.</p>}
+      {r.steps.filter((x) => showDoneSteps || !(x.log && x.log[todayStr()])).map((s) => {
+        const doneToday = !!(s.log && s.log[todayStr()]);
+        return (
+          <div className="cr-list-row" key={s.id}>
+            <div className={`cr-checkbox ${doneToday ? "checked" : ""}`} onClick={() => onToggle(r, s.id)}>
+              {doneToday && <Check size={13} />}
+            </div>
+            <button className="cr-btn ghost" title="Abrir os detalhes deste dia e registrar o que você fez"
+              style={{ flex: 1, justifyContent: "flex-start", textAlign: "left", textDecoration: doneToday ? "line-through" : "none", fontWeight: 600 }}
+              onClick={() => onOpenDay({ routineId: r.id, stepId: s.id })}>{s.text}</button>
+            {Object.values(s.sessions || {}).some((x) => (x.exercises || []).length) && (
+              <span className="cr-chip">{Object.values(s.sessions).filter((x) => (x.exercises || []).length).length} treino(s) registrados</span>
+            )}
+            {stepRangeLabel(s) && <span className="cr-chip">{stepRangeLabel(s)}</span>}
+            <span className="cr-chip" style={{ background: itemColor("routineCategory", stepCategoryId(s)), color: readableText(itemColor("routineCategory", stepCategoryId(s))) }}>{listName("routineCategory", stepCategoryId(s))}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function isWorkoutRoutine(r) {
+  const workoutWords = (ROUTINE_CATEGORY_KEYWORDS.find(([id]) => id === "treino") || [])[1];
+  return routineCategoryId(r) === "treino" || !!(workoutWords && workoutWords.test(r.name || ""));
 }
 
 function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal, fitness, setFitness, fitnessMedia, setFitnessMedia }) {
@@ -6227,7 +6523,6 @@ function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal, fitness,
       <div className="cr-tabbar" style={{ marginTop: 8 }}>
         <button className={`cr-tabbtn ${view === "calendario" ? "active" : ""}`} onClick={() => setView("calendario")}>Calendário de Rotinas (planejado)</button>
         <button className={`cr-tabbtn ${view === "google" ? "active" : ""}`} onClick={() => setView("google")}>Google Agenda (agendado de verdade)</button>
-        <button className={`cr-tabbtn ${view === "lista" ? "active" : ""}`} onClick={() => setView("lista")}>Lista</button>
         <button className={`cr-tabbtn ${view === "treino" ? "active" : ""}`} onClick={() => setView("treino")}>Treino semanal</button>
       </div>
       {view !== "google" && view !== "treino" && (
@@ -6246,54 +6541,32 @@ function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal, fitness,
         <GoogleAgendaView gcal={gcal} setGcal={setGcal} />
       ) : view === "treino" ? (
         <WeeklyTrainingView routines={routines} fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia}
-          onOpenDay={setDayOpen} />
+          onOpenDay={setDayOpen} onToggle={toggleStep} onEdit={setEditing} onDelete={setConfirmDel}
+          showDoneSteps={showDoneSteps} setShowDoneSteps={setShowDoneSteps} />
       ) : view === "calendario" ? (
-        filteredRoutines.length === 0 ? <p className="cr-empty">Nenhuma rotina nesta categoria ainda.</p> : <RoutinesCalendar routines={filteredRoutines} onEdit={setEditing} onToggle={toggleStep}
-          onRemoveStep={(routine, stepId) => setRoutines(routines.map((r) => r.id === routine.id ? { ...r, steps: (r.steps || []).filter((s) => s.id !== stepId) } : r))} />
-      ) : (
         <>
-        <div className="cr-row" style={{ marginTop: 12 }}>
-          <button className="cr-btn ghost" onClick={() => setShowDoneSteps(!showDoneSteps)}>{showDoneSteps ? "Ocultar o que já fiz hoje" : "Mostrar o que já fiz hoje"}</button>
-        </div>
-        <div className="cr-grid cr-grid-2" style={{ marginTop: 8 }}>
-          {routines.length === 0 && <p className="cr-empty">Nenhuma rotina cadastrada ainda.</p>}
-          {filteredRoutines.map((r) => (
-            <div className="cr-card" key={r.id}>
-              <div className="cr-row" style={{ justifyContent: "space-between" }}>
-                <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{r.name}</h3>
-                <div className="cr-row" style={{ gap: 2 }}>
-                  <button className="cr-btn ghost" onClick={() => setEditing(r)}><Pencil size={13} /></button>
-                  <button className="cr-btn ghost danger" onClick={() => setConfirmDel(r)}><Trash2 size={13} /></button>
+          {filteredRoutines.length === 0 ? <p className="cr-empty">Nenhuma rotina nesta categoria ainda.</p> : <RoutinesCalendar routines={filteredRoutines} onEdit={setEditing} onToggle={toggleStep}
+            onOpenDay={setDayOpen}
+            onRemoveStep={(routine, stepId) => setRoutines(routines.map((r) => r.id === routine.id ? { ...r, steps: (r.steps || []).filter((s) => s.id !== stepId) } : r))} />}
+          {/* Rotinas que não são de treino: editar e excluir a rotina inteira (as de treino ficam em Treino semanal) */}
+          {filteredRoutines.some((r) => !isWorkoutRoutine(r)) && (
+            <div className="cr-card" style={{ marginTop: 14 }}>
+              <h3 className="cr-serif" style={{ margin: "0 0 8px", fontSize: 15 }}>Rotinas cadastradas</h3>
+              {filteredRoutines.filter((r) => !isWorkoutRoutine(r)).map((r) => (
+                <div className="cr-list-row" key={r.id}>
+                  <span className="cr-list-title" style={{ flex: 1, fontWeight: 600 }}>{r.name || "Sem nome"}</span>
+                  <span className="cr-chip" style={{ background: itemColor("routineCategory", routineCategoryId(r)), color: readableText(itemColor("routineCategory", routineCategoryId(r))) }}>
+                    {listName("routineCategory", routineCategoryId(r))}
+                  </span>
+                  <span className="cr-chip">{(r.steps || []).length} {(r.steps || []).length === 1 ? "etapa" : "etapas"}</span>
+                  <button className="cr-btn ghost" aria-label={`Editar rotina ${r.name}`} title="Editar" onClick={() => setEditing(r)}><Pencil size={14} /></button>
+                  <button className="cr-btn ghost danger" aria-label={`Excluir rotina ${r.name}`} title="Excluir" onClick={() => setConfirmDel(r)}><Trash2 size={14} /></button>
                 </div>
-                <span className="cr-chip" style={{ marginTop: 6, background: itemColor("routineCategory", routineCategoryId(r)), color: readableText(itemColor("routineCategory", routineCategoryId(r))) }}>
-                  {listName("routineCategory", routineCategoryId(r))}
-                </span>
-              </div>
-              <p className="cr-sub" style={{ margin: "2px 0 6px" }}>Marcações valem para hoje e recomeçam amanhã.</p>
-              {r.steps.length > 0 && !showDoneSteps && r.steps.every((x) => x.log && x.log[todayStr()]) && <p className="cr-empty">Tudo feito por hoje.</p>}
-              {r.steps.filter((x) => showDoneSteps || !(x.log && x.log[todayStr()])).map((s) => {
-                const doneToday = !!(s.log && s.log[todayStr()]);
-                return (
-                  <div className="cr-list-row" key={s.id}>
-                    <div className={`cr-checkbox ${doneToday ? "checked" : ""}`} onClick={() => toggleStep(r, s.id)}>
-                      {doneToday && <Check size={13} />}
-                    </div>
-                    <button className="cr-btn ghost" title="Abrir os detalhes deste dia e registrar o que você fez"
-                      style={{ flex: 1, justifyContent: "flex-start", textAlign: "left", textDecoration: doneToday ? "line-through" : "none", fontWeight: 600 }}
-                      onClick={() => setDayOpen({ routineId: r.id, stepId: s.id })}>{s.text}</button>
-                    {Object.values(s.sessions || {}).some((x) => (x.exercises || []).length) && (
-                      <span className="cr-chip">{Object.values(s.sessions).filter((x) => (x.exercises || []).length).length} treino(s) registrados</span>
-                    )}
-                    {stepRangeLabel(s) && <span className="cr-chip">{stepRangeLabel(s)}</span>}
-                    <span className="cr-chip" style={{ background: itemColor("routineCategory", stepCategoryId(s)), color: readableText(itemColor("routineCategory", stepCategoryId(s))) }}>{listName("routineCategory", stepCategoryId(s))}</span>
-                  </div>
-                );
-              })}
+              ))}
             </div>
-          ))}
-        </div>
+          )}
         </>
-      )}
+      ) : null}
       {editing && <RoutineModal routine={editing === "new" ? null : editing} onSave={save} onClose={() => setEditing(null)} />}
       {dayOpen && (() => {
         const rt = routines.find((x) => x.id === dayOpen.routineId);
@@ -7193,25 +7466,48 @@ function FitnessGoalsSection({ fitness, setFitness }) {
 }
 
 // Aba "Treino semanal" dentro de Planejamento > Rotinas.
-function WeeklyTrainingView({ routines, fitness, setFitness, fitnessMedia, setFitnessMedia, onOpenDay }) {
-  const workoutSteps = [];
-  routines.forEach((r) => (r.steps || []).forEach((s) => {
-    if (stepCategoryId(s) === "treino" || routineCategoryId(r) === "treino") workoutSteps.push({ routine: r, step: s });
+function WeeklyTrainingView({ routines, fitness, setFitness, fitnessMedia, setFitnessMedia, onOpenDay, onToggle, onEdit, onDelete, showDoneSteps, setShowDoneSteps }) {
+  const workoutRoutines = routines.filter(isWorkoutRoutine);
+  // etapas de treino que estão dentro de outras rotinas (ex.: "Academia" na rotina da manhã)
+  const otherWorkoutSteps = [];
+  routines.filter((r) => !isWorkoutRoutine(r)).forEach((r) => (r.steps || []).forEach((s) => {
+    if (stepCategoryId(s) === "treino") otherWorkoutSteps.push({ routine: r, step: s });
   }));
   return (
     <div className="cr-training">
       <WeeklyStreakCard fitness={fitness} setFitness={setFitness} />
-      <div className="cr-card">
-        <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}><Dumbbell size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />Registro dos treinos</h3>
-        <p className="cr-sub" style={{ margin: "4px 0 10px" }}>Abra um treino para registrar exercícios, observações, fotos e vídeos do dia.</p>
-        {workoutSteps.length === 0 && <p className="cr-empty">Nenhuma etapa de rotina na categoria Treino. Crie ou edite uma rotina e escolha a categoria Treino.</p>}
-        <div className="cr-row" style={{ flexWrap: "wrap", gap: 6 }}>
-          {workoutSteps.map(({ routine, step }) => (
-            <button key={routine.id + step.id} type="button" className="cr-btn" onClick={() => onOpenDay({ routineId: routine.id, stepId: step.id })}>
-              {step.text || routine.name}{stepRangeLabel(step) ? ` · ${stepRangeLabel(step)}` : ""}
-            </button>
-          ))}
+      <div>
+        <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
+          <div>
+            <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}><Dumbbell size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />Registro dos treinos</h3>
+            <p className="cr-sub" style={{ margin: "4px 0 0" }}>Abra um treino para registrar exercícios, observações, fotos e vídeos do dia.</p>
+          </div>
+          {workoutRoutines.length > 0 && (
+            <button className="cr-btn ghost" onClick={() => setShowDoneSteps(!showDoneSteps)}>{showDoneSteps ? "Ocultar o que já fiz hoje" : "Mostrar o que já fiz hoje"}</button>
+          )}
         </div>
+        {workoutRoutines.length === 0 && otherWorkoutSteps.length === 0 && (
+          <p className="cr-empty">Nenhuma rotina de treino ainda. Crie uma rotina e escolha a categoria Treino.</p>
+        )}
+        {workoutRoutines.length > 0 && (
+          <div className="cr-grid cr-grid-2" style={{ marginTop: 10 }}>
+            {workoutRoutines.map((r) => (
+              <RoutineListCard key={r.id} r={r} showDoneSteps={showDoneSteps} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} onOpenDay={onOpenDay} />
+            ))}
+          </div>
+        )}
+        {otherWorkoutSteps.length > 0 && (
+          <div className="cr-card" style={{ marginTop: 10 }}>
+            <p className="cr-label" style={{ marginTop: 0 }}>Treinos em outras rotinas</p>
+            <div className="cr-row" style={{ flexWrap: "wrap", gap: 6 }}>
+              {otherWorkoutSteps.map(({ routine, step }) => (
+                <button key={routine.id + step.id} type="button" className="cr-btn" onClick={() => onOpenDay({ routineId: routine.id, stepId: step.id })}>
+                  {step.text || routine.name}{stepRangeLabel(step) ? ` · ${stepRangeLabel(step)}` : ""} <span className="cr-sub" style={{ margin: 0 }}>({routine.name})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="cr-training-grid">
         <FitnessGoalsSection fitness={fitness} setFitness={setFitness} />
@@ -7601,7 +7897,136 @@ function placeOf(b, places) {
   return (places || []).find((p) => p.id === b.placeId) || null;
 }
 
-function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSettings, originTarget, clearOriginTarget }) {
+// Faixa do topo de Procedimentos: sessões já agendadas e o que está na hora de marcar.
+const DEFAULT_BOOKING_WARN_DAYS = 15;
+const daysBetween = (from, to) => Math.round((new Date(to + "T00:00:00") - new Date(from + "T00:00:00")) / 86400000);
+
+// Data prevista para a próxima sessão: a informada, ou a calculada pelo intervalo, ou a data planejada.
+function procedureDueDate(b) {
+  const status = String(inferProcStatus(b) || "").toLowerCase();
+  if (status === "nunca" || status.startsWith("paus")) return "";
+  const due = b.nextExpenseDate
+    || (b.recurring ? nextMaintenanceDate(b.dateDone, b.frequencyUnit, b.frequencyValue) : "")
+    || (!b.recurring ? b.plannedDate : "") || "";
+  if (!due || (b.dateDone && b.dateDone >= due)) return "";
+  return due;
+}
+
+function buildProcedureAlerts(procedures, today, warnDays) {
+  const upcoming = procedures
+    .filter((b) => b.scheduledDate && b.scheduledDate >= today)
+    .map((b) => ({ b, date: b.scheduledDate, time: b.scheduledTime || "", days: daysBetween(today, b.scheduledDate) }))
+    .sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time));
+  const toBook = procedures
+    .filter((b) => !(b.scheduledDate && b.scheduledDate >= today))
+    .map((b) => ({ b, date: procedureDueDate(b) }))
+    .filter((x) => x.date)
+    .map((x) => ({ ...x, days: daysBetween(today, x.date) }))
+    .filter((x) => x.days <= warnDays)
+    .sort((x, y) => x.date.localeCompare(y.date));
+  return { upcoming, toBook };
+}
+
+function ProcedureAlertsStrip({ procedures, warnDays, onWarnDays, onOpen, onSchedule, onRegister }) {
+  const today = useToday();
+  const { upcoming, toBook } = buildProcedureAlerts(procedures, today, warnDays);
+  const when = (days) => (days === 0 ? "hoje" : days === 1 ? "amanhã" : "");
+  const warnControl = (
+    <label className="cr-proc-alerts-warn">
+      Avisar
+      <input type="number" min="0" max="365" className="cr-input" aria-label="Dias de antecedência para avisar" value={warnDays}
+        onChange={(event) => onWarnDays(Math.max(0, Math.min(365, Math.round(Number(event.target.value) || 0))))} />
+      dias antes
+    </label>
+  );
+  if (upcoming.length === 0 && toBook.length === 0) {
+    return (
+      <div className="cr-proc-alerts is-empty">
+        <span className="cr-sub" style={{ margin: 0 }}><CalendarDays size={14} style={{ verticalAlign: "-2px", marginRight: 6 }} />Nenhuma sessão agendada e nada para marcar por enquanto.</span>
+        {warnControl}
+      </div>
+    );
+  }
+  return (
+    <div className="cr-proc-alerts">
+      <section className="cr-proc-alerts-col" aria-label="Próximas sessões">
+        <h3 className="cr-serif"><CalendarDays size={15} /> Próximas sessões</h3>
+        {upcoming.length === 0 && <p className="cr-sub" style={{ margin: 0 }}>Nenhuma sessão agendada.</p>}
+        {upcoming.map(({ b, date, time, days }) => (
+          <button key={b.id} type="button" className={`cr-proc-alert-item ${days <= 7 ? "is-soon" : ""}`} onClick={() => onOpen(b)}>
+            <span className="cr-proc-alert-name">{b.name || "Procedimento"}</span>
+            <span className="cr-proc-alert-meta">
+              {when(days) && <strong className="cr-proc-alert-badge">{when(days)}</strong>}
+              {fmtDateBR(date)}{time ? ` às ${time}` : ""}{(b._place || b.clinic) ? ` · ${b._place || b.clinic}` : ""}
+            </span>
+          </button>
+        ))}
+      </section>
+      <section className="cr-proc-alerts-col is-attention" aria-label="Para marcar em breve">
+        <h3 className="cr-serif"><Bell size={15} /> Para marcar em breve</h3>
+        {toBook.length === 0 && <p className="cr-sub" style={{ margin: 0 }}>Nada para marcar nos próximos {warnDays} dias.</p>}
+        {toBook.map(({ b, date, days }) => (
+          <div key={b.id} className={`cr-proc-alert-item is-book ${days < 0 ? "is-late" : ""}`} role="button" tabIndex={0}
+            onClick={() => onOpen(b)} onKeyDown={(event) => { if (event.target === event.currentTarget && event.key === "Enter") onOpen(b); }}>
+            <span className="cr-proc-alert-name">{b.name || "Procedimento"}</span>
+            <span className="cr-proc-alert-meta">
+              {days < 0 ? `previsto para ${fmtDateBR(date)} · passou há ${-days} ${-days === 1 ? "dia" : "dias"}`
+                : days === 0 ? `previsto para hoje` : `previsto para ${fmtDateBR(date)} · faltam ${days} ${days === 1 ? "dia" : "dias"}`}
+            </span>
+            <span className="cr-row" style={{ gap: 4, flexWrap: "wrap" }}>
+              <button type="button" className="cr-btn primary cr-proc-alert-action" onClick={(event) => { event.stopPropagation(); onSchedule(b, date); }}>
+                <CalendarDays size={13} /> Marcar como agendado
+              </button>
+              <button type="button" className="cr-btn ghost cr-proc-alert-action" onClick={(event) => { event.stopPropagation(); onRegister(b); }}>Já fiz</button>
+            </span>
+          </div>
+        ))}
+        {warnControl}
+      </section>
+    </div>
+  );
+}
+
+function ScheduleSessionModal({ item, suggestedDate, onSave, onClose }) {
+  const today = todayStr();
+  const [date, setDate] = useState(item.scheduledDate || (suggestedDate && suggestedDate >= today ? suggestedDate : today));
+  const [time, setTime] = useState(item.scheduledTime || "");
+  return (
+    <Modal size="small" title={`Agendar: ${item.name || "procedimento"}`} onClose={onClose}>
+      <div className="cr-row" style={{ flexWrap: "wrap" }}>
+        <div className="cr-field" style={{ flex: "1 1 150px" }}><label className="cr-label">Data da sessão</label>
+          <input type="date" className="cr-input" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+        <div className="cr-field" style={{ flex: "1 1 110px" }}><label className="cr-label">Horário (opcional)</label>
+          <input type="time" className="cr-input" value={time} onChange={(e) => setTime(e.target.value)} /></div>
+      </div>
+      <div className="cr-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+        <button type="button" className="cr-btn" onClick={onClose}>Cancelar</button>
+        <button type="button" className="cr-btn primary" disabled={!date} onClick={() => { onSave(date, time); onClose(); }}>Salvar agendamento</button>
+      </div>
+    </Modal>
+  );
+}
+
+function BeautyRemoveModal({ item, linkedCount, onConfirm, onCancel }) {
+  const [removeFinance, setRemoveFinance] = useState(false);
+  return (
+    <Modal size="small" title="Excluir procedimento" onClose={onCancel}>
+      <p style={{ fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>Excluir "{item.name || "procedimento"}"?</p>
+      {linkedCount > 0 && (
+        <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", marginBottom: 10 }}>
+          <input type="checkbox" checked={removeFinance} onChange={(event) => setRemoveFinance(event.target.checked)} style={{ minHeight: 0 }} />
+          <span style={{ fontSize: 14 }}>Excluir também o lançamento vinculado em Finanças{linkedCount > 1 ? ` (${linkedCount} parcelas)` : ""}</span>
+        </label>
+      )}
+      <div className="cr-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+        <button type="button" className="cr-btn" onClick={onCancel}>Cancelar</button>
+        <button type="button" className="cr-btn primary" style={{ background: "#A1493C" }} onClick={() => onConfirm(removeFinance)}>Excluir</button>
+      </div>
+    </Modal>
+  );
+}
+
+function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSettings, originTarget, clearOriginTarget, finance, setFinance, cards, setCards }) {
   const ctx = useContext(ListsContext);
   const [section, setSection] = useState("procedimentos");
   const [editing, setEditing] = useState(null);
@@ -7627,21 +8052,55 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
     clearOriginTarget();
   }, [originTarget, beauty, clearOriginTarget]);
 
-  const save = (data) => { setBeauty(upsertById(beauty, { ...data, userEdited: true }, { history: data.history || [] })); };
-  const remove = (id) => setBeauty(beauty.flatMap((item) => {
+  const save = (data) => {
+    setBeauty(upsertById(beauty, { ...data, userEdited: true }, { history: data.history || [] }));
+    // card criado a partir de um lançamento: valor e data voltam para Finanças
+    if (data.financeLink && setFinance) {
+      const next = syncFinanceFromCard(finance || [], data);
+      if (next !== finance) setFinance(next);
+    }
+  };
+  const [scheduling, setScheduling] = useState(null);
+  const [confirmRemoveCard, setConfirmRemoveCard] = useState(null);
+  const linkedFinanceOf = (item) => (item?.financeLink?.key ? (finance || []).filter((entry) => financeLinkKey(entry) === item.financeLink.key) : []);
+  const removeNow = (id) => setBeauty(beauty.flatMap((item) => {
     if (item.id !== id) return [item];
     if ((item.history || []).length > 0) return [{ ...item, archived: true, recurring: false }];
     return [];
   }));
+  const remove = (id) => {
+    const item = beauty.find((entry) => entry.id === id);
+    if (item && linkedFinanceOf(item).length) { setConfirmRemoveCard(item); return; }
+    removeNow(id);
+  };
+  const confirmCardRemoval = (removeFinance) => {
+    const item = confirmRemoveCard;
+    setConfirmRemoveCard(null);
+    if (!item) return;
+    removeNow(item.id);
+    if (removeFinance && setFinance) {
+      const ids = new Set(linkedFinanceOf(item).map((entry) => entry.id));
+      setFinance((finance || []).filter((entry) => !ids.has(entry.id)));
+      // pagamentos automáticos das parcelas já pagas saem junto
+      if (setCards && (cards || []).some((card) => (card.payments || []).some((payment) => ids.has(payment.installmentEntryId)))) {
+        setCards(cards.map((card) => ({ ...card, payments: (card.payments || []).filter((payment) => !ids.has(payment.installmentEntryId)) })));
+      }
+    }
+  };
+  const saveSchedule = (item, date, time) => setBeauty(beauty.map((entry) => entry.id === item.id ? { ...entry, scheduledDate: date, scheduledTime: time, userEdited: true } : entry));
+  const bookingWarnDays = Number.isFinite(Number(settings?.procBookingWarnDays)) && settings?.procBookingWarnDays !== ""
+    ? Number(settings.procBookingWarnDays) : DEFAULT_BOOKING_WARN_DAYS;
   const originalOf = (b) => beauty.find((x) => x.id === b.id);
 
   const saveRealization = (procedureId, entry) => {
     setBeauty(beauty.map((b) => {
       if (b.id !== procedureId) return b;
-      const history = [{ ...entry, id: uid() }, ...(b.history || [])].sort((x, y) => y.date.localeCompare(x.date));
+      // card vindo de um lançamento: o pagamento já está em Finanças, a realização não conta de novo
+      const history = [{ ...entry, id: uid(), ...(b.financeLink ? { financeLinked: true } : {}) }, ...(b.history || [])].sort((x, y) => y.date.localeCompare(x.date));
       const latest = history[0];
       return {
         ...b, userEdited: true, history, dateDone: latest.date, professional: latest.professional,
+        ...(b.scheduledDate && b.scheduledDate <= entry.date ? { scheduledDate: "", scheduledTime: "" } : {}),
         clinic: latest.clinic, cost: latest.cost, notes: latest.notes, result: latest.result,
         nextExpenseDate: b.recurring
           ? nextFinanceDate(latest.date, b.frequencyUnit === "dias" ? "" : `a cada ${b.frequencyValue} meses`, b.frequencyUnit === "dias" ? b.frequencyValue : 0)
@@ -7716,11 +8175,6 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
       options: placeNames.map((n) => ({ value: n, label: n, count: count("local", (p) => p._place === n) })) },
   ];
 
-  const dueAlerts = procedures
-    .map((b) => ({ b, m: maintenanceStatus(b) }))
-    .filter((x) => x.m && (x.m.level === "atrasado" || x.m.level === "hoje" || x.m.level === "proxima"))
-    .sort((a, c) => a.m.date.localeCompare(c.m.date));
-
   const sections = [...statusList.map((s) => ({ id: s.id, label: s.name })), { id: "", label: "Sem status" }];
 
   return (
@@ -7735,6 +8189,12 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
           </div>
         )}
       </div>
+
+      <ProcedureAlertsStrip procedures={procedures} warnDays={bookingWarnDays}
+        onWarnDays={(days) => setSettings({ ...settings, procBookingWarnDays: days })}
+        onOpen={(b) => setEditing(originalOf(b))}
+        onSchedule={(b, date) => setScheduling({ item: originalOf(b), date })}
+        onRegister={(b) => setRegistering(originalOf(b))} />
 
       <div className="cr-tabbar" style={{ marginTop: 14 }}>
         <button className={`cr-tabbtn ${section === "procedimentos" ? "active" : ""}`} onClick={() => setSection("procedimentos")}>Procedimentos</button>
@@ -7773,21 +8233,6 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
         <div>
           <FilterGroups groups={groups} />
 
-          {dueAlerts.length > 0 && (
-            <div className="cr-card" style={{ marginBottom: 22, borderColor: "#E3B5AB" }}>
-              <h3 className="cr-serif" style={{ margin: "0 0 10px", fontSize: 15, color: "#A1493C" }}>Manutenção</h3>
-              {dueAlerts.map(({ b, m }) => (
-                <div className="cr-list-row" key={b.id}>
-                  <span className="cr-list-title" style={{ flex: 1 }}>{statusEmoji(m.level)} {b.name}</span>
-                  <span className="cr-chip" style={m.level === "atrasado" ? { background: "#F6DEDA", color: "#A1493C" } : { background: "#FBEBD4", color: "#96631C" }}>
-                    {statusMessage(m, b.name)}
-                  </span>
-                  <button className="cr-btn ghost" onClick={() => setRegistering(originalOf(b))}>+ Registrar realização</button>
-                </div>
-              ))}
-            </div>
-          )}
-
           {procedures.length === 0 && <p className="cr-empty">Nenhum procedimento registrado ainda.</p>}
           {procedures.length > 0 && filtered.length === 0 && <p className="cr-empty">Nenhum procedimento com esses filtros.</p>}
 
@@ -7821,6 +8266,10 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
 
       {editing && <BeautyModal key={liveEditing ? liveEditing.id + ":" + (liveEditing.history || []).length : "new"} item={liveEditing} places={places} onSave={save} onClose={() => setEditing(null)} onRegister={() => setRegistering(liveEditing)} />}
       {customize && <CardFieldsModal settings={settings || {}} setSettings={setSettings} onClose={() => setCustomize(false)} />}
+      {scheduling && <ScheduleSessionModal item={scheduling.item} suggestedDate={scheduling.date}
+        onSave={(date, time) => saveSchedule(scheduling.item, date, time)} onClose={() => setScheduling(null)} />}
+      {confirmRemoveCard && <BeautyRemoveModal item={confirmRemoveCard} linkedCount={linkedFinanceOf(confirmRemoveCard).length}
+        onConfirm={confirmCardRemoval} onCancel={() => setConfirmRemoveCard(null)} />}
       {registering && <RegistrarRealizacaoModal item={registering} onSave={(entry) => saveRealization(registering.id, entry)} onClose={() => setRegistering(null)} />}
     </div>
   );
@@ -7894,13 +8343,17 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
     on("dateDone") && b.dateDone && <span className="cr-chip" key="l">última: {fmtDateShort(b.dateDone)}</span>,
     on("frequency") && b.recurring && <span className="cr-chip" key="f">{freqLabel}</span>,
     on("cost") && b.cost > 0 && <span className="cr-chip" key="c">{fmtBRL(b.cost)}</span>,
+    b.financeLink?.installments > 1 && <span className="cr-chip" key="p">{b.financeLink.installments}x de {fmtBRL(b.financeLink.installmentAmount)}</span>,
+    b.scheduledDate && b.scheduledDate >= todayStr() && <span className="cr-chip" key="s">agendado: {fmtDateShort(b.scheduledDate)}{b.scheduledTime ? ` ${b.scheduledTime}` : ""}</span>,
   ].filter(Boolean);
   return (
     <div className={`cr-card ${personalizedCardClass(b)}`} style={{ cursor: "pointer", ...personalizedCardStyle(b) }} onClick={onEdit} title="Clique para abrir o procedimento completo">
       {/* Sem imagem o card começa direto no título: nada de bloco vazio nem sobreposição */}
       {on("image") && b.image && <CardImage item={b} src={b.image} style={{ borderRadius: 10, marginBottom: 8 }} />}
       <div className="cr-row cr-card-heading">
-        <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{m && on("maintenance") ? `${statusEmoji(m.level)} ` : ""}{b.name}</h3>
+        <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{m && on("maintenance") ? `${statusEmoji(m.level)} ` : ""}{b.name}
+          {b.financeLink && <span className="cr-finance-link-badge" title="Criado a partir de um lançamento em Finanças" aria-label="Vinculado a um lançamento em Finanças"><Link2 size={12} /></span>}
+        </h3>
       </div>
       <div className="cr-row" role="group" aria-label={`Avaliação de ${b.name}`} style={{ gap: 2, marginTop: 2 }}>
         {Array.from({ length: 5 }, (_, index) => {
@@ -8103,13 +8556,24 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Prioridade financeira</label>
           <ManagedSelect listKey="priority" value={form.priority || "alta"} onChange={(value) => setForm({ ...form, priority: value })} /></div>
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Próxima sessão prevista</label>
+        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Data prevista para a próxima sessão</label>
           <input type="date" className="cr-input" value={form.nextExpenseDate || preview || ""}
             onChange={(event) => setForm({ ...form, nextExpenseDate: event.target.value })} /></div>
       </div>
       {!form.recurring && <div className="cr-field"><label className="cr-label">Data planejada (opcional)</label>
         <input type="date" className="cr-input" value={form.plannedDate || ""}
           onChange={(event) => setForm({ ...form, plannedDate: event.target.value })} /></div>}
+
+      <FormSection title="Agendamento" />
+      <div className="cr-row" style={{ flexWrap: "wrap" }}>
+        <div className="cr-field" style={{ flex: "1 1 150px" }}><label className="cr-label">Sessão agendada (data)</label>
+          <input type="date" className="cr-input" value={form.scheduledDate || ""} onChange={(event) => setForm({ ...form, scheduledDate: event.target.value })} /></div>
+        <div className="cr-field" style={{ flex: "1 1 110px" }}><label className="cr-label">Horário</label>
+          <input type="time" className="cr-input" value={form.scheduledTime || ""} onChange={(event) => setForm({ ...form, scheduledTime: event.target.value })} /></div>
+      </div>
+      {form.financeLink && (
+        <p className="cr-sub" style={{ marginTop: 0 }}><Link2 size={12} style={{ verticalAlign: "-1px" }} /> Vinculado a um lançamento em Finanças{form.financeLink.installments > 1 ? ` (${form.financeLink.installments}x de ${fmtBRL(form.financeLink.installmentAmount)})` : ""}: o valor e a data atualizam o lançamento.</p>
+      )}
 
       <FormSection title="Recorrência e alertas" />
       <div className="cr-field">
@@ -8123,7 +8587,7 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
 
       {form.recurring && (
         <>
-          <div className="cr-field"><label className="cr-label">Frequência</label>
+          <div className="cr-field"><label className="cr-label">Intervalo entre sessões</label>
             <select className="cr-select" value={selectedKey}
               onChange={(e) => {
                 const key = e.target.value;
@@ -10557,7 +11021,7 @@ export default function App({ onSignOut }) {
         {tab === "finance" && <FinanceView finance={finance} setFinance={setFinance} shopping={shopping} setShopping={setShopping} beauty={beauty} setBeauty={setBeauty} hobbies={hobbies} setHobbies={setHobbies} accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} investments={investments} setInvestments={setInvestments} goTo={setTab} onOrigin={navigateToOrigin} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "study" && <StudyView study={study} setStudy={setStudy} studyAreas={studyAreas} setStudyAreas={setStudyAreas} />}
         {tab === "career" && <CareerView career={career} setCareer={setCareer} />}
-        {tab === "beauty" && <BeautyView beauty={beauty} setBeauty={setBeauty} places={places} setPlaces={setPlaces} settings={settings} setSettings={setSettings} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
+        {tab === "beauty" && <BeautyView beauty={beauty} setBeauty={setBeauty} finance={finance} setFinance={setFinance} cards={cards} setCards={setCards} places={places} setPlaces={setPlaces} settings={settings} setSettings={setSettings} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "selfcare" && <SelfCareView selfcare={selfcare} setSelfcare={setSelfcare} />}
         {tab === "hobbies" && <HobbiesView hobbies={hobbies} setHobbies={setHobbies} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "personaldev" && <PersonalDevView personaldev={personaldev} setPersonaldev={setPersonaldev} settings={settings} setSettings={setSettings} />}

@@ -282,6 +282,8 @@ function generateProcedureRecords(beauty, fromDate, untilDate) {
   beauty.forEach((procedure) => {
     const history = Array.isArray(procedure.history) ? procedure.history : [];
     history.forEach((entry, index) => {
+      // realização de um card criado a partir de um lançamento: o pagamento já está em Finanças
+      if (entry.financeLinked) return;
       const record = sourceRecord("beauty", procedure, stableHistoryEvent(entry, index), "saida", "procedure");
       if (record) result.push(record);
     });
