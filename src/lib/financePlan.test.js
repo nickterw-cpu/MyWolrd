@@ -184,3 +184,21 @@ describe("monthSpendingStatus", () => {
     expect(monthSpendingStatus(tx, {}, "2026-11").level).toBe("aboveAverage");
   });
 });
+
+describe("parcelas do mês", () => {
+  it("destaca as parcelas do crédito que já estão no gasto do mês", () => {
+    const parcel = (i, status, month) => ({ id: `g:${i}`, date: `${month}-10`, type: "saida", amount: 100, status, paymentMethod: "Crédito", cardId: "c1",
+      invoiceMonth: month, installmentGroup: { id: "g", index: i, total: 5 } });
+    const tx = [
+      { date: "2026-11-05", type: "entrada", amount: 5000, status: "pago" },
+      { date: "2026-11-06", type: "saida", amount: 300, status: "pago" },
+      parcel(1, "pago", "2026-11"), { ...parcel(2, "agendado", "2026-11"), id: "h:1", installmentGroup: { id: "h", index: 1, total: 2 }, amount: 80 },
+      parcel(3, "agendado", "2026-12"),
+      { id: "s:1", date: "2026-11-12", type: "saida", amount: 200, status: "pago", paymentMethod: "Crédito", cardId: "c1", installmentGroup: { id: "s", index: 1, total: 3, kind: "sessions" } },
+    ];
+    const nov = monthSpendingStatus(tx, {}, "2026-11");
+    expect(nov.installments).toMatchObject({ total: 180, count: 2 });
+    expect(nov.spent).toBe(680);
+    expect(monthSpendingStatus(tx, {}, "2026-12").installments).toMatchObject({ total: 100, count: 1 });
+  });
+});

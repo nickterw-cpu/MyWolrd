@@ -1540,7 +1540,9 @@ const GlobalStyle = () => (
     .cr-rule-box p { margin: 0 0 6px; }
     .cr-rule-box ul { margin: 0 0 6px; padding-left: 18px; }
     .cr-quickbox { padding: 16px 18px; border-width: 1.5px; border-color: var(--ink-soft); }
-    .cr-quickbox-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .cr-quickbox-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    @media (max-width: 560px) { .cr-quickbox-values { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .cr-quickbox-sub { font-size: 12px; color: var(--ink-soft); }
     .cr-quickbox-item { display: grid; gap: 2px; padding: 4px 6px; border: 0; border-radius: 10px; background: transparent; text-align: left; font: inherit; color: inherit; cursor: pointer; min-width: 0; }
     .cr-quickbox-item:hover, .cr-quickbox-item:focus-visible { background: #F6F1EA; outline: none; }
     .cr-quickbox-item .cr-label { margin: 0; }
@@ -3746,6 +3748,18 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                         {st.base > 0 ? fmtBRL(st.available) : "—"}
                       </span>
                     </button>
+                    {/* destaque de quanto do gasto vem de parcelas (já está dentro de "Gasto no mês") */}
+                    <button type="button" className="cr-quickbox-item" title="Ver as parcelas do mês"
+                      onClick={() => setDetail({
+                        title: `Parcelas do mês · ${monthLabel(selectedMonth)}`,
+                        note: "Parcelas de compras parceladas no crédito com data neste mês, pagas e a pagar. Já estão incluídas em \"Gasto no mês\".",
+                        totalLabel: "Parcelas do mês",
+                        groups: [{ label: "", sign: 1, items: st.installments.items }],
+                      })}>
+                      <span className="cr-label">Parcelas do mês</span>
+                      <span className="cr-quickbox-number">{fmtBRL(st.installments.total)}</span>
+                      <span className="cr-quickbox-sub">{st.installments.count === 0 ? "nenhuma parcela" : `em ${st.installments.count} ${st.installments.count === 1 ? "parcela" : "parcelas"}`}</span>
+                    </button>
                   </div>
                   {st.base > 0 ? (
                     <>
@@ -4143,7 +4157,8 @@ function FinanceDetailModal({ detail, accounts, cards, onOpenEntry, onClose }) {
                 title={tx.sourceRef ? "Abrir na área de origem" : "Abrir para editar"}>
                 <span className="cr-detail-desc">
                   <strong>{tx.desc || tx.category || "Lançamento"}{tx.installmentGroup ? ` (${tx.installmentGroup.index}/${tx.installmentGroup.total})` : ""}</strong>
-                  <span>{[tx.category, fmtDateBR(tx.date), financePaymentLabel(tx, accounts, cards)].filter(Boolean).join(" · ")}</span>
+                  <span>{[tx.category, fmtDateBR(tx.date), financePaymentLabel(tx, accounts, cards),
+                    tx.paymentMethod === "Crédito" && tx.invoiceMonth ? `fatura ${monthLabel(tx.invoiceMonth)}` : ""].filter(Boolean).join(" · ")}</span>
                 </span>
                 <span className="cr-detail-amount">{fmtBRL(Number(tx.amount) || 0)}</span>
               </button>
