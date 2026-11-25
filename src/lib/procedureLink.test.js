@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isProcedureExpense, planInstallments, syncCardFromFinance, syncFinanceFromCard } from "./procedureLink.js";
+import { financeEntriesForCard, isProcedureExpense, planInstallments, procedureTotal, syncCardFromFinance, syncFinanceFromCard } from "./procedureLink.js";
 
 const today = "2026-11-24";
 let n = 0;
@@ -50,5 +50,26 @@ describe("procedureLink", () => {
     expect(plan.map((p) => p.date)).toEqual(["2026-09-10", "2026-10-10", "2026-11-10", "2026-12-10", "2027-01-10"]);
     expect(plan.map((p) => p.paid)).toEqual([true, true, false, false, false]);
     expect(plan.reduce((s, p) => s + p.amount, 0)).toBeCloseTo(500);
+  });
+});
+
+describe("procedimento criado na aba", () => {
+  it("valor total calculado ou manual", () => {
+    expect(procedureTotal({ cost: 200, plannedSessions: 3 })).toBe(600);
+    expect(procedureTotal({ cost: 200, plannedSessions: 3, totalCost: 500, totalCostManual: true })).toBe(500);
+    expect(procedureTotal({ cost: 150 })).toBe(150);
+  });
+
+  it("gera um lançamento com o total ou um por sessão", () => {
+    let k = 0;
+    const newId = () => `e${++k}`;
+    const card = { id: "b1", name: "Jato de plasma", cost: 200, plannedSessions: 3, scheduledDate: "2026-12-01",
+      gcalSessions: [{ start: "2026-12-15T10:00" }] };
+    const one = financeEntriesForCard(card, { mode: "total", today, newId });
+    expect(one.entries).toHaveLength(1);
+    expect(one.entries[0]).toMatchObject({ amount: 600, category: "Beleza", expenseClass: "procedure", date: "2026-12-01", status: "agendado" });
+    const many = financeEntriesForCard(card, { mode: "sessions", today, newId });
+    expect(many.entries.map((e) => [e.date, e.amount])).toEqual([["2026-12-01", 200], ["2026-12-15", 200], ["2027-01-14", 200]]);
+    expect(many.link).toMatchObject({ key: "sessions:b1", origin: "beauty", mode: "sessions", installments: 3 });
   });
 });

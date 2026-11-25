@@ -16,8 +16,9 @@ describe("selfCareSync", () => {
   it("limpa o título e compara nomes parecidos", () => {
     expect(cleanSelfCareTitle("Self care: Botox")).toBe("Botox");
     expect(cleanSelfCareTitle("Botox [Self care]")).toBe("Botox");
-    expect(titlesMatch("Depilação a laser", "Laser - Self care")).toBe(true);
-    expect(titlesMatch("Botox", "Botox testa")).toBe(true);
+    expect(titlesMatch("Jato de plasma", "Jato de plasma - 2ª sessão [Self care]")).toBe(true);
+    expect(titlesMatch("Jato de plasma", "Self care: jato de plasma (3/3)")).toBe(true);
+    expect(titlesMatch("Botox", "Botox testa")).toBe(false);
     expect(titlesMatch("Pé", "Pedicure")).toBe(false);
   });
 
@@ -47,6 +48,22 @@ describe("selfCareSync", () => {
     expect(created[0]).toMatchObject({ name: "Massagem", clinic: "Clínica Bela", gcalAuto: true });
     const gone = syncSelfCareSessions(created, [], { newId });
     expect(gone.map((c) => c.name)).toEqual(["Botox"]);
+  });
+
+  it("junta sessões repetidas num único card e conta as sessões", () => {
+    const evs = [1, 2, 3].map((i) => ev({ id: `cal1:jp${i}_0_2026-12-0${i}T10:00`, t: `Jato de plasma ${i}ª sessão [Self care]`, s: `2026-12-0${i}T10:00` }));
+    const out = syncSelfCareSessions([], evs, { newId, today: "2026-11-25" });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: "Jato de plasma", plannedSessions: 3, plannedSessionsAuto: true });
+    expect(out[0].gcalSessions).toHaveLength(3);
+    const manual = syncSelfCareSessions([{ ...out[0], plannedSessions: 5, plannedSessionsAuto: false }], evs, { newId, today: "2026-11-25" });
+    expect(manual[0].plannedSessions).toBe(5);
+  });
+
+  it("mantém sessões antigas que saíram da janela da agenda", () => {
+    const card = { id: "b1", name: "Botox", history: [], gcalSessions: [{ key: "cal1|old", title: "Botox", start: "2026-09-01T10:00" }] };
+    const out = syncSelfCareSessions([card], [], { newId, today: "2026-11-25" });
+    expect(out[0].gcalSessions).toHaveLength(1);
   });
 
   it("ignora eventos sem a marcação", () => {

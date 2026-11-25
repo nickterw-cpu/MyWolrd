@@ -157,3 +157,70 @@ export function summarizeFinanceMonth(transactions, plan, month) {
     byCategory,
   };
 }
+
+function previousMonth(month, back) {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 - back, 1));
+  return d.toISOString().slice(0, 7);
+}
+
+export const SPENDING_LEVELS = {
+  none: { mood: "neutral", color: "#B9AFA3", label: "sem dados" },
+  good: { mood: "happy", color: "#3E9A5A", label: "ótimo" },
+  watch: { mood: "neutral", color: "#E3B22E", label: "equilibrado" },
+  aboveAverage: { mood: "neutral", color: "#E3B22E", label: "atenção" },
+  high: { mood: "neutral", color: "#D9532F", label: "atenção" },
+  over: { mood: "sad", color: "#A1493C", label: "passou" },
+  noIncome: { mood: "sad", color: "#A1493C", label: "atenção" },
+};
+
+// Gasto do mês com tudo (pago, a pagar, cartão, parcelas e saldo de fatura informado à mão),
+// comparado com a renda do mês. As listas são as mesmas dos blocos de Finanças.
+export function monthSpendingStatus(transactions, plan, month, { cards = [], expectedIncome = 0 } = {}) {
+  const summary = summarizeFinanceMonth(transactions, plan, month);
+  const P = summary.lists.projectedSpending;
+  const invoiceLines = (Array.isArray(cards) ? cards : [])
+    .map((card) => ({ label: `Fatura ${card.name || "do cartão"} (saldo informado à mão)`, amount: amountOf(card.invoiceAmounts?.[month]) }))
+    .filter((line) => line.amount > 0);
+  const groups = [
+    { key: "paid", label: "Já pago", items: P.paid },
+    { key: "card", label: "Cartão de crédito e parcelas (a pagar)", items: P.card, lines: invoiceLines },
+    { key: "fixed", label: "Contas fixas/recorrentes (a pagar)", items: P.fixed },
+    { key: "pending", label: "Outras despesas a pagar", items: P.pending },
+  ];
+  const spent = groups.reduce((total, group) => total + sumOf(group.items) + (group.lines || []).reduce((t, line) => t + line.amount, 0), 0);
+  const receivedIncome = summary.receivedIncome;
+  const expected = amountOf(expectedIncome);
+  const base = receivedIncome > 0 ? receivedIncome : expected;
+  const baseSource = receivedIncome > 0 ? "received" : expected > 0 ? "expected" : "none";
+  const available = base - spent;
+  const pct = base > 0 ? spent / base : null;
+
+  const history = [1, 2, 3].map((back) => {
+    const m = previousMonth(month, back);
+    const s = summarizeFinanceMonth(transactions, plan, m);
+    const informed = (Array.isArray(cards) ? cards : []).reduce((t, card) => t + amountOf(card.invoiceAmounts?.[m]), 0);
+    return s.spent + sumOf(s.lists.projectedSpending.card) + sumOf(s.lists.projectedSpending.fixed) + sumOf(s.lists.projectedSpending.pending) + informed;
+  }).filter((value) => value > 0);
+  const average = history.length ? history.reduce((t, v) => t + v, 0) / history.length : 0;
+
+  const pctText = pct === null ? "" : `${Math.round(pct * 100)}%`;
+  let level; let message; let rule;
+  if (spent <= 0 && base <= 0) {
+    level = "none"; message = "Sem lançamentos neste mês ainda."; rule = "Nenhum gasto e nenhuma renda no mês.";
+  } else if (base <= 0) {
+    level = "noIncome"; message = "Há gastos no mês, mas nenhuma renda registrada ainda."; rule = "Existe gasto, mas não há renda recebida nem renda prevista no Planejamento.";
+  } else if (pct > 1) {
+    level = "over"; message = `Você passou do orçamento: os gastos somam ${pctText} da renda do mês.`; rule = "Gasto do mês maior que 100% da renda do mês.";
+  } else if (pct >= 0.85) {
+    level = "high"; message = `Atenção, gastos altos: ${pctText} da renda do mês já foi usada.`; rule = "Gasto do mês entre 85% e 100% da renda do mês.";
+  } else if (average > 0 && spent > average * 1.25) {
+    level = "aboveAverage"; message = `Atenção: você está gastando ${Math.round((spent / average - 1) * 100)}% acima da média dos últimos meses.`;
+    rule = "Gasto do mês abaixo de 85% da renda, mas mais de 25% acima da média dos 3 meses anteriores.";
+  } else if (pct >= 0.6) {
+    level = "watch"; message = `Gastos dentro do orçamento, mas de olho: ${pctText} da renda usada.`; rule = "Gasto do mês entre 60% e 85% da renda do mês.";
+  } else {
+    level = "good"; message = `Você está economizando bem: ${pctText} da renda usada até agora.`; rule = "Gasto do mês abaixo de 60% da renda do mês (e sem estar muito acima da média).";
+  }
+  return { ...SPENDING_LEVELS[level], level, message, rule, spent, base, baseSource, receivedIncome, expectedIncome: expected, available, pct, average, groups };
+}

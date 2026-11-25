@@ -4,13 +4,13 @@ import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
 import { habitStreak } from "./src/lib/habitStreak.js";
 import {
-  financeLinkKey, groupEntries, isProcedureExpense, linkedCardFor, planInstallments, shiftMonth as shiftMonthStr,
-  syncCardFromFinance, syncFinanceFromCard,
+  financeEntriesForCard, financeLinkKey, groupEntries, isProcedureExpense, linkedCardFor, planInstallments, procedureSessionCount,
+  procedureTotal, shiftMonth as shiftMonthStr, syncCardFromFinance, syncFinanceFromCard,
 } from "./src/lib/procedureLink.js";
 import { cleanSelfCareTitle, syncSelfCareSessions } from "./src/lib/selfCareSync.js";
 import { countInWeek, normalizeTarget, numericGoalProgress, shiftDays, weekStartOf, weeklyMessage, weeklyStreak } from "./src/lib/workoutWeek.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
-import { allocationValue, summarizeFinanceMonth } from "./src/lib/financePlan.js";
+import { allocationValue, monthSpendingStatus, summarizeFinanceMonth } from "./src/lib/financePlan.js";
 import {
   actualExpenseAverages, buildFinanceAlerts, buildFinanceForecast, buildIntegratedFinance,
   cardInvoiceMonthForDate, cardInvoiceMonthForEntry, cardLimitSummary, createCardFinanceInstallments,
@@ -23,7 +23,7 @@ import {
   Plus, Trash2, Pencil, X, Check, Search, Download, Upload, Sparkles, Flame, ChevronLeft, ChevronRight,
   GraduationCap, Briefcase, Sparkle, Image as ImageIcon, BookHeart, SearchCheck, Compass,
   HardDrive, Mail, FileText, BookOpen, ShoppingBag, ShoppingCart, Heart, Bot, Palette, ListChecks,
-  Music2, Play, Pause, SkipBack, SkipForward, Star, Instagram, Camera, Ruler, Trophy, Dumbbell, ExternalLink, Bell
+  Music2, Play, Pause, SkipBack, SkipForward, Star, Instagram, Info, Merge, Camera, Ruler, Trophy, Dumbbell, ExternalLink, Bell
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -1457,6 +1457,16 @@ const GlobalStyle = () => (
     .cr-installment-preview ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
     .cr-installment-preview li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; padding: 4px 6px; border-radius: 8px; }
     .cr-installment-preview li.is-current { background: #F7E9E4; }
+    .cr-detail-row.is-active { background: #F7E9E4; }
+    .cr-analysis-bar { width: 100%; border: 0; background: transparent; font: inherit; color: inherit; text-align: left; padding: 2px 0; border-radius: 6px; }
+    .cr-analysis-bar:hover, .cr-analysis-bar:focus-visible { background: #F6F1EA; outline: none; }
+    .cr-summary-block:disabled { cursor: default; }
+    .cr-finance-register { margin: 4px 0 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #FBF8F4; }
+    .cr-place-picker { display: grid; gap: 4px; max-height: 240px; overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    .cr-place-option { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 4px; border-radius: 8px; }
+    .cr-place-option.is-selected { background: #F7E9E4; }
+    .cr-place-option label { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; cursor: pointer; font-size: 14px; overflow-wrap: anywhere; }
+    .cr-place-option input[type=radio] { min-height: 0; }
     .cr-gcal-badge { display: inline-flex; vertical-align: 0; margin-left: 6px; color: #3F6C9E; }
     .cr-gcal-sessions { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #F4F7FB; }
     .cr-gcal-session { display: grid; gap: 1px; padding: 4px 0; font-size: 13px; }
@@ -1515,6 +1525,20 @@ const GlobalStyle = () => (
     .cr-catchart-legend-btn { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px; border: 0; border-radius: 6px; background: transparent; font: inherit; color: inherit; cursor: pointer; min-width: 0; }
     .central-root .cr-catchart-legend-btn { min-height: 32px; }
     .cr-catchart-legend-btn:hover, .cr-catchart-legend-btn:focus-visible { background: #F6F1EA; outline: none; }
+    .cr-howto { padding: 2px 6px; margin-top: 6px; font-size: 12.5px; color: var(--ink-soft); }
+    .central-root .cr-howto { min-height: 32px; }
+    .cr-chip-btn { border: 0; cursor: pointer; font: inherit; font-size: 12px; }
+    .cr-rule-box { margin-bottom: 8px; padding: 10px 12px; border-radius: 10px; background: #FBF8F4; border: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
+    .cr-rule-box p { margin: 0 0 6px; }
+    .cr-rule-box ul { margin: 0 0 6px; padding-left: 18px; }
+    .cr-quickbox { padding: 16px 18px; border-width: 1.5px; border-color: var(--ink-soft); }
+    .cr-quickbox-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .cr-quickbox-item { display: grid; gap: 2px; padding: 4px 6px; border: 0; border-radius: 10px; background: transparent; text-align: left; font: inherit; color: inherit; cursor: pointer; min-width: 0; }
+    .cr-quickbox-item:hover, .cr-quickbox-item:focus-visible { background: #F6F1EA; outline: none; }
+    .cr-quickbox-item .cr-label { margin: 0; }
+    .cr-quickbox-number { font-family: 'Fraunces Variable', serif; font-size: clamp(22px, 5vw, 32px); line-height: 1.15; overflow-wrap: anywhere; }
+    .cr-quickbox-track { height: 6px; margin-top: 12px; border-radius: 999px; background: #EFE8DE; overflow: hidden; }
+    .cr-quickbox-track > div { height: 100%; border-radius: 999px; transition: width 0.3s; }
     /* Treino semanal */
     .cr-training { display: grid; gap: 16px; margin-top: 14px; min-width: 0; }
     .cr-training-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; align-items: start; min-width: 0; }
@@ -2128,7 +2152,8 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
   const renderWidget = (id) => {
     switch (id) {
       case "panorama": {
-        const om = overallMood(tasks, goals, habits, finance);
+        const spending = spendingStatusFor(finance, settings, cards, todayStr().slice(0, 7));
+        const om = overallMood(tasks, goals, habits, spending);
         return (
           <div className="cr-card" key="panorama" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
             <PandaMood mood={om.mood} />
@@ -2136,9 +2161,14 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
               <p className="cr-label" style={{ marginBottom: 4 }}>Panorama geral</p>
               <p className="cr-serif" style={{ fontSize: 16, margin: "0 0 8px" }}>{om.message}</p>
               <div className="cr-row" style={{ flexWrap: "wrap", gap: 6 }}>
-                {om.breakdown.map((b) => (
+                {om.breakdown.map((b) => (b.label === "Finanças" ? (
+                  <button key={b.label} type="button" className="cr-chip cr-chip-btn" title={`${spending.message} Toque para ver como é calculado.`}
+                    onClick={() => setFinanceDetail(spendingRuleDetail(spending, todayStr().slice(0, 7)))}>
+                    {b.label}: {b.status} <Info size={11} style={{ verticalAlign: "-1px" }} />
+                  </button>
+                ) : (
                   <span key={b.label} className="cr-chip">{b.label}: {b.status}</span>
-                ))}
+                )))}
               </div>
             </div>
           </div>
@@ -2268,8 +2298,6 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
               ? <p className="cr-empty">Nenhum gasto registrado este mês ainda.</p>
               : <CategoryExpenseChart data={catData} settings={settings} setSettings={setSettings}
                 onCategoryClick={(label) => setFinanceDetail(categoryDetail(finance, todayStr().slice(0, 7), label))} />}
-            {financeDetail && <FinanceDetailModal detail={financeDetail} accounts={accounts} cards={cards} onClose={() => setFinanceDetail(null)}
-              onOpenEntry={(tx) => { setFinanceDetail(null); if (onOrigin) onOrigin(tx.sourceRef || { type: "financeEdit", sourceId: tx.id }); }} />}
           </div>
         );
       }
@@ -2358,6 +2386,8 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
       {nonStats.map((w) => (
         <div key={w.id} style={{ marginBottom: 26 }}>{renderWidget(w.id)}</div>
       ))}
+      {financeDetail && <FinanceDetailModal detail={financeDetail} accounts={accounts} cards={cards} onClose={() => setFinanceDetail(null)}
+        onOpenEntry={(tx) => { setFinanceDetail(null); if (onOrigin) onOrigin(tx.sourceRef || { type: "financeEdit", sourceId: tx.id }); }} />}
     </div>
   );
 }
@@ -3087,6 +3117,63 @@ function PandaMood({ mood, size = 110 }) {
   );
 }
 
+// Renda líquida prevista do Planejamento (mesma conta da aba Planejamento).
+function planExpectedNet(plan) {
+  const p = plan || {};
+  if (Number(p.netSalary) > 0) return Number(p.netSalary);
+  const deductions = Array.isArray(p.deductions)
+    ? p.deductions.reduce((total, row) => total + (Number(row.amount) || 0), 0)
+    : Number(p.deductions) || 0;
+  return Math.max(0, (Number(p.grossSalary) || 0) + (Number(p.extraIncome) || 0) - deductions);
+}
+
+function spendingStatusFor(finance, settings, cards, month) {
+  return monthSpendingStatus(finance, settings?.financePlan, month, { cards, expectedIncome: planExpectedNet(settings?.financePlan) });
+}
+
+// Detalhe "como é calculado": o que entrou no gasto do mês e qual regra gerou a frase.
+function spendingRuleDetail(status, month) {
+  const pct = status.pct === null ? "—" : `${Math.round(status.pct * 100)}%`;
+  const baseText = status.baseSource === "received" ? `renda recebida no mês (${fmtBRL(status.base)})`
+    : status.baseSource === "expected" ? `renda prevista no Planejamento (${fmtBRL(status.base)}), porque nada foi recebido ainda`
+    : "nenhuma renda registrada";
+  return {
+    title: `Como é calculado · ${monthLabel(month)}`,
+    totalLabel: "Gasto no mês",
+    extra: (
+      <div className="cr-rule-box">
+        <p><strong>Frase:</strong> {status.message}</p>
+        <p><strong>Regra que gerou a frase:</strong> {status.rule}</p>
+        <p><strong>Conta:</strong> gasto do mês {fmtBRL(status.spent)} ÷ {baseText} = <strong>{pct}</strong>
+          {status.average > 0 ? ` · média dos 3 meses anteriores: ${fmtBRL(status.average)}` : ""}</p>
+        <ul>
+          <li>Acima de 100% da renda: "passou do orçamento"</li>
+          <li>De 85% a 100%: "atenção, gastos altos"</li>
+          <li>Mais de 25% acima da média dos 3 meses anteriores: "gastando acima da média"</li>
+          <li>De 60% a 85%: "dentro do orçamento, mas de olho"</li>
+          <li>Abaixo de 60%: "economizando bem"</li>
+        </ul>
+        <p className="cr-sub" style={{ margin: 0 }}>Entram todas as saídas do mês (pagas e a pagar): contas, débito, Pix, cartão de crédito, parcelas e o saldo de fatura informado à mão. Não entram transferências para reserva/investimento nem estimativas.</p>
+      </div>
+    ),
+    groups: status.groups.map((group) => ({ label: group.label, sign: 1, items: group.items, lines: group.lines })),
+  };
+}
+
+function availableDetail(status, incomeItems, month) {
+  return {
+    title: `Disponível · ${monthLabel(month)}`,
+    totalLabel: "Disponível",
+    note: status.baseSource === "expected" ? "Nada foi recebido ainda neste mês: a base é a renda prevista no Planejamento." : "",
+    groups: [
+      status.baseSource === "expected"
+        ? { label: "Renda prevista (Planejamento)", sign: 1, items: [], lines: [{ label: "Renda líquida prevista", amount: status.base }] }
+        : { label: "Renda recebida", sign: 1, items: incomeItems },
+      ...status.groups.map((group) => ({ label: group.label, sign: -1, items: group.items, lines: group.lines })),
+    ],
+  };
+}
+
 function financeMood(income, expense) {
   if (income <= 0 && expense <= 0) return { mood: "neutral", message: "Sem lançamentos neste mês ainda." };
   if (income <= 0) return { mood: "sad", message: "Só saiu dinheiro esse mês, nada entrou ainda." };
@@ -3105,21 +3192,12 @@ function goalsMood(goals) {
   return { mood: "sad", message: "Suas metas ativas precisam de mais atenção." };
 }
 
-function overallMood(tasks, goals, habits, finance) {
+function overallMood(tasks, goals, habits, spending) {
   const today = todayStr();
-  const thisMonth = today.slice(0, 7);
-
-  const monthTx = finance.filter((f) => f.date.slice(0, 7) === thisMonth && f.status !== "cancelado");
-  const income = monthTx.filter((f) => f.type === "entrada" && (!f.status || f.status === "pago")).reduce((s, f) => s + Number(f.amount), 0);
-  const expense = monthTx
-    .filter((f) => f.type === "saida" && (!f.status || f.status === "pago") && !["reserve", "investment"].includes(f.expenseClass))
-    .reduce((s, f) => s + Number(f.amount), 0);
-  let financeScore = 60, financeLabel = "sem dados";
-  if (income > 0 || expense > 0) {
-    const ratio = income > 0 ? expense / income : 2;
-    financeScore = ratio <= 0.7 ? 90 : ratio <= 1 ? 60 : 25;
-    financeLabel = financeScore >= 90 ? "ótimo" : financeScore >= 60 ? "equilibrado" : "atenção";
-  }
+  // Finanças: mesma regra da frase da tela de Finanças (todos os lançamentos do mês, inclusive cartão)
+  const financeScores = { none: 60, good: 90, watch: 70, aboveAverage: 55, high: 40, over: 25, noIncome: 25 };
+  const financeScore = financeScores[spending?.level] ?? 60;
+  const financeLabel = spending?.label || "sem dados";
 
   const activeGoals = goals.filter((g) => !isClosedItem("goalStatus", g.status));
   let goalsScore = 60, goalsLabel = "sem dados";
@@ -3357,7 +3435,8 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
         setBeauty(beauty.map((item) => {
           if (item.id !== card.id) return item;
           const { financeLink, financeAuto, ...rest } = item;
-          return rest;
+          // o lançamento foi excluído em Finanças: não recria sozinho
+          return { ...rest, financeRegister: false };
         }));
       }
     } else {
@@ -3492,6 +3571,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     [finance, settings.financePlan, selectedMonth],
   );
   const averages = useMemo(() => actualExpenseAverages(finance, todayStr()), [finance]);
+  const spendingStatus = useMemo(() => spendingStatusFor(finance, settings, cards, selectedMonth), [finance, settings, cards, selectedMonth]);
   const income = planSummary.receivedIncome;
   const expense = planSummary.spent;
   const balance = income - expense;
@@ -3625,15 +3705,51 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             {selectedMonth !== localDateStr(new Date()).slice(0, 7) && <button type="button" className="cr-btn ghost" onClick={returnToCurrentMonth}>hoje</button>}
           </div>
           {(() => {
-            const fm = financeMood(income, expense);
+            const st = spendingStatus;
+            const usedPct = st.pct === null ? 0 : Math.min(100, Math.round(st.pct * 100));
             return (
-              <div className="cr-card" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
-                <PandaMood mood={fm.mood} />
-                <div>
-                  <p className="cr-label" style={{ marginBottom: 4 }}>Como está seu mês</p>
-                  <p className="cr-serif" style={{ fontSize: 15, margin: 0 }}>{fm.message}</p>
+              <>
+                <div className="cr-card" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+                  <PandaMood mood={st.mood} />
+                  <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+                    <p className="cr-label" style={{ marginBottom: 4 }}>Como está seu mês</p>
+                    <p className="cr-serif" style={{ fontSize: 15, margin: 0 }}>{st.message}</p>
+                    <button type="button" className="cr-btn ghost cr-howto" onClick={() => setDetail(spendingRuleDetail(st, selectedMonth))}>
+                      <Info size={13} /> como é calculado
+                    </button>
+                  </div>
                 </div>
-              </div>
+                {/* Resumo rápido: a primeira coisa do mês */}
+                <div className="cr-card cr-quickbox" style={{ marginBottom: 16 }}>
+                  <div className="cr-quickbox-values">
+                    <button type="button" className="cr-quickbox-item" onClick={() => setDetail(spendingRuleDetail(st, selectedMonth))} title="Ver o que compõe este valor">
+                      <span className="cr-label">Gasto no mês</span>
+                      <span className="cr-quickbox-number">{fmtBRL(st.spent)}</span>
+                    </button>
+                    <button type="button" className="cr-quickbox-item" onClick={() => setDetail(availableDetail(st, planSummary.lists.income, selectedMonth))} title="Ver o que compõe este valor">
+                      <span className="cr-label">Disponível</span>
+                      <span className="cr-quickbox-number" style={{ color: st.base > 0 ? (st.available >= 0 ? "#5C7A56" : "#A1493C") : "var(--ink-soft)" }}>
+                        {st.base > 0 ? fmtBRL(st.available) : "—"}
+                      </span>
+                    </button>
+                  </div>
+                  {st.base > 0 ? (
+                    <>
+                      <div className="cr-quickbox-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usedPct} aria-label="Quanto da renda do mês já foi usado">
+                        <div style={{ width: `${usedPct}%`, background: st.color }} />
+                      </div>
+                      <p className="cr-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>
+                        {Math.round(st.pct * 100)}% da renda do mês {st.baseSource === "expected" ? "prevista" : "recebida"} ({fmtBRL(st.base)})
+                      </p>
+                    </>
+                  ) : (
+                    <p className="cr-sub" style={{ margin: "6px 0 0", fontSize: 12.5 }}>
+                      Ainda não há renda ou orçamento definido para este mês.{" "}
+                      <button type="button" className="cr-btn ghost" style={{ padding: "0 4px", minHeight: 0, display: "inline" }} onClick={() => setTab("planejamento")}>Definir renda do mês</button>
+                    </p>
+                  )}
+                </div>
+              </>
             );
           })()}
           <div className="cr-grid cr-grid-3" style={{ marginBottom: 16 }}>
@@ -3931,11 +4047,11 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       {editScopeAsk && (
         <Modal size="small" title="Editar parcela" onClose={() => setEditScopeAsk(null)}>
           <p style={{ fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>
-            Esta é a parcela {editScopeAsk.installmentGroup.index}/{editScopeAsk.installmentGroup.total} de "{editScopeAsk.desc || editScopeAsk.category}". A edição vale para:
+            Esta é a {editScopeAsk.installmentGroup.kind === "sessions" ? "sessão" : "parcela"} {editScopeAsk.installmentGroup.index}/{editScopeAsk.installmentGroup.total} de "{editScopeAsk.desc || editScopeAsk.category}". A edição vale para:
           </p>
           <div className="cr-row" style={{ justifyContent: "flex-end", flexWrap: "wrap", gap: 8 }}>
-            <button type="button" className="cr-btn" onClick={() => { setEditing({ ...editScopeAsk, _editScope: "one" }); setEditScopeAsk(null); }}>Só esta parcela</button>
-            <button type="button" className="cr-btn primary" onClick={() => { setEditing({ ...editScopeAsk, _editScope: "all" }); setEditScopeAsk(null); }}>Todas as parcelas</button>
+            <button type="button" className="cr-btn" onClick={() => { setEditing({ ...editScopeAsk, _editScope: "one" }); setEditScopeAsk(null); }}>Só esta {editScopeAsk.installmentGroup.kind === "sessions" ? "sessão" : "parcela"}</button>
+            <button type="button" className="cr-btn primary" onClick={() => { setEditing({ ...editScopeAsk, _editScope: "all" }); setEditScopeAsk(null); }}>Todas as {editScopeAsk.installmentGroup.kind === "sessions" ? "sessões" : "parcelas"}</button>
           </div>
         </Modal>
       )}
@@ -3989,6 +4105,7 @@ function FinanceDetailModal({ detail, accounts, cards, onOpenEntry, onClose }) {
     <Modal size="small" title={detail.title} onClose={onClose}>
       <div className="cr-detail">
         {detail.note && <p className="cr-sub" style={{ marginTop: 0 }}>{detail.note}</p>}
+        {detail.extra}
         {!empty && !detail.noSort && (
           <div className="cr-row" style={{ gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
             <span className="cr-sub" style={{ margin: 0 }}>Ordenar:</span>
@@ -4037,24 +4154,26 @@ function FinanceDetailModal({ detail, accounts, cards, onOpenEntry, onClose }) {
 
 function FinanceRemoveModal({ entry, card, onConfirm, onCancel }) {
   const group = entry.installmentGroup;
+  const unit = group?.kind === "sessions" ? "sessão" : "parcela";
+  const units = group?.kind === "sessions" ? "sessões" : "parcelas";
   const [scope, setScope] = useState(group ? "one" : "all");
   const [removeCard, setRemoveCard] = useState(false);
   // o card só sai junto quando todo o lançamento (ou todas as parcelas) é excluído
   const removesAll = !group || scope === "all" || Number(group.total) === 1;
   return (
-    <Modal size="small" title={group ? "Excluir parcela" : "Excluir lançamento"} onClose={onCancel}>
+    <Modal size="small" title={group ? `Excluir ${unit}` : "Excluir lançamento"} onClose={onCancel}>
       <p style={{ fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>
-        {group ? `"${entry.desc || entry.category}" é a parcela ${group.index}/${group.total}. O que você quer excluir?` : `Excluir "${entry.desc || entry.category}"?`}
+        {group ? `"${entry.desc || entry.category}" é a ${unit} ${group.index}/${group.total}. O que você quer excluir?` : `Excluir "${entry.desc || entry.category}"?`}
       </p>
       {group && (
         <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
           <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap" }}>
             <input type="radio" name="remove-scope" checked={scope === "one"} onChange={() => setScope("one")} style={{ minHeight: 0 }} />
-            <span style={{ fontSize: 14 }}>Só esta parcela ({group.index}/{group.total})</span>
+            <span style={{ fontSize: 14 }}>Só esta {unit} ({group.index}/{group.total})</span>
           </label>
           <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap" }}>
             <input type="radio" name="remove-scope" checked={scope === "all"} onChange={() => setScope("all")} style={{ minHeight: 0 }} />
-            <span style={{ fontSize: 14 }}>Todas as {group.total} parcelas</span>
+            <span style={{ fontSize: 14 }}>Todas as {group.total} {units}</span>
           </label>
         </div>
       )}
@@ -8150,15 +8269,27 @@ function placeOf(b, places) {
 const DEFAULT_BOOKING_WARN_DAYS = 15;
 const daysBetween = (from, to) => Math.round((new Date(to + "T00:00:00") - new Date(from + "T00:00:00")) / 86400000);
 
-// Data prevista para a próxima sessão: a informada, ou a calculada pelo intervalo, ou a data planejada.
-function procedureDueDate(b) {
+// Sessões feitas: sessões da agenda com data passada (ou o histórico de realizações, sem agenda).
+function procedureDoneSessions(b, today = todayStr()) {
+  const gcal = (b.gcalSessions || []).filter((session) => (session.start || "").slice(0, 10) < today).length;
+  return (b.gcalSessions || []).length ? gcal : (b.history || []).length;
+}
+
+// Próxima manutenção de um procedimento recorrente (última realização + intervalo entre sessões).
+function procedureMaintenanceDate(b) {
   const status = String(inferProcStatus(b) || "").toLowerCase();
-  if (status === "nunca" || status.startsWith("paus")) return "";
-  const due = b.nextExpenseDate
-    || (b.recurring ? nextMaintenanceDate(b.dateDone, b.frequencyUnit, b.frequencyValue) : "")
-    || (!b.recurring ? b.plannedDate : "") || "";
-  if (!due || (b.dateDone && b.dateDone >= due)) return "";
-  return due;
+  if (status === "nunca" || status.startsWith("paus") || !b.recurring) return "";
+  const due = nextMaintenanceDate(b.dateDone, b.frequencyUnit, b.frequencyValue) || "";
+  return due && !(b.dateDone && b.dateDone >= due) ? due : "";
+}
+
+// Faltam sessões (número de sessões maior que as feitas) e nenhuma está agendada.
+function procedureMissingSessions(b, today) {
+  const status = String(inferProcStatus(b) || "").toLowerCase();
+  if (status === "nunca" || status.startsWith("paus")) return 0;
+  const planned = Number(b.plannedSessions) || 0;
+  if (planned <= 1) return 0;
+  return Math.max(0, planned - procedureDoneSessions(b, today));
 }
 
 // Sessões do Google Agenda ainda por vir (de hoje em diante)
@@ -8181,13 +8312,18 @@ function buildProcedureAlerts(procedures, today, warnDays) {
     // a mesma sessão marcada no app e no Google (mesmo dia) aparece uma vez só
     .filter((item, index, all) => !(item.fromGoogle === undefined && all.some((other) => other.fromGoogle && other.b.id === item.b.id && other.date === item.date)))
     .sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time));
+  // "Para marcar em breve": sem nenhuma sessão agendada (no app ou na agenda) e
+  // (a) com sessões restantes, ou (b) recorrente com a manutenção chegando (prazo de aviso configurável).
   const toBook = procedures
     .filter((b) => !(b.scheduledDate && b.scheduledDate >= today) && upcomingGcalSessions(b, today).length === 0)
-    .map((b) => ({ b, date: procedureDueDate(b) }))
-    .filter((x) => x.date)
-    .map((x) => ({ ...x, days: daysBetween(today, x.date) }))
-    .filter((x) => x.days <= warnDays)
-    .sort((x, y) => x.date.localeCompare(y.date));
+    .map((b) => {
+      const missing = procedureMissingSessions(b, today);
+      const date = procedureMaintenanceDate(b);
+      const days = date ? daysBetween(today, date) : null;
+      return { b, missing, date: date && days <= warnDays ? date : "", days };
+    })
+    .filter((x) => x.missing > 0 || x.date)
+    .sort((x, y) => (x.date || "9999").localeCompare(y.date || "9999"));
   return { upcoming, toBook };
 }
 
@@ -8231,14 +8367,16 @@ function ProcedureAlertsStrip({ procedures, warnDays, onWarnDays, onOpen, onSche
       </section>
       <section className="cr-proc-alerts-col is-attention" aria-label="Para marcar em breve">
         <h3 className="cr-serif"><Bell size={15} /> Para marcar em breve</h3>
-        {toBook.length === 0 && <p className="cr-sub" style={{ margin: 0 }}>Nada para marcar nos próximos {warnDays} dias.</p>}
-        {toBook.map(({ b, date, days }) => (
-          <div key={b.id} className={`cr-proc-alert-item is-book ${days < 0 ? "is-late" : ""}`} role="button" tabIndex={0}
+        {toBook.length === 0 && <p className="cr-sub" style={{ margin: 0 }}>Nada para marcar agora.</p>}
+        {toBook.map(({ b, date, days, missing }) => (
+          <div key={b.id} className={`cr-proc-alert-item is-book ${date && days < 0 ? "is-late" : ""}`} role="button" tabIndex={0}
             onClick={() => onOpen(b)} onKeyDown={(event) => { if (event.target === event.currentTarget && event.key === "Enter") onOpen(b); }}>
             <span className="cr-proc-alert-name">{b.name || "Procedimento"}</span>
             <span className="cr-proc-alert-meta">
-              {days < 0 ? `previsto para ${fmtDateBR(date)} · passou há ${-days} ${-days === 1 ? "dia" : "dias"}`
-                : days === 0 ? `previsto para hoje` : `previsto para ${fmtDateBR(date)} · faltam ${days} ${days === 1 ? "dia" : "dias"}`}
+              {date
+                ? (days < 0 ? `manutenção prevista para ${fmtDateBR(date)} · passou há ${-days} ${-days === 1 ? "dia" : "dias"}`
+                  : days === 0 ? "manutenção prevista para hoje" : `manutenção prevista para ${fmtDateBR(date)} · faltam ${days} ${days === 1 ? "dia" : "dias"}`)
+                : `${procedureDoneSessions(b, today)} de ${Number(b.plannedSessions)} sessões feitas · ${missing === 1 ? "falta 1" : `faltam ${missing}`}, nenhuma agendada`}
             </span>
             <span className="cr-row" style={{ gap: 4, flexWrap: "wrap" }}>
               <button type="button" className="cr-btn primary cr-proc-alert-action" onClick={(event) => { event.stopPropagation(); onSchedule(b, date); }}>
@@ -8293,6 +8431,149 @@ function BeautyRemoveModal({ item, linkedCount, onConfirm, onCancel }) {
   );
 }
 
+// Gastos realizados de um procedimento: histórico de realizações ou, sem histórico, a última realização.
+function procedureSpendRecords(b) {
+  const history = Array.isArray(b.history) ? b.history : [];
+  if (history.length) return history.filter((entry) => entry.date).map((entry) => ({ date: entry.date, amount: Number(entry.cost) || 0 }));
+  return b.dateDone ? [{ date: b.dateDone, amount: Number(b.cost) || 0 }] : [];
+}
+
+// Datas de sessões feitas (histórico, última realização e sessões passadas da agenda).
+function procedureDoneDates(b, today) {
+  return Array.from(new Set([
+    ...(b.history || []).map((entry) => entry.date),
+    b.dateDone,
+    ...(b.gcalSessions || []).map((session) => (session.start || "").slice(0, 10)).filter((date) => date < today),
+  ].filter(Boolean))).sort();
+}
+
+const ANALYSIS_PERIODS = [
+  { id: "mes", label: "Este mês" }, { id: "3m", label: "3 meses" }, { id: "ano", label: "Este ano" }, { id: "tudo", label: "Tudo" },
+];
+
+function RankingBars({ items, format }) {
+  const max = Math.max(1, ...items.map((item) => item.value));
+  if (!items.length) return <p className="cr-empty" style={{ margin: "6px 0" }}>Sem dados.</p>;
+  return (
+    <div className="cr-catchart-hbars">
+      {items.map((item) => (
+        <button key={item.id} type="button" className="cr-catchart-hbar cr-analysis-bar" onClick={item.onClick} title="Abrir o procedimento">
+          <span className="cr-catchart-hbar-label">{item.label}</span>
+          <div className="cr-catchart-hbar-track"><div className="cr-catchart-hbar-fill" style={{ width: `${Math.max(3, (item.value / max) * 100)}%`, background: "#C77B6C" }} /></div>
+          <span className="cr-catchart-hbar-value">{format(item.value)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ProcedureAnalysis({ procedures, onOpen }) {
+  const today = useToday();
+  const [period, setPeriod] = useState("ano");
+  const [category, setCategory] = useState("todas");
+  const [priceMetric, setPriceMetric] = useState("total");
+  const [priceOrder, setPriceOrder] = useState("desc");
+  const start = period === "mes" ? `${today.slice(0, 7)}-01`
+    : period === "3m" ? addDays(today, -90)
+    : period === "ano" ? `${today.slice(0, 4)}-01-01` : "0000-00-00";
+  const inPeriod = (date) => !!date && date >= start && date <= today;
+  const categories = getList("procCategory");
+  const list = procedures.filter((b) => category === "todas" || (category === "" ? !b.category : b.category === category));
+  const open = (b) => () => onOpen(b);
+
+  const priced = list
+    .map((b) => ({ id: b.id, label: b.name || "Sem nome", value: priceMetric === "total" ? procedureTotal(b) : Number(b.cost) || 0, onClick: open(b) }))
+    .filter((item) => item.value > 0)
+    .sort((a, b) => (priceOrder === "desc" ? b.value - a.value : a.value - b.value));
+  const sessionsInPeriod = (b) => procedureDoneDates(b, today).filter(inPeriod).length;
+  const mostDone = list.map((b) => ({ id: b.id, label: b.name || "Sem nome", value: sessionsInPeriod(b), onClick: open(b) }))
+    .filter((item) => item.value > 0).sort((a, b) => b.value - a.value).slice(0, 8);
+  const onlyOnce = list.filter((b) => procedureDoneDates(b, today).length === 1);
+
+  const records = list.flatMap((b) => procedureSpendRecords(b).map((r) => ({ ...r, b })));
+  const sumIn = (pred) => records.filter((r) => pred(r.date)).reduce((t, r) => t + r.amount, 0);
+  const monthTotal = sumIn((d) => d.slice(0, 7) === today.slice(0, 7));
+  const yearTotal = sumIn((d) => d.slice(0, 4) === today.slice(0, 4));
+  const periodRecords = records.filter((r) => inPeriod(r.date));
+  const periodTotal = periodRecords.reduce((t, r) => t + r.amount, 0);
+  const paidSessions = periodRecords.filter((r) => r.amount > 0);
+  const average = paidSessions.length ? paidSessions.reduce((t, r) => t + r.amount, 0) / paidSessions.length : 0;
+  const byCategory = new Map();
+  periodRecords.forEach((r) => {
+    const key = r.b.category || "Sem categoria";
+    byCategory.set(key, (byCategory.get(key) || 0) + r.amount);
+  });
+  const categoryBars = [...byCategory].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
+    .map(([key, value]) => ({ id: key, label: listName("procCategory", key) || key, value, onClick: () => setCategory(key === "Sem categoria" ? "" : key) }));
+
+  const latest = list.map((b) => ({ b, date: procedureDoneDates(b, today).at(-1) })).filter((x) => x.date).sort((a, b) => b.date.localeCompare(a.date))[0];
+  const next = list.flatMap((b) => [
+    ...(b.scheduledDate && b.scheduledDate >= today ? [{ b, date: b.scheduledDate, time: b.scheduledTime || "" }] : []),
+    ...upcomingGcalSessions(b, today).map((session) => ({ b, date: session.start.slice(0, 10), time: session.allDay ? "" : gcalTimeOf(session.start) })),
+  ]).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
+
+  return (
+    <div className="cr-analysis">
+      <div className="cr-row" style={{ flexWrap: "wrap", gap: 8, margin: "14px 0" }}>
+        <div className="cr-catchart-types" role="group" aria-label="Período">
+          {ANALYSIS_PERIODS.map((option) => (
+            <button key={option.id} type="button" className={`cr-tabbtn ${period === option.id ? "active" : ""}`} aria-pressed={period === option.id} onClick={() => setPeriod(option.id)}>{option.label}</button>
+          ))}
+        </div>
+        <select className="cr-select" style={{ maxWidth: 220 }} value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filtrar por categoria">
+          <option value="todas">Todas as categorias</option>
+          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <option value="">Sem categoria</option>
+        </select>
+      </div>
+      <div className="cr-grid cr-grid-3" style={{ marginBottom: 16 }}>
+        <div className="cr-card"><p className="cr-label">Gasto este mês</p><p className="cr-serif" style={{ fontSize: 22, margin: 0 }}>{fmtBRL(monthTotal)}</p></div>
+        <div className="cr-card"><p className="cr-label">Gasto este ano</p><p className="cr-serif" style={{ fontSize: 22, margin: 0 }}>{fmtBRL(yearTotal)}</p></div>
+        <div className="cr-card"><p className="cr-label">Valor médio por sessão (período)</p><p className="cr-serif" style={{ fontSize: 22, margin: 0 }}>{average > 0 ? fmtBRL(average) : "—"}</p></div>
+        <button type="button" className="cr-card cr-summary-block" disabled={!latest} onClick={() => latest && onOpen(latest.b)}>
+          <span className="cr-label">Procedimento mais recente</span>
+          <span className="cr-summary-value is-compact">{latest ? `${latest.b.name} · ${fmtDateBR(latest.date)}` : "—"}</span>
+        </button>
+        <button type="button" className="cr-card cr-summary-block" disabled={!next} onClick={() => next && onOpen(next.b)}>
+          <span className="cr-label">Próximo agendado</span>
+          <span className="cr-summary-value is-compact">{next ? `${next.b.name} · ${fmtDateBR(next.date)}${next.time ? ` ${next.time}` : ""}` : "—"}</span>
+        </button>
+        <div className="cr-card"><p className="cr-label">Gasto no período</p><p className="cr-serif" style={{ fontSize: 22, margin: 0 }}>{fmtBRL(periodTotal)}</p></div>
+      </div>
+      <div className="cr-training-grid">
+        <div className="cr-card">
+          <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+            <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{priceOrder === "desc" ? "Mais caros" : "Mais baratos"}</h3>
+            <div className="cr-row" style={{ gap: 6, flexWrap: "wrap" }}>
+              <select className="cr-select" style={{ width: "auto" }} value={priceMetric} onChange={(e) => setPriceMetric(e.target.value)} aria-label="Valor usado no ranking">
+                <option value="total">Valor total</option><option value="sessao">Valor por sessão</option>
+              </select>
+              <select className="cr-select" style={{ width: "auto" }} value={priceOrder} onChange={(e) => setPriceOrder(e.target.value)} aria-label="Ordem">
+                <option value="desc">Mais caros primeiro</option><option value="asc">Mais baratos primeiro</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ marginTop: 10 }}><RankingBars items={priced.slice(0, 8)} format={fmtBRL} /></div>
+        </div>
+        <div className="cr-card">
+          <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>Os que você mais faz (sessões no período)</h3>
+          <div style={{ marginTop: 10 }}><RankingBars items={mostDone} format={(v) => `${v} ${v === 1 ? "sessão" : "sessões"}`} /></div>
+          <p className="cr-label" style={{ margin: "14px 0 6px" }}>Feitos uma vez só</p>
+          {onlyOnce.length === 0 ? <p className="cr-sub" style={{ margin: 0 }}>Nenhum.</p> : (
+            <div className="cr-row" style={{ flexWrap: "wrap", gap: 4 }}>
+              {onlyOnce.map((b) => <button key={b.id} type="button" className="cr-chip cr-chip-btn" onClick={() => onOpen(b)}>{b.name}</button>)}
+            </div>
+          )}
+        </div>
+        <div className="cr-card">
+          <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>Gasto por categoria (período)</h3>
+          <div style={{ marginTop: 10 }}><RankingBars items={categoryBars} format={fmtBRL} /></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSettings, originTarget, clearOriginTarget, finance, setFinance, cards, setCards }) {
   const ctx = useContext(ListsContext);
   const [section, setSection] = useState("procedimentos");
@@ -8300,7 +8581,8 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
   const [registering, setRegistering] = useState(null);
   const [financeMonth, setFinanceMonth] = useState("todos");
   const [financeYear, setFinanceYear] = useState(String(new Date().getFullYear()));
-  const [f, setF] = useState({ status: "todos", area: "todos", tipo: "todos", preco: "todos", local: "todos" });
+  const [f, setF] = useState({ status: "todos", area: "todos", tipo: "todos", preco: "todos", local: "todos", categoria: "todos" });
+  const [financeCategory, setFinanceCategory] = useState("todas");
   const setFilter = (k) => (v) => setF((cur) => ({ ...cur, [k]: v }));
   const [customize, setCustomize] = useState(false);
   const on = (k) => cardFieldOn(settings || {}, k);
@@ -8320,12 +8602,77 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
   }, [originTarget, beauty, clearOriginTarget]);
 
   const save = (data) => {
-    setBeauty(upsertById(beauty, { ...data, userEdited: true }, { history: data.history || [] }));
-    // card criado a partir de um lançamento: valor e data voltam para Finanças
-    if (data.financeLink && setFinance) {
-      const next = syncFinanceFromCard(finance || [], data);
-      if (next !== finance) setFinance(next);
+    // o formulário pode não ter o vínculo criado num salvamento anterior: junta com o card salvo
+    const existing = beauty.find((entry) => entry.id === data.id);
+    let card = { ...(existing || {}), ...data, userEdited: true };
+    if (existing?.financeLink && !data.financeLink) card.financeLink = existing.financeLink;
+    let nextFinance = finance || [];
+    const link = card.financeLink;
+    const removeLinked = (list, key) => list.filter((entry) => financeLinkKey(entry) !== key);
+    if (link && link.origin === "beauty") {
+      const wantedMode = Number(card.plannedSessions) > 1 ? (card.financeMode || "total") : "total";
+      if (!card.financeRegister) {
+        // desmarcou "Registrar também em Finanças": o lançamento criado por aqui sai
+        nextFinance = removeLinked(nextFinance, link.key);
+        const { financeLink: _drop, ...rest } = card;
+        card = rest;
+      } else if (wantedMode !== link.mode || (link.mode === "sessions" && procedureSessionCount(card) !== link.installments)) {
+        // mudou para "por sessão" / "valor total" ou o número de sessões: recria os lançamentos
+        const generated = financeEntriesForCard(card, { mode: wantedMode, today: todayStr(), newId: uid });
+        nextFinance = [...generated.entries, ...removeLinked(nextFinance, link.key)];
+        card.financeLink = generated.link;
+      } else {
+        nextFinance = syncFinanceFromCard(nextFinance, card);
+      }
+    } else if (link) {
+      // card criado a partir de um lançamento: valor e data voltam para Finanças
+      nextFinance = syncFinanceFromCard(nextFinance, card);
+    } else if (card.financeRegister && procedureTotal(card) > 0 && setFinance) {
+      const mode = Number(card.plannedSessions) > 1 ? (card.financeMode || "total") : "total";
+      const generated = financeEntriesForCard(card, { mode, today: todayStr(), newId: uid });
+      nextFinance = [...generated.entries, ...nextFinance];
+      card.financeLink = generated.link;
     }
+    setBeauty(upsertById(beauty, card, { history: card.history || [] }));
+    if (setFinance && nextFinance !== (finance || [])) setFinance(nextFinance);
+  };
+  // Mescla um procedimento em outro (sessões da agenda, histórico e vínculo com Finanças vão para o destino).
+  const mergeCards = (sourceId, targetId) => {
+    const source = beauty.find((b) => b.id === sourceId);
+    const target = beauty.find((b) => b.id === targetId);
+    if (!source || !target) return;
+    const sessions = [...(target.gcalSessions || [])];
+    (source.gcalSessions || []).forEach((session) => { if (!sessions.some((x) => x.key === session.key)) sessions.push(session); });
+    sessions.sort((a, b) => a.start.localeCompare(b.start));
+    const history = [...(target.history || []), ...(source.history || [])].sort((x, y) => String(y.date).localeCompare(String(x.date)));
+    const merged = {
+      ...target,
+      gcalSessions: sessions,
+      history,
+      dateDone: [target.dateDone, source.dateDone].filter(Boolean).sort().at(-1) || "",
+      scheduledDate: target.scheduledDate || source.scheduledDate || "",
+      scheduledTime: target.scheduledDate ? target.scheduledTime || "" : source.scheduledTime || "",
+      financeLink: target.financeLink || source.financeLink,
+      ...(target.plannedSessionsAuto !== false && sessions.length ? { plannedSessions: sessions.length, plannedSessionsAuto: true } : {}),
+      userEdited: true,
+    };
+    setBeauty(beauty.filter((b) => b.id !== sourceId).map((b) => (b.id === targetId ? merged : b)));
+    setEditing(merged);
+    notify(`"${source.name}" foi mesclado em "${target.name}".`);
+  };
+  const placeTools = {
+    usage: (id) => beauty.filter((b) => !b.archived && b.placeId === id),
+    add: (name) => {
+      const place = { id: uid(), name, address: "", instagram: "", site: "", booking: "", professional: "", notes: "", rating: 0 };
+      setPlaces([...places, place]);
+      return place.id;
+    },
+    rename: (id, name) => setPlaces(places.map((p) => (p.id === id ? { ...p, name } : p))),
+    remove: (id, mode) => {
+      const next = removePlaceFrom(places, beauty, id, mode);
+      setPlaces(next.places);
+      if (next.beauty.some((b, i) => b !== beauty[i])) setBeauty(next.beauty);
+    },
   };
   const [scheduling, setScheduling] = useState(null);
   const [confirmRemoveCard, setConfirmRemoveCard] = useState(null);
@@ -8392,14 +8739,22 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
     ]),
   ].filter(Boolean))).sort((a, b) => b.localeCompare(a));
   const inPeriod = (date) => !!date && date.slice(0, 4) === financeYear && (financeMonth === "todos" || date.slice(5, 7) === financeMonth);
-  const realizedRecords = procedures.flatMap((procedure) => {
+  const allRealizedRecords = procedures.flatMap((procedure) => {
     const history = Array.isArray(procedure.history) ? procedure.history : [];
-    if (history.length) return history.filter((entry) => inPeriod(entry.date)).map((entry) => ({ date: entry.date, amount: Number(entry.cost) || 0 }));
+    const meta = { name: procedure.name, category: procedure.category || "" };
+    if (history.length) return history.filter((entry) => inPeriod(entry.date)).map((entry) => ({ date: entry.date, amount: Number(entry.cost) || 0, ...meta }));
     return procedure.dateDone && inPeriod(procedure.dateDone)
-      ? [{ date: procedure.dateDone, amount: Number(procedure.cost) || 0 }]
+      ? [{ date: procedure.dateDone, amount: Number(procedure.cost) || 0, ...meta }]
       : [];
   });
+  const inFinanceCategory = (cat) => financeCategory === "todas" || (financeCategory === "" ? !cat : cat === financeCategory);
+  const realizedRecords = section === "financeiro" ? allRealizedRecords.filter((entry) => inFinanceCategory(entry.category)) : allRealizedRecords;
   const realizedTotal = realizedRecords.reduce((sum, entry) => sum + entry.amount, 0);
+  const realizedByCategory = [...allRealizedRecords.reduce((map, entry) => {
+    const key = entry.category || "";
+    map.set(key, (map.get(key) || 0) + entry.amount);
+    return map;
+  }, new Map())].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
   const plannedProcedures = procedures.filter((procedure) => {
     const status = inferProcStatus(procedure);
     const hasPlannedWork = status !== "nunca" && !status.startsWith("paus")
@@ -8410,7 +8765,8 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
     return hasPlannedWork && remaining > 0 && Number(procedure.cost) > 0;
   });
   const plannedRecords = plannedProcedures.filter((procedure) =>
-    inPeriod(procedure.plannedDate || procedure.nextExpenseDate));
+    inPeriod(procedure.plannedDate || procedure.nextExpenseDate)
+    && (section !== "financeiro" || inFinanceCategory(procedure.category || "")));
   const plannedTotal = plannedRecords.reduce((sum, procedure) => {
     const remaining = Number(procedure.plannedSessions) > 0
       ? Number(procedure.plannedSessions) - (procedure.history || []).length
@@ -8425,7 +8781,8 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
     (except === "area" || f.area === "todos" || (f.area === "nd" ? !p._region : p._region === f.area)) &&
     (except === "tipo" || f.tipo === "todos" || (f.tipo === "nd" ? !p.degree : p.degree === f.tipo)) &&
     (except === "preco" || f.preco === "todos" || p._band === f.preco) &&
-    (except === "local" || f.local === "todos" || p._place === f.local);
+    (except === "local" || f.local === "todos" || p._place === f.local) &&
+    (except === "categoria" || f.categoria === "todos" || (f.categoria === "nd" ? !p.category : p.category === f.categoria));
   const count = (key, pred) => procedures.filter((p) => matches(p, key) && pred(p)).length;
   const filtered = procedures.filter((p) => matches(p));
 
@@ -8441,6 +8798,8 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
       options: [...getPriceBands().map((b) => ({ value: b.name, label: b.name, count: count("preco", (p) => p._band === b.name) })), { value: "Sem valor", label: "Sem valor", count: count("preco", (p) => p._band === "Sem valor") }] },
     { key: "local", label: "Local", value: f.local, onChange: setFilter("local"), onManage: () => setSection("lugares"),
       options: placeNames.map((n) => ({ value: n, label: n, count: count("local", (p) => p._place === n) })) },
+    { key: "categoria", label: "Categoria", value: f.categoria, onChange: setFilter("categoria"), onManage: () => ctx.openManager("procCategory"),
+      options: withNd(getList("procCategory").map((c) => ({ value: c.id, label: c.name, count: count("categoria", (p) => p.category === c.id) })), "categoria", "Sem categoria", (p) => !p.category) },
   ];
 
   const sections = [...statusList.map((s) => ({ id: s.id, label: s.name })), { id: "", label: "Sem status" }];
@@ -8468,7 +8827,9 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
         <button className={`cr-tabbtn ${section === "procedimentos" ? "active" : ""}`} onClick={() => setSection("procedimentos")}>Procedimentos</button>
         <button className={`cr-tabbtn ${section === "lugares" ? "active" : ""}`} onClick={() => setSection("lugares")}>Lugares e profissionais ({places.length})</button>
         <button className={`cr-tabbtn ${section === "financeiro" ? "active" : ""}`} onClick={() => setSection("financeiro")}>Financeiro</button>
+        <button className={`cr-tabbtn ${section === "analises" ? "active" : ""}`} onClick={() => setSection("analises")}>Análises</button>
       </div>
+      {section === "analises" && <ProcedureAnalysis procedures={procedures} onOpen={(b) => setEditing(originalOf(b))} />}
 
       {section === "lugares" && <PlacesPanel places={places} setPlaces={setPlaces} beauty={beauty} setBeauty={setBeauty} />}
       {section === "financeiro" && (
@@ -8481,7 +8842,25 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
             <select className="cr-select" style={{ maxWidth: 140 }} value={financeYear} onChange={(event) => setFinanceYear(event.target.value)} aria-label="Filtrar por ano">
               {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
             </select>
+            <select className="cr-select" style={{ maxWidth: 220 }} value={financeCategory} onChange={(event) => setFinanceCategory(event.target.value)} aria-label="Filtrar por categoria">
+              <option value="todas">Todas as categorias</option>
+              {getList("procCategory").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <option value="">Sem categoria</option>
+            </select>
+            <button type="button" className="cr-btn" onClick={() => ctx.openManager("procCategory")}><SettingsIcon size={13} /> Categorias</button>
           </div>
+          {realizedByCategory.length > 0 && (
+            <div className="cr-card" style={{ marginBottom: 12 }}>
+              <h3 className="cr-serif" style={{ margin: "0 0 8px", fontSize: 15 }}>Total gasto por categoria no período</h3>
+              {realizedByCategory.map(([key, value]) => (
+                <button key={key || "sem"} type="button" className={`cr-detail-row ${financeCategory === key ? "is-active" : ""}`}
+                  onClick={() => setFinanceCategory(financeCategory === key ? "todas" : key)} title="Filtrar por esta categoria">
+                  <span className="cr-detail-desc"><strong>{key ? listName("procCategory", key) : "Sem categoria"}</strong></span>
+                  <span className="cr-detail-amount">{fmtBRL(value)}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="cr-grid cr-grid-2">
             <div className="cr-card"><p className="cr-label">Procedimentos realizados no período</p><p className="cr-serif" style={{ fontSize: 24 }}>{fmtBRL(realizedTotal)}</p></div>
             <div className="cr-card"><p className="cr-label">Procedimentos planejados no período</p><p className="cr-serif" style={{ fontSize: 24 }}>{fmtBRL(plannedTotal)}</p></div>
@@ -8491,7 +8870,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
             <h3 className="cr-serif" style={{ marginTop: 0 }}>Realizações</h3>
             {realizedRecords.length === 0 && <p className="cr-empty">Nenhuma realização cadastrada nesse período.</p>}
             {realizedRecords.map((entry, index) => (
-              <div className="cr-list-row" key={`${entry.date}-${index}`}><span className="cr-list-title" style={{ flex: 1 }}>{fmtDateShort(entry.date)}</span><strong>{fmtBRL(entry.amount)}</strong></div>
+              <div className="cr-list-row" key={`${entry.date}-${index}`}><span className="cr-chip">{fmtDateShort(entry.date)}</span><span className="cr-list-title" style={{ flex: 1 }}>{entry.name}</span>{entry.category && <span className="cr-chip">{listName("procCategory", entry.category)}</span>}<strong>{fmtBRL(entry.amount)}</strong></div>
             ))}
           </div>
         </div>
@@ -8532,7 +8911,9 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
         </div>
       )}
 
-      {editing && <BeautyModal key={liveEditing ? liveEditing.id + ":" + (liveEditing.history || []).length : "new"} item={liveEditing} places={places} onSave={save} onClose={() => setEditing(null)} onRegister={() => setRegistering(liveEditing)} />}
+      {editing && <BeautyModal key={liveEditing ? liveEditing.id + ":" + (liveEditing.history || []).length : "new"} item={liveEditing} places={places} onSave={save} onClose={() => setEditing(null)} onRegister={() => setRegistering(liveEditing)}
+        placeTools={placeTools} onMerge={mergeCards}
+        mergeTargets={liveEditing ? beauty.filter((b) => !b.archived && b.id !== liveEditing.id).sort((a, b) => (a.name || "").localeCompare(b.name || "")) : []} />}
       {customize && <CardFieldsModal settings={settings || {}} setSettings={setSettings} onClose={() => setCustomize(false)} />}
       {scheduling && <ScheduleSessionModal item={scheduling.item} suggestedDate={scheduling.date}
         onSave={(date, time) => saveSchedule(scheduling.item, date, time)} onClose={() => setScheduling(null)} />}
@@ -8610,14 +8991,16 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
     on("bodyArea") && b.bodyArea && <span className="cr-chip" key="a">{b.bodyArea}</span>,
     on("dateDone") && b.dateDone && <span className="cr-chip" key="l">última: {fmtDateShort(b.dateDone)}</span>,
     on("frequency") && b.recurring && <span className="cr-chip" key="f">{freqLabel}</span>,
-    on("cost") && b.cost > 0 && <span className="cr-chip" key="c">{fmtBRL(b.cost)}</span>,
-    b.financeLink?.installments > 1 && <span className="cr-chip" key="p">{b.financeLink.installments}x de {fmtBRL(b.financeLink.installmentAmount)}</span>,
-    b.scheduledDate && b.scheduledDate >= todayStr() && <span className="cr-chip" key="s">agendado: {fmtDateShort(b.scheduledDate)}{b.scheduledTime ? ` ${b.scheduledTime}` : ""}</span>,
-    ...upcomingGcalSessions(b).slice(0, 2).map((session) => (
-      <span className="cr-chip" key={`g-${session.key}`} title="Sessão vinda do Google Agenda">
-        <CalendarDays size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />{fmtDateShort(session.start.slice(0, 10))}{session.allDay ? "" : ` ${gcalTimeOf(session.start)}`}
+    on("cost") && b.cost > 0 && <span className="cr-chip" key="c">{fmtBRL(b.cost)}{procedureSessionCount(b) > 1 ? "/sessão" : ""}</span>,
+    on("cost") && (procedureSessionCount(b) > 1 || b.totalCostManual) && procedureTotal(b) > 0 && <span className="cr-chip" key="t">total {fmtBRL(procedureTotal(b))}</span>,
+    b.financeLink?.installments > 1 && b.financeLink.origin !== "beauty" && <span className="cr-chip" key="p">{b.financeLink.installments}x de {fmtBRL(b.financeLink.installmentAmount)}</span>,
+    // andamento das sessões (as datas ficam nos alertas e no detalhe do card)
+    (procedureSessionCount(b) > 1 || (b.gcalSessions || []).length > 0) && (
+      <span className="cr-chip" key="prog" title={(b.gcalSessions || []).length ? "Sessões da agenda: as de data passada contam como feitas" : undefined}>
+        {(b.gcalSessions || []).length > 0 && <CalendarDays size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />}
+        {procedureDoneSessions(b)} de {Math.max(procedureSessionCount(b), (b.gcalSessions || []).length)} sessões feitas
       </span>
-    )),
+    ),
   ].filter(Boolean);
   return (
     <div className={`cr-card ${personalizedCardClass(b)}`} style={{ cursor: "pointer", ...personalizedCardStyle(b) }} onClick={onEdit} title="Clique para abrir o procedimento completo">
@@ -8741,18 +9124,26 @@ function RegistrarRealizacaoModal({ item, onSave, onClose }) {
   );
 }
 
-function BeautyModal({ item, places, onSave, onClose, onRegister }) {
+function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, mergeTargets = [], onMerge }) {
   const [form, setForm] = useState(item || {
     procStatus: "quero", region: "", degree: "", placeId: "", bodyArea: "", category: "", goal: "",
     image: "", professional: "", clinic: "", instagram: "", cost: "", dateDone: "", priority: "alta", plannedSessions: "", nextExpenseDate: "",
     recurring: false, frequencyUnit: "meses", frequencyValue: "", alertDays: DEFAULT_ALERT_DAYS,
     result: "", notes: "", link: "", name: "", history: [],
+    // procedimento novo criado aqui: registra também em Finanças (pode desmarcar)
+    financeRegister: true, financeMode: "total",
   });
+  const [mergeTarget, setMergeTarget] = useState("");
+  const [confirmMerge, setConfirmMerge] = useState(false);
+  const computedTotal = Math.round((Number(form.cost) || 0) * (Number(form.plannedSessions) > 0 ? Number(form.plannedSessions) : 1) * 100) / 100;
+  const shownTotal = form.totalCostManual ? form.totalCost : (computedTotal || "");
+  // card que veio de um lançamento de Finanças: o vínculo já existe, não oferece criar outro
+  const fromFinance = !!(item?.financeLink && item.financeLink.origin !== "beauty");
   const autoStatus = useAutoSave(form, onSave, (f) => ({
     ...f, cost: Number(f.cost) || 0, plannedSessions: Number(f.plannedSessions) || 0,
     frequencyValue: f.recurring ? Number(f.frequencyValue) || "" : "",
   }));
-  const preview = form.recurring ? (form.nextExpenseDate || nextMaintenanceDate(form.dateDone, form.frequencyUnit, form.frequencyValue)) : null;
+  const preview = form.recurring ? nextMaintenanceDate(form.dateDone, form.frequencyUnit, form.frequencyValue) : null;
   const selectedPlace = places.find((place) => place.id === form.placeId);
   const matchedPresetKey = FREQUENCY_PRESETS.find((f) => f.key !== "custom" && f.unit === form.frequencyUnit && f.value === Number(form.frequencyValue))?.key;
   const selectedKey = matchedPresetKey || (form.frequencyValue ? "custom" : "");
@@ -8792,10 +9183,12 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
 
       <FormSection title="Local e profissional" />
       <div className="cr-field"><label className="cr-label">Local (da aba Lugares e profissionais)</label>
-        <select className="cr-select" value={form.placeId || ""} onChange={(e) => setForm({ ...form, placeId: e.target.value })}>
-          <option value="">Nenhum local escolhido</option>
-          {places.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select></div>
+        <PlacePicker places={places} value={form.placeId || ""} tools={placeTools}
+          onChange={(placeId, extra = {}) => setForm((current) => ({
+            ...current, placeId,
+            ...(extra.keepName && !current.clinic ? { clinic: extra.keepName } : {}),
+            ...(extra.clearName && (current.clinic || "").trim().toLowerCase() === extra.clearName.trim().toLowerCase() ? { clinic: "" } : {}),
+          }))} /></div>
       {selectedPlace && (selectedPlace.instagram || selectedPlace.booking) && (
         <div className="cr-row" style={{ marginTop: -4, marginBottom: 8 }}>
           {selectedPlace.instagram && <button className="cr-btn" onClick={() => openExternalLink(instagramUrl(selectedPlace.instagram))}>Instagram</button>}
@@ -8817,25 +9210,55 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
         </div>
       )}
       <FormSection title="Valores e datas" />
-      <div className="cr-row">
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Valor por sessão (R$)</label>
+      <div className="cr-row" style={{ flexWrap: "wrap" }}>
+        <div className="cr-field" style={{ flex: "1 1 150px" }}><label className="cr-label">Valor por sessão (R$)</label>
           <input type="number" className="cr-input" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} /></div>
+        <div className="cr-field" style={{ flex: "1 1 150px" }}><label className="cr-label">Número de sessões</label>
+          <input type="number" min="1" className="cr-input" value={form.plannedSessions || ""} placeholder="1"
+            onChange={(event) => setForm({ ...form, plannedSessions: Number(event.target.value) || "", plannedSessionsAuto: false })} />
+          {(item?.gcalSessions || []).length > 0 && (
+            <p className="cr-sub" style={{ margin: "4px 0 0", fontSize: 12 }}>{form.plannedSessionsAuto === false ? "Informado por você." : "Acompanha os eventos da agenda; você pode corrigir."}</p>
+          )}</div>
+      </div>
+      <div className="cr-field"><label className="cr-label">Valor total (R$)</label>
+        <input type="number" className="cr-input" value={shownTotal}
+          onChange={(e) => setForm({ ...form, totalCost: e.target.value, totalCostManual: e.target.value !== "" })} />
+        <p className="cr-sub" style={{ margin: "4px 0 0", fontSize: 12 }}>
+          {form.totalCostManual
+            ? <>Valor combinado informado por você (cálculo: {fmtBRL(computedTotal)}). <button type="button" className="cr-btn ghost" style={{ padding: "0 4px", minHeight: 0, display: "inline" }} onClick={() => setForm({ ...form, totalCost: "", totalCostManual: false })}>usar o cálculo</button></>
+            : "Calculado: valor por sessão × número de sessões. Edite se o valor combinado for diferente."}
+        </p></div>
+      <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Data da última realização</label>
           <input type="date" max={todayStr()} className="cr-input" value={form.dateDone || ""} onChange={(e) => setForm({ ...form, dateDone: e.target.value })} /></div>
-      </div>
-      <div className="cr-field"><label className="cr-label">Quantidade total de sessões planejadas (opcional)</label>
-        <input type="number" min="1" className="cr-input" value={form.plannedSessions || ""}
-          onChange={(event) => setForm({ ...form, plannedSessions: Number(event.target.value) || "" })} /></div>
-      <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Prioridade financeira</label>
           <ManagedSelect listKey="priority" value={form.priority || "alta"} onChange={(value) => setForm({ ...form, priority: value })} /></div>
-        <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Data prevista para a próxima sessão</label>
-          <input type="date" className="cr-input" value={form.nextExpenseDate || preview || ""}
-            onChange={(event) => setForm({ ...form, nextExpenseDate: event.target.value })} /></div>
       </div>
-      {!form.recurring && <div className="cr-field"><label className="cr-label">Data planejada (opcional)</label>
-        <input type="date" className="cr-input" value={form.plannedDate || ""}
-          onChange={(event) => setForm({ ...form, plannedDate: event.target.value })} /></div>}
+      {!fromFinance && (
+        <div className="cr-finance-register">
+          <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", gap: 8 }}>
+            <input type="checkbox" checked={!!form.financeRegister} onChange={(e) => setForm({ ...form, financeRegister: e.target.checked })} style={{ minHeight: 0 }} />
+            <span style={{ fontSize: 14 }}>Registrar também em Finanças <span className="cr-sub" style={{ margin: 0 }}>(Beleza · Procedimento)</span></span>
+          </label>
+          {form.financeRegister && Number(form.plannedSessions) > 1 && (
+            <div style={{ display: "grid", gap: 4, margin: "8px 0 0 24px" }}>
+              <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", gap: 8 }}>
+                <input type="radio" name="finance-mode" checked={(form.financeMode || "total") === "total"} onChange={() => setForm({ ...form, financeMode: "total" })} style={{ minHeight: 0 }} />
+                <span style={{ fontSize: 13.5 }}>Um lançamento com o valor total</span>
+              </label>
+              <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", gap: 8 }}>
+                <input type="radio" name="finance-mode" checked={form.financeMode === "sessions"} onChange={() => setForm({ ...form, financeMode: "sessions" })} style={{ minHeight: 0 }} />
+                <span style={{ fontSize: 13.5 }}>Um lançamento por sessão, na data de cada uma</span>
+              </label>
+            </div>
+          )}
+          {form.financeRegister && (
+            <p className="cr-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>
+              {item?.financeLink ? "Já registrado em Finanças: valor e data ficam sincronizados." : "O lançamento é criado assim que houver um valor."}
+            </p>
+          )}
+        </div>
+      )}
 
       <FormSection title="Agendamento" />
       <div className="cr-row" style={{ flexWrap: "wrap" }}>
@@ -8918,6 +9341,25 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
         </>
       )}
 
+      {item && onMerge && mergeTargets.length > 0 && (
+        <>
+          <FormSection title="Mesclar procedimentos" />
+          <p className="cr-sub" style={{ marginTop: 0 }}>Se este procedimento e outro são o mesmo, junte os dois: sessões da agenda, histórico e vínculo com Finanças passam para o outro e este card sai.</p>
+          <div className="cr-row" style={{ flexWrap: "wrap" }}>
+            <select className="cr-select" style={{ flex: "1 1 200px" }} value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)} aria-label="Procedimento para mesclar">
+              <option value="">Escolha o procedimento…</option>
+              {mergeTargets.map((target) => <option key={target.id} value={target.id}>{target.name || "Sem nome"}</option>)}
+            </select>
+            <button type="button" className="cr-btn" disabled={!mergeTarget} onClick={() => setConfirmMerge(true)}><Merge size={14} /> Mesclar</button>
+          </div>
+          {confirmMerge && (
+            <ConfirmModal title="Mesclar procedimentos" confirmLabel="Mesclar"
+              message={`Juntar "${form.name || "este procedimento"}" em "${mergeTargets.find((t) => t.id === mergeTarget)?.name || ""}"? Este card deixa de existir; nada das sessões, histórico ou Finanças é apagado.`}
+              onConfirm={() => { setConfirmMerge(false); onMerge(item.id, mergeTarget); }} onCancel={() => setConfirmMerge(false)} />
+          )}
+        </>
+      )}
+
       <FormSection title="Resultado e observações" />
       <div className="cr-field"><label className="cr-label">Resultado (esperado / obtido)</label>
         <input className="cr-input" value={form.result} onChange={(e) => setForm({ ...form, result: e.target.value })} /></div>
@@ -8944,6 +9386,112 @@ function BeautyModal({ item, places, onSave, onClose, onRegister }) {
   );
 }
 
+// Remove um lugar; procedimentos que o usavam ficam com o nome no campo Clínica ("keep") ou em branco ("blank").
+function removePlaceFrom(places, beauty, id, mode) {
+  const place = places.find((p) => p.id === id);
+  const name = (place?.name || "").trim();
+  return {
+    places: places.filter((p) => p.id !== id),
+    beauty: beauty.map((b) => {
+      if (b.placeId !== id) return b;
+      if (mode === "keep") return { ...b, placeId: "", clinic: b.clinic || name };
+      return { ...b, placeId: "", clinic: (b.clinic || "").trim().toLowerCase() === name.toLowerCase() ? "" : b.clinic };
+    }),
+  };
+}
+
+function PlaceRemoveModal({ place, usedBy, onConfirm, onCancel }) {
+  const [mode, setMode] = useState("keep");
+  return (
+    <Modal size="small" title="Excluir lugar" onClose={onCancel}>
+      <p style={{ fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>Excluir "{place.name}"?</p>
+      {usedBy.length > 0 && (
+        <>
+          <p className="cr-sub" style={{ marginTop: 0 }}>
+            Este lugar está em uso em {usedBy.length === 1 ? "1 procedimento" : `${usedBy.length} procedimentos`} ({usedBy.slice(0, 4).map((b) => b.name).join(", ")}{usedBy.length > 4 ? "…" : ""}). Nenhum procedimento é apagado. O que fazer com eles?
+          </p>
+          <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
+            <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", gap: 8 }}>
+              <input type="radio" name="place-remove" checked={mode === "keep"} onChange={() => setMode("keep")} style={{ minHeight: 0 }} />
+              <span style={{ fontSize: 14 }}>Manter o nome "{place.name}" no procedimento (campo Clínica)</span>
+            </label>
+            <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", gap: 8 }}>
+              <input type="radio" name="place-remove" checked={mode === "blank"} onChange={() => setMode("blank")} style={{ minHeight: 0 }} />
+              <span style={{ fontSize: 14 }}>Deixar o local em branco</span>
+            </label>
+          </div>
+        </>
+      )}
+      <div className="cr-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+        <button type="button" className="cr-btn" onClick={onCancel}>Cancelar</button>
+        <button type="button" className="cr-btn primary" style={{ background: "#A1493C" }} onClick={() => onConfirm(mode)}>Excluir</button>
+      </div>
+    </Modal>
+  );
+}
+
+// Lista de lugares no cadastro do procedimento: escolher, criar, renomear (lápis) e excluir (lixeira).
+function PlacePicker({ places, value, onChange, tools }) {
+  const [renaming, setRenaming] = useState(null);
+  const [newName, setNewName] = useState("");
+  const [removing, setRemoving] = useState(null);
+  const addPlace = () => {
+    const name = newName.trim();
+    if (!name || !tools) return;
+    const id = tools.add(name);
+    setNewName("");
+    onChange(id);
+  };
+  const saveRename = () => {
+    if (renaming && renaming.name.trim() && tools) tools.rename(renaming.id, renaming.name.trim());
+    setRenaming(null);
+  };
+  return (
+    <div>
+      <div className="cr-place-picker" role="radiogroup" aria-label="Local do procedimento">
+        <div className={`cr-place-option ${!value ? "is-selected" : ""}`}>
+          <label><input type="radio" name="place-pick" checked={!value} onChange={() => onChange("")} /> Nenhum local escolhido</label>
+        </div>
+        {places.map((place) => (
+          <div key={place.id} className={`cr-place-option ${value === place.id ? "is-selected" : ""}`}>
+            {renaming?.id === place.id ? (
+              <>
+                <input className="cr-input" style={{ flex: 1, padding: "4px 8px" }} autoFocus value={renaming.name} aria-label="Novo nome do lugar"
+                  onChange={(e) => setRenaming({ ...renaming, name: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveRename(); } if (e.key === "Escape") setRenaming(null); }} />
+                <button type="button" className="cr-btn ghost" aria-label="Salvar nome" title="Salvar" onClick={saveRename}><Check size={14} /></button>
+                <button type="button" className="cr-btn ghost" aria-label="Cancelar" title="Cancelar" onClick={() => setRenaming(null)}><X size={14} /></button>
+              </>
+            ) : (
+              <>
+                <label><input type="radio" name="place-pick" checked={value === place.id} onChange={() => onChange(place.id)} /> {place.name || "Sem nome"}</label>
+                {tools && <button type="button" className="cr-btn ghost" aria-label={`Renomear ${place.name}`} title="Renomear" onClick={() => setRenaming({ id: place.id, name: place.name || "" })}><Pencil size={14} /></button>}
+                {tools && <button type="button" className="cr-btn ghost danger" aria-label={`Excluir ${place.name}`} title="Excluir" onClick={() => setRemoving(place)}><Trash2 size={14} /></button>}
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      {tools && (
+        <div className="cr-row" style={{ marginTop: 6, flexWrap: "wrap" }}>
+          <input className="cr-input" style={{ flex: "1 1 180px" }} placeholder="Novo lugar (nome da clínica)" value={newName}
+            onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPlace(); } }} />
+          <button type="button" className="cr-btn" disabled={!newName.trim()} onClick={addPlace}><Plus size={14} /> Adicionar novo lugar</button>
+        </div>
+      )}
+      {removing && (
+        <PlaceRemoveModal place={removing} usedBy={tools.usage(removing.id)} onCancel={() => setRemoving(null)}
+          onConfirm={(mode) => {
+            const wasSelected = value === removing.id;
+            tools.remove(removing.id, mode);
+            if (wasSelected) onChange("", mode === "keep" ? { keepName: removing.name } : { clearName: removing.name });
+            setRemoving(null);
+          }} />
+      )}
+    </div>
+  );
+}
+
 function PlacesPanel({ places, setPlaces, beauty, setBeauty }) {
   const [editing, setEditing] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
@@ -8961,9 +9509,10 @@ function PlacesPanel({ places, setPlaces, beauty, setBeauty }) {
       if (changed) setBeauty(next);
     }
   };
-  const removePlace = (id) => {
-    setPlaces(places.filter((p) => p.id !== id));
-    setBeauty(beauty.map((b) => (b.placeId === id ? { ...b, placeId: "" } : b)));
+  const removePlace = (id, mode) => {
+    const next = removePlaceFrom(places, beauty, id, mode);
+    setPlaces(next.places);
+    if (next.beauty.some((b, i) => b !== beauty[i])) setBeauty(next.beauty);
     setConfirmDel(null);
   };
 
@@ -8976,7 +9525,7 @@ function PlacesPanel({ places, setPlaces, beauty, setBeauty }) {
       {places.length === 0 && <p className="cr-empty">Nenhum lugar cadastrado ainda. Clique em "Novo lugar" para começar.</p>}
       <div className="cr-grid cr-grid-3">
         {places.map((p) => {
-          const procs = beauty.filter((b) => b.placeId === p.id || (!b.placeId && b.clinic && b.clinic.trim().toLowerCase() === (p.name || "").trim().toLowerCase()));
+          const procs = beauty.filter((b) => !b.archived && (b.placeId === p.id || (!b.placeId && b.clinic && b.clinic.trim().toLowerCase() === (p.name || "").trim().toLowerCase())));
           return (
             <div className="cr-card" key={p.id}>
               <div className="cr-row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -9013,8 +9562,8 @@ function PlacesPanel({ places, setPlaces, beauty, setBeauty }) {
       </div>
       {editing && <PlaceModal item={editing === "new" ? null : editing} beauty={beauty} onSave={savePlace} onClose={() => setEditing(null)} />}
       {confirmDel && (
-        <ConfirmModal title="Excluir lugar" message={`Excluir "${confirmDel.name}"? Os procedimentos continuam salvos, só perdem o vínculo com esse lugar.`}
-          onConfirm={() => removePlace(confirmDel.id)} onCancel={() => setConfirmDel(null)} />
+        <PlaceRemoveModal place={confirmDel} usedBy={beauty.filter((b) => !b.archived && b.placeId === confirmDel.id)}
+          onConfirm={(mode) => removePlace(confirmDel.id, mode)} onCancel={() => setConfirmDel(null)} />
       )}
     </div>
   );
@@ -9024,6 +9573,8 @@ function PlaceModal({ item, beauty, onSave, onClose }) {
   const [form, setForm] = useState(item
     ? { ...item, procedureIds: beauty.filter((b) => b.placeId === item.id).map((b) => b.id) }
     : { name: "", address: "", instagram: "", site: "", booking: "", professional: "", notes: "", rating: 0, procedureIds: [] });
+  // procedimentos excluídos ficam arquivados (por terem histórico): não aparecem mais na lista
+  const activeProcedures = beauty.filter((b) => !b.archived);
   const autoStatus = useAutoSave(form, onSave);
   const toggleProc = (id) => {
     const has = form.procedureIds.includes(id);
@@ -9054,10 +9605,10 @@ function PlaceModal({ item, beauty, onSave, onClose }) {
               style={{ border: "none", background: "none", cursor: "pointer", fontSize: 24, color: n <= Number(form.rating) ? "#C9962E" : "#D9D2C5", padding: 2 }}>★</button>
           ))}
         </div></div>
-      {beauty.length > 0 && (
+      {activeProcedures.length > 0 && (
         <div className="cr-field"><label className="cr-label">Procedimentos feitos ou planejados aqui</label>
           <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 10, padding: 8 }}>
-            {beauty.map((b) => (
+            {activeProcedures.map((b) => (
               <label key={b.id} className="cr-row" style={{ cursor: "pointer", marginBottom: 4 }}>
                 <input type="checkbox" checked={form.procedureIds.includes(b.id)} onChange={() => toggleProc(b.id)} />
                 <span style={{ fontSize: 13 }}>{b.name}</span>
@@ -10943,6 +11494,13 @@ export default function App({ onSignOut }) {
       // Valores que já existem nos dados entram nas listas editáveis, assim nada some da tela
       { const rs = reconcileLists(finalSettings, { goals: finalGoals, beauty: finalBeauty, selfcare: finalSelfcare, hobbies: finalHobbies, career: finalCareer, study: finalStudy, tasks: finalTasks, shopping: finalShopping, habits: finalHabits });
         if (rs !== finalSettings) { finalSettings = rs; bg(storageSet(KEYS.settings, finalSettings)); } }
+      // Categorias sugeridas para os procedimentos: entram uma vez só, sem apagar as que já existem
+      if (!finalSettings.procCategorySeedV1) {
+        const current = Array.isArray(finalSettings.procCategories) ? finalSettings.procCategories : LIST_REGISTRY.procCategory.defaults.map((item) => item.name);
+        const add = ["Rosto", "Corpo", "Cabelo", "Mãos e pés", "Outros"].filter((name) => !current.some((item) => String(item).toLowerCase() === name.toLowerCase()));
+        finalSettings = { ...finalSettings, procCategories: [...current, ...add], procCategorySeedV1: true };
+        bg(storageSet(KEYS.settings, finalSettings));
+      }
       // Dá um status editável às tarefas antigas sem alterar seu estado de conclusão.
       { const statuses = Array.isArray(finalSettings.lists?.taskStatus) ? finalSettings.lists.taskStatus : LIST_REGISTRY.taskStatus.defaults;
         let changed = false;

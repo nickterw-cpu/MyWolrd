@@ -147,3 +147,40 @@ describe("summarizeFinanceMonth lists", () => {
     expect(summary.receivedIncome - summary.spent - summary.commitments - summary.transferPaid - summary.reservedRemaining).toBeCloseTo(summary.available, 10);
   });
 });
+
+import { monthSpendingStatus } from "./financePlan.js";
+
+describe("monthSpendingStatus", () => {
+  const base = [
+    { date: "2026-11-05", type: "entrada", amount: 5000, status: "pago" },
+    { date: "2026-11-06", type: "saida", amount: 1000, status: "pago", expenseClass: "fixed" },
+  ];
+  it("economizando bem com gastos baixos", () => {
+    expect(monthSpendingStatus(base, {}, "2026-11")).toMatchObject({ level: "good", spent: 1000, available: 4000 });
+  });
+  it("um valor alto no cartão muda a frase para alerta", () => {
+    const withCard = [...base, { date: "2026-11-10", type: "saida", amount: 4500, status: "agendado", paymentMethod: "Crédito", cardId: "c1" }];
+    const status = monthSpendingStatus(withCard, {}, "2026-11");
+    expect(status.level).toBe("over");
+    expect(status.spent).toBe(5500);
+    expect(status.message).toMatch(/passou do orçamento/);
+  });
+  it("saldo de fatura informado à mão também conta", () => {
+    const status = monthSpendingStatus(base, {}, "2026-11", { cards: [{ id: "c1", name: "Nubank", invoiceAmounts: { "2026-11": 3500 } }] });
+    expect(status.spent).toBe(4500);
+    expect(status.level).toBe("high");
+  });
+  it("usa a renda prevista quando nada foi recebido e avisa sem renda", () => {
+    const noIncome = [{ date: "2026-11-06", type: "saida", amount: 300, status: "pago" }];
+    expect(monthSpendingStatus(noIncome, {}, "2026-11").level).toBe("noIncome");
+    expect(monthSpendingStatus(noIncome, {}, "2026-11", { expectedIncome: 3000 })).toMatchObject({ level: "good", base: 3000, baseSource: "expected" });
+  });
+  it("compara com a média dos meses anteriores", () => {
+    const tx = [
+      ...["2026-08", "2026-09", "2026-10"].map((m) => ({ date: `${m}-10`, type: "saida", amount: 1000, status: "pago" })),
+      { date: "2026-11-05", type: "entrada", amount: 10000, status: "pago" },
+      { date: "2026-11-06", type: "saida", amount: 2000, status: "pago" },
+    ];
+    expect(monthSpendingStatus(tx, {}, "2026-11").level).toBe("aboveAverage");
+  });
+});

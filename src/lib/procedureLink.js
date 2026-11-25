@@ -62,7 +62,7 @@ export function syncCardFromFinance(beauty, entries, { today, newId }) {
   const dateFields = date > today ? { scheduledDate: date, dateDone: "" } : { dateDone: date };
   if (!existing) {
     return [{
-      id: newId(), name: first.desc || "Procedimento", cost: total, history: [],
+      id: newId(), name: first.desc || "Procedimento", cost: total, totalCost: total, totalCostManual: true, history: [],
       procStatus: date > today ? "quero" : "jafiz", ...dateFields,
       region: "", degree: "", placeId: "", bodyArea: "", category: "", goal: "", image: "",
       professional: "", clinic: "", instagram: "", priority: "alta", plannedSessions: "", nextExpenseDate: "",
@@ -71,7 +71,10 @@ export function syncCardFromFinance(beauty, entries, { today, newId }) {
     }, ...list];
   }
   const sameDate = (existing.dateDone || existing.scheduledDate) === date;
-  const patch = { ...existing, cost: total, financeLink: { ...existing.financeLink, ...link } };
+  // valor total do card acompanha o lançamento; o valor por sessão só muda nos cards criados por Finanças sem sessões
+  const patch = { ...existing, totalCost: total, totalCostManual: true, financeLink: { ...existing.financeLink, ...link } };
+  if (existing.financeLink?.origin !== "beauty" && procedureSessionCount(existing) === 1) patch.cost = total;
+  if (existing.financeLink?.origin === "beauty") { patch.financeLink.origin = "beauty"; patch.financeLink.mode = existing.financeLink.mode; }
   if (!sameDate) {
     Object.assign(patch, date > today
       ? { scheduledDate: date, dateDone: "" }
@@ -86,6 +89,64 @@ export function cardLinkedDate(card) {
   return card?.dateDone || card?.scheduledDate || "";
 }
 
+// Sessões do procedimento (mínimo 1) e valor total: calculado (valor por sessão × sessões) ou informado à mão.
+export function procedureSessionCount(card) {
+  const n = Math.floor(Number(card?.plannedSessions));
+  return n > 0 ? n : 1;
+}
+
+export function procedureTotal(card) {
+  if (card?.totalCostManual && Number(card.totalCost) > 0) return round2(Number(card.totalCost));
+  return round2((Number(card?.cost) || 0) * procedureSessionCount(card));
+}
+
+// Datas das sessões conhecidas (agenda, agendada no app, última realização); completa com +30 dias.
+export function procedureSessionDates(card, count, today) {
+  const known = Array.from(new Set([
+    ...(card.gcalSessions || []).map((session) => String(session.start || "").slice(0, 10)),
+    card.scheduledDate, card.dateDone,
+  ].filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date || "")))).sort();
+  const dates = known.slice(0, count);
+  while (dates.length < count) {
+    const last = dates[dates.length - 1] || today;
+    const d = new Date(`${last}T00:00:00Z`);
+    if (dates.length) d.setUTCDate(d.getUTCDate() + 30);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+// Lançamentos de Finanças para um procedimento criado na aba Procedimentos (Beleza + Procedimento).
+// mode "total": um lançamento com o valor total; "sessions": um lançamento por sessão, na data de cada uma.
+export function financeEntriesForCard(card, { mode = "total", today, newId }) {
+  const total = procedureTotal(card);
+  const base = {
+    type: "saida", category: "Beleza", expenseClass: "procedure", desc: card.name || "Procedimento",
+    paymentMethod: "", accountId: "", cardId: "", link: "",
+  };
+  const statusFor = (date) => (date <= today ? "pago" : "agendado");
+  const count = procedureSessionCount(card);
+  if (mode !== "sessions" || count <= 1) {
+    const date = cardLinkedDate(card) || procedureSessionDates(card, 1, today)[0];
+    const id = newId();
+    return {
+      entries: [{ ...base, id, amount: total, plannedAmount: total, date, status: statusFor(date) }],
+      link: { key: id, installments: 0, installmentAmount: 0, origin: "beauty", mode: "total" },
+    };
+  }
+  const groupId = `sessions:${card.id}`;
+  const dates = procedureSessionDates(card, count, today);
+  const per = round2(total / count);
+  const entries = dates.map((date, index) => {
+    const amount = index === count - 1 ? round2(total - per * (count - 1)) : per;
+    return {
+      ...base, id: `${groupId}:${index + 1}`, amount, plannedAmount: amount, date, status: statusFor(date),
+      installmentGroup: { id: groupId, index: index + 1, total: count, totalAmount: total, purchaseDate: dates[0], kind: "sessions" },
+    };
+  });
+  return { entries, link: { key: groupId, installments: count, installmentAmount: entries[count - 1].amount, origin: "beauty", mode: "sessions" } };
+}
+
 // Leva valor e data do card para o lançamento (ou parcelas) vinculados.
 export function syncFinanceFromCard(finance, card) {
   const key = card?.financeLink?.key;
@@ -93,7 +154,7 @@ export function syncFinanceFromCard(finance, card) {
   if (!key) return list;
   const linked = list.filter((entry) => financeLinkKey(entry) === key);
   if (!linked.length) return list;
-  const total = round2(Number(card.cost) || 0);
+  const total = procedureTotal(card);
   const date = cardLinkedDate(card);
   if (!linked[0].installmentGroup) {
     const entry = linked[0];

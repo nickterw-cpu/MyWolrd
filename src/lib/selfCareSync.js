@@ -22,18 +22,24 @@ export function cleanSelfCareTitle(title) {
   return cleaned || "Self care";
 }
 
-function matchKey(text) {
-  return normalizeText(cleanSelfCareTitle(text)).replace(/[^a-z0-9]+/g, " ").trim();
+// Nome para comparar: sem acentos, sem "self care" e sem marcações de sessão ("2ª sessão", "sessão 2 de 3", "(2/3)", "#2").
+export function matchKey(text) {
+  return normalizeText(cleanSelfCareTitle(text))
+    .replace(/\(\s*\d+\s*(?:\/|de)\s*\d+\s*\)/g, " ")
+    .replace(/\bsess(?:ao|oes)\s*(?:n[ºo.]?\s*)?\d+(?:\s*(?:\/|de)\s*\d+)?/g, " ")
+    .replace(/\b\d+\s*(?:a|o|ª|º)?\s*sess(?:ao|oes)\b/g, " ")
+    .replace(/\b\d+\s*\/\s*\d+\b/g, " ")
+    .replace(/#\d+/g, " ")
+    .replace(/\bsess(?:ao|oes)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
+// Só junta nomes iguais depois da limpeza; na dúvida cria separado (dá para mesclar no app).
 export function titlesMatch(a, b) {
   const x = matchKey(a);
   const y = matchKey(b);
-  if (!x || !y) return false;
-  if (x === y) return true;
-  const shorter = x.length <= y.length ? x : y;
-  const longer = x.length <= y.length ? y : x;
-  return shorter.length >= 4 && (` ${longer} `).includes(` ${shorter} `);
+  return !!x && x === y;
 }
 
 // Identificador estável do evento: agenda + UID (+ data, para cada ocorrência de evento repetido).
@@ -60,7 +66,9 @@ export function eventToSession(event) {
 
 // Atualiza os cards: liga cada sessão ao card que já a tem, senão a um card de nome parecido,
 // senão cria um card novo. Sessões que sumiram do Google saem. Devolve a mesma lista se nada mudou.
-export function syncSelfCareSessions(beauty, events, { newId }) {
+export function syncSelfCareSessions(beauty, events, { newId, today = new Date().toISOString().slice(0, 10) }) {
+  // a leitura da agenda só traz eventos dos últimos 30 dias: sessões antigas que saíram dessa janela continuam como feitas
+  const keepBefore = (() => { const d = new Date(`${today}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 25); return d.toISOString().slice(0, 10); })();
   const list = Array.isArray(beauty) ? beauty : [];
   const sessions = new Map();
   (events || []).filter(isSelfCareEvent).forEach((event) => {
@@ -76,13 +84,11 @@ export function syncSelfCareSessions(beauty, events, { newId }) {
     let cardId = holder.get(session.key);
     if (!cardId || !assigned.has(cardId)) {
       const candidates = [...list.filter((card) => !card.archived), ...created];
-      const exact = candidates.find((card) => matchKey(card.name) === matchKey(session.title));
-      const similar = exact || candidates.find((card) => titlesMatch(card.name, session.title));
-      cardId = similar?.id;
+      cardId = candidates.find((card) => titlesMatch(card.name, session.title))?.id;
     }
     if (!cardId) {
       const card = {
-        id: newId(), name: cleanSelfCareTitle(session.title), procStatus: "quero", cost: "", history: [],
+        id: newId(), name: cleanSelfCareTitle(session.title).replace(/\s*[-–:]?\s*\(?\s*\d+\s*(?:ª|º|a|o)?\s*sess[aã]o.*$/i, "").replace(/\s*\(\s*\d+\s*\/\s*\d+\s*\)\s*$/, "").trim() || cleanSelfCareTitle(session.title), procStatus: "quero", cost: "", history: [],
         region: "", degree: "", placeId: "", bodyArea: "", category: "", goal: "", image: "",
         professional: "", clinic: session.loc || "", instagram: "", priority: "alta", plannedSessions: "", nextExpenseDate: "",
         recurring: false, frequencyUnit: "meses", frequencyValue: "", result: "", notes: "", link: "",
@@ -96,16 +102,24 @@ export function syncSelfCareSessions(beauty, events, { newId }) {
   });
 
   let changed = created.length > 0;
+  // número de sessões acompanha a agenda, a menos que tenha sido informado à mão
+  const withCount = (card, gcalSessions) => {
+    const auto = card.plannedSessionsAuto === true || !(Number(card.plannedSessions) > 0);
+    if (!auto || !gcalSessions.length) return { ...card, gcalSessions };
+    return { ...card, gcalSessions, plannedSessions: gcalSessions.length, plannedSessionsAuto: true };
+  };
   const updated = list.flatMap((card) => {
-    const next = (assigned.get(card.id) || []).sort((a, b) => a.start.localeCompare(b.start));
     const before = card.gcalSessions || [];
+    const kept = before.filter((session) => !sessions.has(session.key) && String(session.start || "").slice(0, 10) < keepBefore);
+    const next = [...kept, ...(assigned.get(card.id) || [])].sort((a, b) => a.start.localeCompare(b.start));
     if (!before.length && !next.length) return [card];
     // card criado pela agenda, ainda intocado e sem sessões: sai junto com o evento
     if (!next.length && card.gcalAuto && !card.userEdited && !(card.history || []).length) { changed = true; return []; }
-    if (JSON.stringify(before) === JSON.stringify(next)) return [card];
+    const result = withCount(card, next);
+    if (JSON.stringify(result) === JSON.stringify(card)) return [card];
     changed = true;
-    return [{ ...card, gcalSessions: next }];
+    return [result];
   });
   if (!changed) return list;
-  return [...created.map((card) => ({ ...card, gcalSessions: assigned.get(card.id) })), ...updated];
+  return [...created.map((card) => withCount(card, assigned.get(card.id))), ...updated];
 }
