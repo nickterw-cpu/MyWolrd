@@ -92,3 +92,19 @@ export function buildCardInvoices(card, finance = []) {
     })
     .sort((a, b) => b.month.localeCompare(a.month));
 }
+
+// Parcelas do mês (caixa de resumo): as mesmas compras e o mesmo mês de fatura que buildCardInvoices usa,
+// só das compras parceladas, somando todos os cartões. Pagas e a pagar.
+export function monthInstallments(cards = [], finance = [], month) {
+  const list = Array.isArray(finance) ? finance : [];
+  const items = [];
+  (Array.isArray(cards) ? cards : []).forEach((card) => {
+    list.forEach((entry) => {
+      if (!isCardPurchase(entry, card) || !entry.installmentGroup || entry.installmentGroup.kind === "sessions") return;
+      if (cardInvoiceMonthForEntry(card, entry, list) === month) items.push({ ...entry, targetInvoiceMonth: month });
+    });
+  });
+  items.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const totalCents = items.reduce((sum, entry) => sum + cents(entry.amount), 0);
+  return { items, total: totalCents / 100, count: items.length };
+}

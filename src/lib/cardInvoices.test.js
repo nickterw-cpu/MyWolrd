@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildCardInvoices,
+  buildCardInvoices, monthInstallments,
   cardInvoiceDueDate,
   defaultInvoicePaymentDate,
   ensureInvoiceRecord,
@@ -64,5 +64,36 @@ describe("faturas do cartão", () => {
     expect(defaultInvoicePaymentDate(card, "2026-11-15")).toBe("2026-11-30");
     expect(defaultInvoicePaymentDate(card, "2026-11-25")).toBe("2026-12-30");
     expect(defaultInvoicePaymentDate({ id: "sem-dias" }, "2026-11-25")).toBe("2026-11-25");
+  });
+});
+
+describe("monthInstallments", () => {
+  const card = { id: "c1", closingDay: 3, dueDay: 10 };
+  const M = (base, i) => { const [y, m] = base.split("-").map(Number); return new Date(Date.UTC(y, m - 1 + i, 1)).toISOString().slice(0, 7); };
+  const group = (g, total, amount, dateBase, invBase, paid, extra = {}) => Array.from({ length: total }, (_, k) => ({
+    id: `${g}:${k + 1}`, type: "saida", amount, date: `${M(dateBase, k)}-20`, invoiceMonth: M(invBase, k), invoiceMonthExplicit: true,
+    status: k < paid ? "pago" : "agendado", paymentMethod: "Crédito", cardId: "c1",
+    installmentGroup: { id: g, index: k + 1, total, totalAmount: amount * total }, ...extra }));
+  const finance = [
+    ...group("ga", 5, 300, "2026-10", "2026-11", 1),
+    ...group("gb", 5, 100, "2026-09", "2026-09", 2),
+    ...group("gp", 3, 200, "2026-11", "2026-12", 0, { category: "Beleza", expenseClass: "procedure" }),
+    { id: "x", type: "saida", amount: 999, date: "2026-11-02", cardId: "c1", paymentMethod: "Crédito", invoiceMonth: "2026-11", invoiceMonthExplicit: true },
+    { id: "s:1", type: "saida", amount: 50, date: "2026-11-02", cardId: "c1", paymentMethod: "Crédito", invoiceMonth: "2026-11", invoiceMonthExplicit: true,
+      installmentGroup: { id: "s", index: 1, total: 2, kind: "sessions" } },
+  ];
+  it("usa o mês da fatura, conta pagas e a pagar e bate com as parcelas da fatura", () => {
+    const nov = monthInstallments([card], finance, "2026-11");
+    expect(nov.items.map((e) => e.id)).toEqual(["ga:1", "gb:3"]);
+    expect(nov).toMatchObject({ total: 400, count: 2 });
+    const invoiceParcels = buildCardInvoices(card, finance).find((i) => i.month === "2026-11").purchases.filter((e) => e.installmentGroup && e.installmentGroup.kind !== "sessions");
+    expect(invoiceParcels.reduce((t, e) => t + e.amount, 0)).toBe(nov.total);
+  });
+  it("outubro, dezembro e procedimento parcelado", () => {
+    expect(monthInstallments([card], finance, "2026-10")).toMatchObject({ total: 100, count: 1 });
+    const dez = monthInstallments([card], finance, "2026-12");
+    expect(dez).toMatchObject({ total: 600, count: 3 });
+    expect(dez.items.some((e) => e.id === "gp:1")).toBe(true);
+    expect(monthInstallments([card], finance, "2027-08")).toMatchObject({ total: 0, count: 0 });
   });
 });

@@ -222,9 +222,5 @@ export function monthSpendingStatus(transactions, plan, month, { cards = [], exp
   } else {
     level = "good"; message = `Você está economizando bem: ${pctText} da renda usada até agora.`; rule = "Gasto do mês abaixo de 60% da renda do mês (e sem estar muito acima da média).";
   }
-  // Parcelas do mês: só um destaque do gasto (as mesmas entradas, nunca somadas de novo)
-  const installmentItems = groups.flatMap((group) => group.items)
-    .filter((tx) => tx.installmentGroup && tx.installmentGroup.kind !== "sessions" && tx.paymentMethod === "Crédito");
-  const installments = { items: installmentItems, total: sumOf(installmentItems), count: installmentItems.length };
-  return { ...SPENDING_LEVELS[level], level, message, rule, spent, base, baseSource, receivedIncome, expectedIncome: expected, available, pct, average, groups, installments };
+  return { ...SPENDING_LEVELS[level], level, message, rule, spent, base, baseSource, receivedIncome, expectedIncome: expected, available, pct, average, groups };
 }

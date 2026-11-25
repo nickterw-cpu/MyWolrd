@@ -20,7 +20,7 @@ import {
   cardInvoiceMonthForDate, cardInvoiceMonthForEntry, cardLimitSummary, createCardFinanceInstallments,
   financeEntryWithInvoiceMonth, createFinanceInstallments, nextFinanceDate,
 } from "./src/lib/financeIntegration.js";
-import { buildCardInvoices, cardInvoiceDueDate, defaultInvoicePaymentDate, ensureInvoiceRecord } from "./src/lib/cardInvoices.js";
+import { buildCardInvoices, cardInvoiceDueDate, defaultInvoicePaymentDate, ensureInvoiceRecord, monthInstallments } from "./src/lib/cardInvoices.js";
 import { notify } from "./src/components/ToastHost.jsx";
 import {
   Home, CalendarDays, Target, Repeat, Wallet, NotebookPen, Link2, Settings as SettingsIcon,
@@ -3588,6 +3588,8 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   );
   const averages = useMemo(() => actualExpenseAverages(finance, todayStr()), [finance]);
   const spendingStatus = useMemo(() => spendingStatusFor(finance, settings, cards, selectedMonth), [finance, settings, cards, selectedMonth]);
+  // Parcelas do mês: mesma regra da fatura (mês da fatura de cada parcela, todos os cartões)
+  const installmentsOfMonth = useMemo(() => monthInstallments(cards, finance, selectedMonth), [cards, finance, selectedMonth]);
   const income = planSummary.receivedIncome;
   const expense = planSummary.spent;
   const balance = income - expense;
@@ -3752,13 +3754,13 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                     <button type="button" className="cr-quickbox-item" title="Ver as parcelas do mês"
                       onClick={() => setDetail({
                         title: `Parcelas do mês · ${monthLabel(selectedMonth)}`,
-                        note: "Parcelas de compras parceladas no crédito com data neste mês, pagas e a pagar. Já estão incluídas em \"Gasto no mês\".",
+                        note: "Parcelas de compras parceladas no crédito que caem na fatura deste mês (todos os cartões), pagas e a pagar. É só um destaque: não muda o \"Gasto no mês\".",
                         totalLabel: "Parcelas do mês",
-                        groups: [{ label: "", sign: 1, items: st.installments.items }],
+                        groups: [{ label: "", sign: 1, items: installmentsOfMonth.items }],
                       })}>
                       <span className="cr-label">Parcelas do mês</span>
-                      <span className="cr-quickbox-number">{fmtBRL(st.installments.total)}</span>
-                      <span className="cr-quickbox-sub">{st.installments.count === 0 ? "nenhuma parcela" : `em ${st.installments.count} ${st.installments.count === 1 ? "parcela" : "parcelas"}`}</span>
+                      <span className="cr-quickbox-number">{fmtBRL(installmentsOfMonth.total)}</span>
+                      <span className="cr-quickbox-sub">em {installmentsOfMonth.count} {installmentsOfMonth.count === 1 ? "parcela" : "parcelas"}</span>
                     </button>
                   </div>
                   {st.base > 0 ? (
@@ -4158,7 +4160,8 @@ function FinanceDetailModal({ detail, accounts, cards, onOpenEntry, onClose }) {
                 <span className="cr-detail-desc">
                   <strong>{tx.desc || tx.category || "Lançamento"}{tx.installmentGroup ? ` (${tx.installmentGroup.index}/${tx.installmentGroup.total})` : ""}</strong>
                   <span>{[tx.category, fmtDateBR(tx.date), financePaymentLabel(tx, accounts, cards),
-                    tx.paymentMethod === "Crédito" && tx.invoiceMonth ? `fatura ${monthLabel(tx.invoiceMonth)}` : ""].filter(Boolean).join(" · ")}</span>
+                    tx.targetInvoiceMonth ? `fatura ${monthLabel(tx.targetInvoiceMonth)}`
+                      : tx.paymentMethod === "Crédito" && tx.invoiceMonth ? `fatura ${monthLabel(tx.invoiceMonth)}` : ""].filter(Boolean).join(" · ")}</span>
                 </span>
                 <span className="cr-detail-amount">{fmtBRL(Number(tx.amount) || 0)}</span>
               </button>
