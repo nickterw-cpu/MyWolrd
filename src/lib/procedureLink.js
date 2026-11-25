@@ -45,12 +45,14 @@ const round2 = (n) => Math.round(n * 100) / 100;
 
 // Cria ou atualiza o card vinculado ao lançamento (ou ao grupo de parcelas).
 // entries: o lançamento único, ou todas as parcelas do grupo.
-export function syncCardFromFinance(beauty, entries, { today, newId }) {
+export function syncCardFromFinance(beauty, entries, { today, newId, previousKey = "" }) {
   const list = Array.isArray(beauty) ? beauty : [];
   if (!entries.length) return list;
   const first = entries[0];
   const key = financeLinkKey(first);
-  const existing = list.find((item) => item.financeLink?.key === key);
+  // lançamento refeito (ex.: virou parcelado): o card continua o mesmo, só troca a chave do vínculo
+  const existing = list.find((item) => item.financeLink?.key === key)
+    || (previousKey ? list.find((item) => item.financeLink?.key === previousKey) : undefined);
   const isGroup = !!first.installmentGroup;
   const total = round2(entries.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0));
   const date = (isGroup && first.installmentGroup.purchaseDate) || first.date || today;
@@ -72,7 +74,7 @@ export function syncCardFromFinance(beauty, entries, { today, newId }) {
   }
   const sameDate = (existing.dateDone || existing.scheduledDate) === date;
   // valor total do card acompanha o lançamento; o valor por sessão só muda nos cards criados por Finanças sem sessões
-  const patch = { ...existing, totalCost: total, totalCostManual: true, financeLink: { ...existing.financeLink, ...link } };
+  const patch = { ...existing, totalCost: total, totalCostManual: true, financeLink: { ...existing.financeLink, ...link, key } };
   if (existing.financeLink?.origin !== "beauty" && procedureSessionCount(existing) === 1) patch.cost = total;
   if (existing.financeLink?.origin === "beauty") { patch.financeLink.origin = "beauty"; patch.financeLink.mode = existing.financeLink.mode; }
   if (!sameDate) {

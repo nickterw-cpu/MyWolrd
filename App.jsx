@@ -4,10 +4,14 @@ import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
 import { habitStreak } from "./src/lib/habitStreak.js";
 import {
-  financeEntriesForCard, financeLinkKey, groupEntries, isProcedureExpense, linkedCardFor, planInstallments, procedureSessionCount,
+  financeLinkKey, groupEntries, isProcedureExpense, linkedCardFor, planInstallments, procedureSessionCount,
   procedureTotal, shiftMonth as shiftMonthStr, syncCardFromFinance, syncFinanceFromCard,
 } from "./src/lib/procedureLink.js";
 import { cleanSelfCareTitle, syncSelfCareSessions } from "./src/lib/selfCareSync.js";
+import {
+  applyCardInvoiceChanges, financeEntriesForProcedure, financeSettingsFromEntries, financeSettingsSignature,
+  materializeFinanceEntries, procedureFinanceForm, procedureSignatureExtra,
+} from "./src/lib/financeEntries.js";
 import { countInWeek, normalizeTarget, numericGoalProgress, shiftDays, weekStartOf, weeklyMessage, weeklyStreak } from "./src/lib/workoutWeek.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, monthSpendingStatus, summarizeFinanceMonth } from "./src/lib/financePlan.js";
@@ -1461,6 +1465,9 @@ const GlobalStyle = () => (
     .cr-analysis-bar { width: 100%; border: 0; background: transparent; font: inherit; color: inherit; text-align: left; padding: 2px 0; border-radius: 6px; }
     .cr-analysis-bar:hover, .cr-analysis-bar:focus-visible { background: #F6F1EA; outline: none; }
     .cr-summary-block:disabled { cursor: default; }
+    .cr-missing-finance { margin: 8px 0 0; padding: 6px 10px; border: 1px dashed #E8C9A0; border-radius: 12px; background: #FFFBF3; }
+    .cr-missing-finance > .cr-btn { color: #96631C; padding: 4px 6px; }
+    .cr-proc-finance-summary { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); display: grid; gap: 4px; }
     .cr-finance-register { margin: 4px 0 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #FBF8F4; }
     .cr-place-picker { display: grid; gap: 4px; max-height: 240px; overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
     .cr-place-option { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 4px; border-radius: 8px; }
@@ -1528,6 +1535,7 @@ const GlobalStyle = () => (
     .cr-howto { padding: 2px 6px; margin-top: 6px; font-size: 12.5px; color: var(--ink-soft); }
     .central-root .cr-howto { min-height: 32px; }
     .cr-chip-btn { border: 0; cursor: pointer; font: inherit; font-size: 12px; }
+    .cr-proc-link-chip { background: #F7E9E4; color: #8F1111; }
     .cr-rule-box { margin-bottom: 8px; padding: 10px 12px; border-radius: 10px; background: #FBF8F4; border: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
     .cr-rule-box p { margin: 0 0 6px; }
     .cr-rule-box ul { margin: 0 0 6px; padding-left: 18px; }
@@ -3282,10 +3290,11 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     if (next !== card) setCards(cards.map((entry) => entry.id === cardId ? next : entry));
   };
   // Beleza + Procedimento: cria/atualiza o card vinculado em Procedimentos estéticos.
-  const syncLinkedCard = (nextFinance, entry) => {
-    if (!entry || entry.type !== "saida" && !linkedCardFor(beauty, entry)) return;
-    if (isProcedureExpense(entry)) {
-      const updated = syncCardFromFinance(beauty, groupEntries(nextFinance, entry), { today: todayStr(), newId: uid });
+  const syncLinkedCard = (nextFinance, entry, previousKey = "") => {
+    const previousCard = previousKey ? (beauty || []).find((item) => item.financeLink?.key === previousKey) : undefined;
+    if (!entry || entry.type !== "saida" && !linkedCardFor(beauty, entry) && !previousCard) return;
+    if (isProcedureExpense(entry) || previousCard) {
+      const updated = syncCardFromFinance(beauty, groupEntries(nextFinance, entry), { today: todayStr(), newId: uid, previousKey });
       if (updated !== beauty) setBeauty(updated);
       return;
     }
@@ -3319,11 +3328,16 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     // parcela editada com "todas as parcelas": leva os dados comuns para as outras parcelas do grupo
     if (_editScope === "all" && base.installmentGroup?.id) {
       const groupId = base.installmentGroup.id;
-      const shared = Object.fromEntries(["type", "category", "expenseClass", "desc", "paymentMethod", "cardId", "accountId", "link", "amount", "plannedAmount"]
+      const shared = Object.fromEntries(["type", "category", "expenseClass", "desc", "paymentMethod", "cardId", "accountId", "link"]
         .filter((key) => key in base).map((key) => [key, base[key]]));
-      const total = Number(base.installmentGroup.total) || 1;
+      // o valor informado é o total da compra: dividido entre as parcelas (a diferença de centavos fica na última)
+      const members = next.filter((entry) => entry.installmentGroup?.id === groupId)
+        .sort((a, b) => Number(a.installmentGroup.index) - Number(b.installmentGroup.index));
+      const total = Math.round((Number(base.amount) || 0) * 100) / 100;
+      const per = Math.round((total / members.length) * 100) / 100;
+      const amountOf = (entry) => (entry.id === members[members.length - 1].id ? Math.round((total - per * (members.length - 1)) * 100) / 100 : per);
       next = next.map((entry) => entry.installmentGroup?.id === groupId
-        ? { ...entry, ...shared, installmentGroup: { ...entry.installmentGroup, totalAmount: Math.round(Number(base.amount) * total * 100) / 100 } }
+        ? { ...entry, ...shared, amount: amountOf(entry), plannedAmount: amountOf(entry), installmentGroup: { ...entry.installmentGroup, totalAmount: total } }
         : entry);
     }
     syncLinkedCard(next, base);
@@ -3341,34 +3355,15 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       && !!base.cardId && Number(installmentsCount) > 1;
     const card = cards.find((entry) => entry.id === base.cardId);
     const paid = isInstallmentPurchase ? Math.max(0, Math.min(Number(installmentsCount) - 1, Number(paidCount) || 0)) : 0;
-    // parcelas já pagas ou mês da 1ª parcela ajustado na pré-visualização: cada parcela vai para a fatura do seu mês
-    if (isInstallmentPurchase && (paid > 0 || firstInvoiceMonth)) {
-      const startMonth = firstInvoiceMonth || shiftMonthStr(todayStr().slice(0, 7), -paid);
-      const groupId = `installments:${id}`;
-      const total = Number(base.amount) || 0;
-      const plan = planInstallments({ total, count: Number(installmentsCount), paidCount: paid, purchaseDate: base.date, firstInvoiceMonth: startMonth });
-      const entries = plan.map((p) => ({
-        ...base,
-        id: `${groupId}:${p.index}`,
-        amount: p.amount,
-        plannedAmount: p.amount,
-        date: p.date,
-        invoiceMonth: p.invoiceMonth,
-        invoiceMonthExplicit: true,
-        installmentGroup: { id: groupId, index: p.index, total: p.total, totalAmount: total, purchaseDate: base.date },
-        status: p.paid || (paid === 0 && p.index === 1 && base.status === "pago" && p.date <= todayStr())
-          ? "pago" : base.status === "cancelado" ? "cancelado" : "agendado",
-      }));
-      if (card) {
-        let nextCard = entries.reduce((acc, entry) => ensureInvoiceRecord(acc, entry.invoiceMonth, todayStr()), card);
-        // parcelas já pagas: registra o pagamento delas na fatura do mês para não aparecerem como dívida
-        const paidPayments = entries.filter((entry) => entry.status === "pago").map((entry) => ({
-          id: uid(), invoiceMonth: entry.invoiceMonth, date: entry.date, amount: entry.amount, auto: true, installmentEntryId: entry.id,
-        }));
-        if (paidPayments.length) nextCard = { ...nextCard, payments: [...(nextCard.payments || []), ...paidPayments] };
-        if (nextCard !== card) setCards(cards.map((entry) => entry.id === card.id ? nextCard : entry));
-        if (tab === "fatura") { setInvoiceCard(card.id); setSelectedMonth(entries[paid].invoiceMonth); }
-      }
+    // compra parcelada: mesma ficha (parcelas pagas nos meses anteriores, atual no mês, futuras depois)
+    if (isInstallmentPurchase) {
+      const { entries, payments } = materializeFinanceEntries({
+        ...base, invoiceMonth: explicitInvoiceMonth, invoiceMonthExplicit: !!explicitInvoiceMonth,
+        installmentsCount, paidCount: paid, firstInvoiceMonth,
+      }, { card, today: todayStr(), newId: uid, groupId: `installments:${id}` });
+      const nextCards = applyCardInvoiceChanges(cards, { entries, payments, today: todayStr() });
+      if (nextCards !== cards) setCards(nextCards);
+      if (tab === "fatura" && card) { setInvoiceCard(card.id); setSelectedMonth(entries[paid].invoiceMonth); }
       const nextFinance = [...entries, ...rest];
       setFinance(nextFinance);
       syncLinkedCard(nextFinance, entries[0]);
@@ -3402,6 +3397,25 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     setEditing(null);
     setInvoiceExpenseCardId("");
     setInvoiceExpenseMonth("");
+  };
+  // Edição que muda o parcelamento (à vista ↔ parcelado, nº de parcelas, parcela atual ou fatura): refaz os lançamentos.
+  const regenerate = (data, original) => {
+    const { recurringEnabled, recurringMonths, _editScope, amountMode, id, installmentGroup, ...form } = data;
+    const oldEntries = original.installmentGroup && original.installmentGroup.kind !== "sessions"
+      ? groupEntries(manualFinance, original) : [original];
+    const removedIds = oldEntries.map((entry) => entry.id);
+    const card = cards.find((entry) => entry.id === form.cardId);
+    const single = !(form.type === "saida" && form.paymentMethod === "Crédito" && form.cardId && Number(form.installmentsCount) > 1);
+    const { entries, payments } = materializeFinanceEntries(
+      { ...form, ...(single ? { firstInvoiceMonth: "", paidCount: 0, installmentsCount: 1 } : {}) },
+      { card, today: todayStr(), newId: uid, entryId: single && !original.installmentGroup ? original.id : undefined },
+    );
+    const nextFinance = [...entries, ...manualFinance.filter((entry) => !removedIds.includes(entry.id))];
+    const nextCards = applyCardInvoiceChanges(cards, { entries, payments, removedIds, today: todayStr() });
+    if (nextCards !== cards) setCards(nextCards);
+    setFinance(nextFinance);
+    syncLinkedCard(nextFinance, entries[0], financeLinkKey(original));
+    setEditing(null);
   };
   const discardDraft = (id) => {
     if (manualFinance.some((x) => x.id === id)) setFinance(manualFinance.filter((x) => x.id !== id));
@@ -3853,7 +3867,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             <p className="cr-label" style={{ marginBottom: 6 }}>Lançamentos do mês</p>
             {monthTx.length === 0 && <p className="cr-empty">Nada neste mês.</p>}
             {monthTx.slice().sort((a, b) => b.date.localeCompare(a.date)).map((f) => (
-              <FinanceRow key={f.id} f={f} onEdit={() => openEdit(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} />
+              <FinanceRow key={f.id} f={f} onEdit={() => openEdit(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} procedure={f.sourceRef ? null : linkedCardFor(beauty, f)} />
             ))}
           </div>
         </div>
@@ -3872,7 +3886,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           <div className="cr-card">
             {filteredTx.length === 0 && <p className="cr-empty">Nenhum lançamento encontrado.</p>}
             {filteredTx.map((f) => (
-              <FinanceRow key={f.id} f={f} onEdit={() => openEdit(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} />
+              <FinanceRow key={f.id} f={f} onEdit={() => openEdit(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} procedure={f.sourceRef ? null : linkedCardFor(beauty, f)} />
             ))}
           </div>
         </div>
@@ -3951,6 +3965,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                       <span className="cr-list-title">{f.desc || f.category || "Compra"}</span>
                       <span className="cr-chip">compra {fmtDateShort(f.date)}</span>
                       {f.installmentGroup && <span className="cr-chip">{f.installmentGroup.index}/{f.installmentGroup.total}</span>}
+                      {!f.sourceRef && <ProcedureLinkChip card={linkedCardFor(beauty, f)} onOrigin={onOrigin} />}
                       <span style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: "nowrap" }}>{fmtBRL(f.amount)}</span>
                       {!f.sourceRef && <>
                         <button className="cr-btn ghost" aria-label={`Editar ${f.desc || "lançamento"}`} onClick={() => openEdit(manualFinance.find((entry) => entry.id === f.id) || f)}><Pencil size={13} /></button>
@@ -4039,7 +4054,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       )}
 
       {editing && (
-        <FinanceModal item={editing === "new" ? null : editing} initialCardId={invoiceExpenseCardId} initialInvoiceMonth={invoiceExpenseMonth} onSave={save} onGenerate={generate} onDiscard={discardDraft} onClose={() => { setEditing(null); setInvoiceExpenseCardId(""); setInvoiceExpenseMonth(""); }} finance={finance}
+        <FinanceModal item={editing === "new" ? null : editing} initialCardId={invoiceExpenseCardId} initialInvoiceMonth={invoiceExpenseMonth} onSave={save} onGenerate={generate} onRegenerate={regenerate} onDiscard={discardDraft} onClose={() => { setEditing(null); setInvoiceExpenseCardId(""); setInvoiceExpenseMonth(""); }} finance={finance}
           accounts={accounts} cards={cards} paymentMethods={settings.paymentMethods || DEFAULT_SETTINGS.paymentMethods}
           categories={settings.financeCategories || DEFAULT_SETTINGS.financeCategories} />
       )}
@@ -4497,7 +4512,17 @@ function FinancePlanningPanel({ finance, manualFinance, setFinance, month, setti
   );
 }
 
-function FinanceRow({ f, onEdit, onRemove, goTo, onOrigin }) {
+function ProcedureLinkChip({ card, onOrigin }) {
+  if (!card) return null;
+  return (
+    <button type="button" className="cr-chip cr-chip-btn cr-proc-link-chip" title={`Lançamento do procedimento "${card.name}". Abrir o card.`}
+      onClick={(event) => { event.stopPropagation(); if (onOrigin) onOrigin({ type: "beauty", sourceId: card.id }); }}>
+      <Sparkle size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />Procedimento: {card.name || "sem nome"}
+    </button>
+  );
+}
+
+function FinanceRow({ f, onEdit, onRemove, goTo, onOrigin, procedure }) {
   const st = effectiveStatus(f);
   const originTabs = { shopping: "shopping", beauty: "beauty", hobbies: "hobbies", receiptSchedule: "finance" };
   const deletableSource = ["receiptSchedule", "shopping", "beauty", "hobbies"].includes(f.sourceRef?.type);
@@ -4512,6 +4537,7 @@ function FinanceRow({ f, onEdit, onRemove, goTo, onOrigin }) {
       {f.paymentMethod && <span className="cr-chip">{f.paymentMethod}</span>}
       {f.installmentGroup && <span className="cr-chip">{f.installmentGroup.index}/{f.installmentGroup.total}</span>}
       {f.recurringId && <span className="cr-chip">recorrente</span>}
+      <ProcedureLinkChip card={procedure} onOrigin={onOrigin} />
       {f.sourceRef && <span className="cr-chip">{f.sourceKind === "previsao" ? "Estimativa" : "Integrado"} · {f.sourceLabel}</span>}
       <span className="cr-chip" style={st === "atrasado" ? { background: "#F6DEDA", color: "#A1493C" } : st === "cancelado" ? { opacity: 0.6 } : undefined}>{STATUS_LABEL[st]}</span>
       <span style={{ color: f.type === "entrada" ? "#5C7A56" : "#A1493C", fontWeight: 600, fontSize: 13.5 }}>
@@ -4679,25 +4705,16 @@ function InvestmentModal({ item, categories, onSave, onClose }) {
   );
 }
 
-function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSave, onGenerate, onDiscard, onClose, accounts, cards, paymentMethods, categories, finance }) {
+// Ficha de lançamento: os mesmos campos no novo lançamento, na edição e no financeiro do procedimento.
+// mode: "new" | "edit" | "procedure"; allowStructure: pode mudar parcelamento (não vale para "só esta parcela").
+function FinanceEntryFields({ form, setForm, mode = "new", allowStructure = true, hideInstallments = false, accounts, cards, paymentMethods, categories, finance, excludeIds = [] }) {
   const ctx = useContext(ListsContext);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
-  const [form, setForm] = useState(item ? {
-    ...item,
-    invoiceMonthExplicit: item.invoiceMonthExplicit === true,
-  } : {
-    type: "saida", category: categories[0] || "", expenseClass: "variable", amount: "", plannedAmount: "", date: todayStr(), desc: "",
-    paymentMethod: initialCardId ? "Crédito" : "Pix", status: "pago", accountId: "", cardId: initialCardId, link: "",
-    invoiceMonth: initialInvoiceMonth,
-    invoiceMonthExplicit: !!initialInvoiceMonth,
-    installmentsCount: 1, recurringEnabled: false, recurringMonths: 12,
-  });
-  const isEdit = !!item;
+  const isEdit = mode === "edit";
+  const isProcedure = mode === "procedure";
   const isCredit = form.paymentMethod === "Crédito";
   const selectedCard = cards.find((card) => card.id === form.cardId);
   const limitSummary = selectedCard
-    ? cardLimitSummary(selectedCard, isEdit ? finance.filter((entry) => entry.id !== item.id) : finance)
+    ? cardLimitSummary(selectedCard, (finance || []).filter((entry) => !excludeIds.includes(entry.id)))
     : null;
   const invoiceMonthForForm = form.invoiceMonthExplicit
     ? form.invoiceMonth
@@ -4707,48 +4724,20 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
     ? (form.invoiceDueDate?.slice(0, 7) === form.invoiceMonth ? form.invoiceDueDate : cardInvoiceDueDate(selectedCard, form.invoiceMonth))
     : selectedCard ? defaultInvoicePaymentDate(selectedCard, form.date) : "";
   const isCreditPurchase = form.type === "saida" && isCredit;
-  const draftId = useRef(uid());
-  const needsGeneration = !isEdit && ((isCredit && Number(form.installmentsCount) > 1) || !!form.recurringEnabled);
-  const autoStatus = useAutoSave(form, onSave, (f) => {
-    const gen = !isEdit && ((f.paymentMethod === "Crédito" && Number(f.installmentsCount) > 1) || !!f.recurringEnabled);
-    return gen ? null : { ...f, amount: Number(f.amount) || 0 };
-  }, draftId.current, (f) => Number(f.amount) > 0 && !!f.date
-    && (f.type !== "saida" || f.paymentMethod !== "Crédito" || !!f.cardId));
-  const saveTransaction = async () => {
-    if (!(Number(form.amount) > 0) || !form.date || (form.type === "saida" && isCredit && !form.cardId) || saving) return;
-    setSaving(true);
-    setSaveError("");
-    try {
-      const saved = await onSave({ ...form, id: item?.id || draftId.current, amount: Number(form.amount) });
-      if (saved === false) {
-        setSaveError("Não foi possível confirmar o salvamento. Verifique a conexão e tente novamente.");
-        return;
-      }
-      onClose();
-    } catch (error) {
-      console.error("Não foi possível salvar o lançamento financeiro.", error);
-      setSaveError(error instanceof Error ? error.message : "Não foi possível salvar o lançamento. Tente novamente.");
-    } finally {
-      setSaving(false);
-    }
-  };
-  useEffect(() => { if (needsGeneration && onDiscard) onDiscard(draftId.current); }, [needsGeneration]);
   // Pré-visualização das parcelas (com parcelas já pagas nos meses anteriores)
   const installmentCount = Number(form.installmentsCount) || 1;
   const paidInstallments = Number(form.paidCount) || 0;
   const purchaseTotal = form.amountMode === "parcela" ? (Number(form.amount) || 0) * installmentCount : Number(form.amount) || 0;
   const planFirstMonth = form.firstInvoiceMonth
     || (paidInstallments > 0 ? shiftMonthStr(todayStr().slice(0, 7), -paidInstallments) : invoiceMonthForForm || "");
-  const installmentPlan = !isEdit && isCredit && installmentCount > 1 && purchaseTotal > 0 && form.date
+  const installmentPlan = allowStructure && isCredit && installmentCount > 1 && purchaseTotal > 0 && form.date
     ? planInstallments({ total: purchaseTotal, count: installmentCount, paidCount: paidInstallments, purchaseDate: form.date, firstInvoiceMonth: planFirstMonth })
       .map((p) => ({ ...p, status: p.paid || (paidInstallments === 0 && p.index === 1 && form.status === "pago" && p.date <= todayStr()) ? "paga" : "a pagar" }))
     : [];
-
   return (
-    <Modal title={item ? (item._editScope === "all" ? "Editar todas as parcelas" : item.installmentGroup ? `Editar parcela ${item.installmentGroup.index}/${item.installmentGroup.total}` : "Editar lançamento") : "Novo lançamento"} onClose={onClose}>
-      {item?._editScope === "all" && (
-        <p className="cr-sub" style={{ marginTop: 0 }}>Categoria, classificação, descrição, valor da parcela e forma de pagamento valem para todas as parcelas; a data e o status continuam de cada parcela.</p>
-      )}
+    <>
+      {!isProcedure && (
+        <>
       <div className="cr-field"><label className="cr-label">Tipo</label>
         <select className="cr-select" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
           <option value="entrada">entrada</option><option value="saida">saída</option>
@@ -4771,7 +4760,7 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
       )}
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}>
-          <label className="cr-label">{!isEdit && isCredit && Number(form.installmentsCount) > 1
+          <label className="cr-label">{allowStructure && isCredit && Number(form.installmentsCount) > 1
             ? (form.amountMode === "parcela" ? "Valor de cada parcela (R$)" : "Valor total da compra (R$)")
             : form.type === "saida" && form.status === "pago" ? "Valor real pago (R$)" : "Valor do lançamento / previsto (R$)"}</label>
           <input type="number" min="0.01" step="0.01" className="cr-input" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
@@ -4790,6 +4779,8 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
       <div className="cr-field"><label className="cr-label">Descrição</label>
         <input className="cr-input" value={form.desc} onChange={(e) => setForm({ ...form, desc: e.target.value })} /></div>
 
+        </>
+      )}
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Forma de pagamento</label>
           <div className="cr-row" style={{ flexWrap: "nowrap", gap: 6 }}>
@@ -4813,7 +4804,7 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
             {cards.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select></div>
       )}
-      {isCreditPurchase && form.cardId && !(!isEdit && Number(form.installmentsCount) > 1 && Number(form.paidCount) > 0) && (
+      {isCreditPurchase && form.cardId && !(allowStructure && Number(form.installmentsCount) > 1) && (
         <div className="cr-field">
           <label className="cr-label">Data de pagamento da fatura</label>
           <input type="date" className="cr-input" value={invoicePaymentDateForForm || ""}
@@ -4846,7 +4837,10 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
           </select></div>
       )}
 
-      {!isEdit && isCredit && (
+      {isCredit && !allowStructure && !hideInstallments && (
+        <p className="cr-sub">Esta é a parcela {form.installmentGroup?.index}/{form.installmentGroup?.total}. Para mudar o parcelamento (número de parcelas, parcela atual ou fatura), edite "todas as parcelas".</p>
+      )}
+      {isCredit && allowStructure && (
         <div className="cr-field"><label className="cr-label">Parcelamento</label>
           <select className="cr-select" value={form.installmentsCount} onChange={(e) => setForm({ ...form, installmentsCount: Number(e.target.value), paidCount: 0, firstInvoiceMonth: "" })}>
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((n) => <option key={n} value={n}>{n === 1 ? "à vista / 1x" : `${n}x`}</option>)}
@@ -4854,6 +4848,7 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
           {form.installmentsCount > 1 && (
             <>
               <div className="cr-row" style={{ marginTop: 8, flexWrap: "wrap" }}>
+                {mode === "new" && (
                 <div className="cr-field" style={{ flex: "1 1 180px", margin: 0 }}>
                   <label className="cr-label">O valor informado acima é</label>
                   <select className="cr-select" value={form.amountMode || "total"} onChange={(e) => setForm({ ...form, amountMode: e.target.value })}>
@@ -4861,6 +4856,7 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
                     <option value="parcela">o valor de cada parcela</option>
                   </select>
                 </div>
+                )}
                 <div className="cr-field" style={{ flex: "1 1 180px", margin: 0 }}>
                   <label className="cr-label">Já paguei até a parcela</label>
                   <select className="cr-select" value={Number(form.paidCount) || 0} onChange={(e) => setForm({ ...form, paidCount: Number(e.target.value), firstInvoiceMonth: "" })}>
@@ -4901,7 +4897,7 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
         </div>
       )}
 
-      {!isEdit && (
+      {mode === "new" && (
         <div className="cr-field">
           <label className="cr-row" style={{ cursor: "pointer" }}>
             <div className={`cr-checkbox ${form.recurringEnabled ? "checked" : ""}`} onClick={() => setForm({ ...form, recurringEnabled: !form.recurringEnabled })}>
@@ -4918,10 +4914,109 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
         </div>
       )}
 
-      <div className="cr-field"><label className="cr-label">Link (nota fiscal, comprovante, produto…)</label>
-        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>
+      {!isProcedure && <div className="cr-field"><label className="cr-label">Link (nota fiscal, comprovante, produto…)</label>
+        <input className="cr-input" value={form.link || ""} onChange={(e) => setForm({ ...form, link: e.target.value })} /></div>}
 
-      {needsGeneration ? (
+    </>
+  );
+}
+
+function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSave, onGenerate, onRegenerate, onDiscard, onClose, accounts, cards, paymentMethods, categories, finance }) {
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  // Na edição, a ficha já vem com o parcelamento atual (número de parcelas, já pagas e fatura da 1ª).
+  const [form, setForm] = useState(() => {
+    if (!item) {
+      return {
+        type: "saida", category: categories[0] || "", expenseClass: "variable", amount: "", plannedAmount: "", date: todayStr(), desc: "",
+        paymentMethod: initialCardId ? "Crédito" : "Pix", status: "pago", accountId: "", cardId: initialCardId, link: "",
+        invoiceMonth: initialInvoiceMonth,
+        invoiceMonthExplicit: !!initialInvoiceMonth,
+        installmentsCount: 1, recurringEnabled: false, recurringMonths: 12,
+      };
+    }
+    const group = item.installmentGroup && item.installmentGroup.kind !== "sessions" ? item.installmentGroup : null;
+    const groupList = group ? (finance || []).filter((entry) => entry.installmentGroup?.id === group.id)
+      .sort((a, b) => Number(a.installmentGroup.index) - Number(b.installmentGroup.index)) : [];
+    const firstMonth = group ? (groupList[0]?.invoiceMonth || "") : (item.invoiceMonthExplicit ? item.invoiceMonth || "" : "");
+    const original = { count: group ? Number(group.total) || 1 : 1, paid: group ? Number(group.paidCount) || 0 : 0, firstMonth };
+    const allScope = item._editScope === "all" && group;
+    return {
+      ...item,
+      invoiceMonthExplicit: item.invoiceMonthExplicit === true,
+      // editando todas as parcelas, o valor é o total da compra (dividido entre as parcelas ao salvar)
+      amount: allScope ? Number(group.totalAmount) || groupList.reduce((t, e) => t + Number(e.amount || 0), 0) : item.amount,
+      amountMode: "total",
+      installmentsCount: original.count,
+      paidCount: original.paid,
+      firstInvoiceMonth: group ? firstMonth : "",
+      _original: original,
+    };
+  });
+  const isEdit = !!item;
+  const isCredit = form.paymentMethod === "Crédito";
+  // editar "só esta parcela" não muda o parcelamento
+  const allowStructure = !isEdit || !item.installmentGroup || item._editScope === "all";
+  const structural = (f) => isEdit && allowStructure && f.type === "saida" && f.paymentMethod === "Crédito" && !!f.cardId && (
+    (Number(f.installmentsCount) || 1) !== f._original.count
+    || (Number(f.installmentsCount) > 1 && ((Number(f.paidCount) || 0) !== f._original.paid || (f.firstInvoiceMonth || "") !== (f._original.firstMonth || "")))
+  );
+  // parcelado no cartão que deixou de ser crédito: também refaz (volta a ser um lançamento só)
+  const leftCredit = (f) => isEdit && allowStructure && f._original.count > 1 && !(f.paymentMethod === "Crédito" && f.cardId);
+  const needsRegeneration = structural(form) || leftCredit(form);
+  const draftId = useRef(uid());
+  const needsGeneration = !isEdit && ((isCredit && Number(form.installmentsCount) > 1) || !!form.recurringEnabled);
+  const autoStatus = useAutoSave(form, onSave, (f) => {
+    const gen = !isEdit && ((f.paymentMethod === "Crédito" && Number(f.installmentsCount) > 1) || !!f.recurringEnabled);
+    if (gen || structural(f) || leftCredit(f)) return null;
+    const { _original, ...rest } = f;
+    return { ...rest, amount: Number(f.amount) || 0 };
+  }, draftId.current, (f) => Number(f.amount) > 0 && !!f.date
+    && (f.type !== "saida" || f.paymentMethod !== "Crédito" || !!f.cardId));
+  const saveTransaction = async () => {
+    if (!(Number(form.amount) > 0) || !form.date || (form.type === "saida" && isCredit && !form.cardId) || saving) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const { _original, ...rest } = form;
+      const saved = await onSave({ ...rest, id: item?.id || draftId.current, amount: Number(form.amount) });
+      if (saved === false) {
+        setSaveError("Não foi possível confirmar o salvamento. Verifique a conexão e tente novamente.");
+        return;
+      }
+      onClose();
+    } catch (error) {
+      console.error("Não foi possível salvar o lançamento financeiro.", error);
+      setSaveError(error instanceof Error ? error.message : "Não foi possível salvar o lançamento. Tente novamente.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  useEffect(() => { if (needsGeneration && onDiscard) onDiscard(draftId.current); }, [needsGeneration]);
+  const installmentCount = Number(form.installmentsCount) || 1;
+  const purchaseTotal = form.amountMode === "parcela" ? (Number(form.amount) || 0) * installmentCount : Number(form.amount) || 0;
+  const excludeIds = item ? (item.installmentGroup ? (finance || []).filter((e) => e.installmentGroup?.id === item.installmentGroup.id).map((e) => e.id) : [item.id]) : [];
+
+  return (
+    <Modal title={item ? (item._editScope === "all" ? "Editar todas as parcelas" : item.installmentGroup ? `Editar parcela ${item.installmentGroup.index}/${item.installmentGroup.total}` : "Editar lançamento") : "Novo lançamento"} onClose={onClose}>
+      {item?._editScope === "all" && (
+        <p className="cr-sub" style={{ marginTop: 0 }}>O valor é o total da compra, dividido entre as parcelas. Categoria, classificação, descrição e forma de pagamento valem para todas; a data e o status continuam de cada parcela. Mudar o número de parcelas, a parcela atual ou a fatura refaz as parcelas.</p>
+      )}
+      <FinanceEntryFields form={form} setForm={setForm} mode={isEdit ? "edit" : "new"} allowStructure={allowStructure}
+        accounts={accounts} cards={cards} paymentMethods={paymentMethods} categories={categories} finance={finance} excludeIds={excludeIds} />
+
+      {isEdit && needsRegeneration ? (
+        <div style={{ marginTop: 14 }}>
+          <p className="cr-sub" style={{ marginTop: 0 }}>
+            {leftCredit(form) ? "As parcelas viram um lançamento só, com o valor total." : `As parcelas serão refeitas: ${installmentCount === 1 ? "um lançamento à vista" : `${installmentCount} parcelas`}, nas faturas da pré-visualização.`}
+          </p>
+          <button className="cr-btn primary" style={{ width: "100%", justifyContent: "center" }}
+            disabled={!(Number(form.amount) > 0) || !form.date || (isCredit && !form.cardId)}
+            onClick={() => { const { _original, ...rest } = form; onRegenerate({ ...rest, amount: purchaseTotal }, item); }}>
+            Salvar e refazer as parcelas
+          </button>
+        </div>
+      ) : needsGeneration ? (
         <div style={{ marginTop: 14 }}>
           <p className="cr-sub" style={{ marginTop: 0 }}>
             {form.recurringEnabled ? "Este lançamento vai se repetir por vários meses." : `Esta compra será dividida em ${form.installmentsCount} parcelas.`} Confirme para criar todos os lançamentos de uma vez.
@@ -8574,7 +8669,7 @@ function ProcedureAnalysis({ procedures, onOpen }) {
   );
 }
 
-function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSettings, originTarget, clearOriginTarget, finance, setFinance, cards, setCards }) {
+function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSettings, originTarget, clearOriginTarget, finance, setFinance, cards, setCards, accounts, onOpenFinanceEntry }) {
   const ctx = useContext(ListsContext);
   const [section, setSection] = useState("procedimentos");
   const [editing, setEditing] = useState(null);
@@ -8601,41 +8696,63 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
     clearOriginTarget();
   }, [originTarget, beauty, clearOriginTarget]);
 
+  // Procedimento ↔ Finanças: o dado financeiro do procedimento é sempre o lançamento (Beleza · Procedimento).
   const save = (data) => {
     // o formulário pode não ter o vínculo criado num salvamento anterior: junta com o card salvo
     const existing = beauty.find((entry) => entry.id === data.id);
-    let card = { ...(existing || {}), ...data, userEdited: true };
-    if (existing?.financeLink && !data.financeLink) card.financeLink = existing.financeLink;
+    const { _financeEdited, ...clean } = data;
+    let card = { ...(existing || {}), ...clean, userEdited: true };
+    if (existing?.financeLink && !clean.financeLink) card.financeLink = existing.financeLink;
     let nextFinance = finance || [];
+    let nextCards = cards || [];
     const link = card.financeLink;
-    const removeLinked = (list, key) => list.filter((entry) => financeLinkKey(entry) !== key);
-    if (link && link.origin === "beauty") {
-      const wantedMode = Number(card.plannedSessions) > 1 ? (card.financeMode || "total") : "total";
-      if (!card.financeRegister) {
-        // desmarcou "Registrar também em Finanças": o lançamento criado por aqui sai
-        nextFinance = removeLinked(nextFinance, link.key);
-        const { financeLink: _drop, ...rest } = card;
-        card = rest;
-      } else if (wantedMode !== link.mode || (link.mode === "sessions" && procedureSessionCount(card) !== link.installments)) {
-        // mudou para "por sessão" / "valor total" ou o número de sessões: recria os lançamentos
-        const generated = financeEntriesForCard(card, { mode: wantedMode, today: todayStr(), newId: uid });
-        nextFinance = [...generated.entries, ...removeLinked(nextFinance, link.key)];
-        card.financeLink = generated.link;
+    const today = todayStr();
+    const mode = Number(card.plannedSessions) > 1 && card.financeMode === "sessions" ? "sessions" : "total";
+    const settings = card.financeSettings || {};
+    const linked = link ? nextFinance.filter((entry) => financeLinkKey(entry) === link.key) : [];
+    const linkedIds = linked.map((entry) => entry.id);
+    if (link && clean.financeRegister === false) {
+      // desmarcou "Registrar em Finanças": o lançamento sai (e os pagamentos automáticos das parcelas)
+      nextFinance = nextFinance.filter((entry) => !linkedIds.includes(entry.id));
+      nextCards = applyCardInvoiceChanges(nextCards, { removedIds: linkedIds, today });
+      const { financeLink: _drop, financeAuto: _auto, ...rest } = card;
+      card = rest;
+    } else if (link) {
+      const currentSignature = financeSettingsSignature(financeSettingsFromEntries(linked) || {},
+        link.mode === "sessions" ? `sessions:${linked.length}` : "total");
+      const wantedSignature = financeSettingsSignature(settings, procedureSignatureExtra(card, mode));
+      if ((_financeEdited && wantedSignature !== currentSignature) || !linked.length) {
+        // mudou forma de pagamento, cartão, parcelas, fatura ou "como pago": refaz os lançamentos
+        const generated = financeEntriesForProcedure(card, { mode, settings, creditCards: nextCards, today, newId: uid, origin: link.origin || "beauty" });
+        if (procedureTotal(card) > 0) {
+          nextFinance = [...generated.entries, ...nextFinance.filter((entry) => !linkedIds.includes(entry.id))];
+          nextCards = applyCardInvoiceChanges(nextCards, { entries: generated.entries, payments: generated.payments, removedIds: linkedIds, today });
+          card.financeLink = generated.link;
+        }
       } else {
+        // valor e data voltam para Finanças
         nextFinance = syncFinanceFromCard(nextFinance, card);
       }
-    } else if (link) {
-      // card criado a partir de um lançamento: valor e data voltam para Finanças
-      nextFinance = syncFinanceFromCard(nextFinance, card);
     } else if (card.financeRegister && procedureTotal(card) > 0 && setFinance) {
-      const mode = Number(card.plannedSessions) > 1 ? (card.financeMode || "total") : "total";
-      const generated = financeEntriesForCard(card, { mode, today: todayStr(), newId: uid });
+      const generated = financeEntriesForProcedure(card, { mode, settings, creditCards: nextCards, today, newId: uid });
       nextFinance = [...generated.entries, ...nextFinance];
+      nextCards = applyCardInvoiceChanges(nextCards, { entries: generated.entries, payments: generated.payments, today });
       card.financeLink = generated.link;
     }
     setBeauty(upsertById(beauty, card, { history: card.history || [] }));
     if (setFinance && nextFinance !== (finance || [])) setFinance(nextFinance);
+    if (setCards && nextCards !== (cards || [])) setCards(nextCards);
   };
+  const financeTools = {
+    finance: finance || [], cards: cards || [], accounts: accounts || [],
+    cardById: (id) => beauty.find((b) => b.id === id),
+    paymentMethods: settings?.paymentMethods || DEFAULT_SETTINGS.paymentMethods,
+    categories: settings?.financeCategories || DEFAULT_SETTINGS.financeCategories,
+    onOpenEntry: (entry) => { setEditing(null); if (onOpenFinanceEntry) onOpenFinanceEntry(entry); },
+  };
+  // Revisão: procedimentos com valor que não têm lançamento em Finanças (nada é criado sozinho)
+  const withoutFinance = beauty.filter((b) => !b.archived && !b.financeLink && (Number(b.cost) > 0 || procedureTotal(b) > 0));
+  const [showMissing, setShowMissing] = useState(false);
   // Mescla um procedimento em outro (sessões da agenda, histórico e vínculo com Finanças vão para o destino).
   const mergeCards = (sourceId, targetId) => {
     const source = beauty.find((b) => b.id === sourceId);
@@ -8823,6 +8940,27 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
         onSchedule={(b, date) => setScheduling({ item: originalOf(b), date })}
         onRegister={(b) => setRegistering(originalOf(b))} />
 
+      {withoutFinance.length > 0 && (
+        <div className="cr-missing-finance">
+          <button type="button" className="cr-btn ghost" onClick={() => setShowMissing(!showMissing)} aria-expanded={showMissing}>
+            <Info size={14} /> {withoutFinance.length === 1 ? "1 procedimento tem valor e não está em Finanças" : `${withoutFinance.length} procedimentos têm valor e não estão em Finanças`}
+            <ChevronRight size={14} style={{ transform: showMissing ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+          </button>
+          {showMissing && (
+            <div style={{ display: "grid", gap: 2, marginTop: 6 }}>
+              <p className="cr-sub" style={{ margin: "0 0 4px", fontSize: 12.5 }}>Nada foi criado automaticamente. Abra o procedimento e marque "Registrar em Finanças" para criar o lançamento (com forma de pagamento e cartão).</p>
+              {withoutFinance.map((b) => (
+                <button key={b.id} type="button" className="cr-detail-row" onClick={() => setEditing(originalOf(b) || b)}>
+                  <span className="cr-detail-desc"><strong>{b.name || "Sem nome"}</strong>
+                    <span>{(b.history || []).length ? `${b.history.length} realização(ões) já aparece(m) em Finanças como integrada(s)` : "sem nenhum registro em Finanças"}</span></span>
+                  <span className="cr-detail-amount">{fmtBRL(procedureTotal(b))}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="cr-tabbar" style={{ marginTop: 14 }}>
         <button className={`cr-tabbtn ${section === "procedimentos" ? "active" : ""}`} onClick={() => setSection("procedimentos")}>Procedimentos</button>
         <button className={`cr-tabbtn ${section === "lugares" ? "active" : ""}`} onClick={() => setSection("lugares")}>Lugares e profissionais ({places.length})</button>
@@ -8912,7 +9050,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
       )}
 
       {editing && <BeautyModal key={liveEditing ? liveEditing.id + ":" + (liveEditing.history || []).length : "new"} item={liveEditing} places={places} onSave={save} onClose={() => setEditing(null)} onRegister={() => setRegistering(liveEditing)}
-        placeTools={placeTools} onMerge={mergeCards}
+        placeTools={placeTools} onMerge={mergeCards} financeTools={financeTools}
         mergeTargets={liveEditing ? beauty.filter((b) => !b.archived && b.id !== liveEditing.id).sort((a, b) => (a.name || "").localeCompare(b.name || "")) : []} />}
       {customize && <CardFieldsModal settings={settings || {}} setSettings={setSettings} onClose={() => setCustomize(false)} />}
       {scheduling && <ScheduleSessionModal item={scheduling.item} suggestedDate={scheduling.date}
@@ -9124,21 +9262,46 @@ function RegistrarRealizacaoModal({ item, onSave, onClose }) {
   );
 }
 
-function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, mergeTargets = [], onMerge }) {
-  const [form, setForm] = useState(item || {
+function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, mergeTargets = [], onMerge, financeTools }) {
+  // id já definido na ficha nova, para achar o vínculo criado no primeiro salvamento
+  const [newId] = useState(() => uid());
+  const cardId = item?.id || newId;
+  const storedLink = item?.financeLink || financeTools.cardById(cardId)?.financeLink;
+  // lançamentos de Finanças ligados a este procedimento (a fonte dos dados financeiros)
+  const linkedEntries = storedLink?.key
+    ? (financeTools.finance || []).filter((entry) => financeLinkKey(entry) === storedLink.key)
+      .sort((a, b) => (Number(a.installmentGroup?.index) || 0) - (Number(b.installmentGroup?.index) || 0))
+    : [];
+  const [confirmUnregister, setConfirmUnregister] = useState(false);
+  const [form, setForm] = useState(() => item ? {
+    ...item,
+    // a ficha financeira vem do lançamento que existe em Finanças (nunca de uma cópia antiga)
+    financeSettings: financeSettingsFromEntries(linkedEntries) || item.financeSettings || {},
+    financeRegister: item.financeLink ? true : item.financeRegister === true,
+    financeMode: item.financeLink?.mode || item.financeMode || "total",
+  } : {
+    id: newId,
     procStatus: "quero", region: "", degree: "", placeId: "", bodyArea: "", category: "", goal: "",
     image: "", professional: "", clinic: "", instagram: "", cost: "", dateDone: "", priority: "alta", plannedSessions: "", nextExpenseDate: "",
     recurring: false, frequencyUnit: "meses", frequencyValue: "", alertDays: DEFAULT_ALERT_DAYS,
     result: "", notes: "", link: "", name: "", history: [],
     // procedimento novo criado aqui: registra também em Finanças (pode desmarcar)
-    financeRegister: true, financeMode: "total",
+    financeRegister: true, financeMode: "total", financeSettings: {},
   });
+  const sessionsMode = Number(form.plannedSessions) > 1 && form.financeMode === "sessions";
+  const financeForm = { ...procedureFinanceForm(form, form.financeSettings || {}, todayStr()), invoiceMonth: form.financeSettings?.invoiceMonth || "",
+    invoiceMonthExplicit: !!form.financeSettings?.invoiceMonthExplicit, invoiceDueDate: form.financeSettings?.invoiceDueDate || "" };
+  const setFinanceForm = (next) => {
+    const keys = ["paymentMethod", "status", "cardId", "accountId", "installmentsCount", "paidCount", "firstInvoiceMonth", "invoiceMonth", "invoiceMonthExplicit", "invoiceDueDate"];
+    setForm((current) => ({ ...current, financeSettings: Object.fromEntries(keys.map((key) => [key, next[key]])), _financeEdited: true }));
+  };
+  const linkedTotal = linkedEntries.reduce((t, entry) => t + (Number(entry.amount) || 0), 0);
+  const linkedPaid = linkedEntries.filter((entry) => entry.status === "pago").reduce((t, entry) => t + (Number(entry.amount) || 0), 0);
   const [mergeTarget, setMergeTarget] = useState("");
   const [confirmMerge, setConfirmMerge] = useState(false);
   const computedTotal = Math.round((Number(form.cost) || 0) * (Number(form.plannedSessions) > 0 ? Number(form.plannedSessions) : 1) * 100) / 100;
   const shownTotal = form.totalCostManual ? form.totalCost : (computedTotal || "");
   // card que veio de um lançamento de Finanças: o vínculo já existe, não oferece criar outro
-  const fromFinance = !!(item?.financeLink && item.financeLink.origin !== "beauty");
   const autoStatus = useAutoSave(form, onSave, (f) => ({
     ...f, cost: Number(f.cost) || 0, plannedSessions: Number(f.plannedSessions) || 0,
     frequencyValue: f.recurring ? Number(f.frequencyValue) || "" : "",
@@ -9209,7 +9372,7 @@ function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, me
           <button type="button" className="cr-btn" onClick={() => openExternalLink(instagramUrl(form.instagram))}><Instagram size={14} /> Instagram</button>
         </div>
       )}
-      <FormSection title="Valores e datas" />
+      <FormSection title="Financeiro" />
       <div className="cr-row" style={{ flexWrap: "wrap" }}>
         <div className="cr-field" style={{ flex: "1 1 150px" }}><label className="cr-label">Valor por sessão (R$)</label>
           <input type="number" className="cr-input" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} /></div>
@@ -9228,38 +9391,76 @@ function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, me
             ? <>Valor combinado informado por você (cálculo: {fmtBRL(computedTotal)}). <button type="button" className="cr-btn ghost" style={{ padding: "0 4px", minHeight: 0, display: "inline" }} onClick={() => setForm({ ...form, totalCost: "", totalCostManual: false })}>usar o cálculo</button></>
             : "Calculado: valor por sessão × número de sessões. Edite se o valor combinado for diferente."}
         </p></div>
+      <div className="cr-finance-register">
+        <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", gap: 8 }}>
+          <input type="checkbox" checked={!!form.financeRegister} style={{ minHeight: 0 }}
+            onChange={(e) => {
+              if (!e.target.checked && linkedEntries.length) { setConfirmUnregister(true); return; }
+              setForm({ ...form, financeRegister: e.target.checked, _financeEdited: true });
+            }} />
+          <span style={{ fontSize: 14 }}>Registrar em Finanças <span className="cr-sub" style={{ margin: 0 }}>(Beleza · Procedimento)</span></span>
+        </label>
+        {!form.financeRegister && (
+          <p className="cr-sub" style={{ margin: "6px 0 0", fontSize: 12.5, color: "#96631C" }}>
+            Este procedimento não está em Finanças{shownTotal ? `: o valor de ${fmtBRL(Number(shownTotal) || 0)} não entra nos totais nem nas faturas` : ""}.
+            {(item?.history || []).length > 0 ? " As realizações já registradas aparecem em Finanças como integradas; marcar aqui cria um lançamento à parte." : ""}
+          </p>
+        )}
+        {form.financeRegister && (
+          <>
+            {Number(form.plannedSessions) > 1 && (
+              <div className="cr-field" style={{ margin: "10px 0 0" }}><label className="cr-label">Como pago</label>
+                <select className="cr-select" value={form.financeMode === "sessions" ? "sessions" : "total"}
+                  onChange={(e) => setForm({ ...form, financeMode: e.target.value, _financeEdited: true })}>
+                  <option value="total">Pacote / valor total</option>
+                  <option value="sessions">Por sessão (um lançamento por sessão)</option>
+                </select></div>
+            )}
+            <div style={{ marginTop: 10 }}>
+              <FinanceEntryFields form={financeForm} setForm={setFinanceForm} mode="procedure"
+                allowStructure={!sessionsMode} hideInstallments={sessionsMode}
+                accounts={financeTools.accounts} cards={financeTools.cards} paymentMethods={financeTools.paymentMethods}
+                categories={financeTools.categories} finance={financeTools.finance} excludeIds={linkedEntries.map((entry) => entry.id)} />
+            </div>
+            {linkedEntries.length > 0 ? (
+              <div className="cr-proc-finance-summary">
+                <div className="cr-grid cr-grid-3" style={{ gap: 8 }}>
+                  <div><p className="cr-label" style={{ margin: 0 }}>Total</p><strong>{fmtBRL(linkedTotal)}</strong></div>
+                  <div><p className="cr-label" style={{ margin: 0 }}>Já pago</p><strong>{fmtBRL(linkedPaid)}</strong></div>
+                  <div><p className="cr-label" style={{ margin: 0 }}>Falta pagar</p><strong>{fmtBRL(Math.max(0, linkedTotal - linkedPaid))}</strong></div>
+                </div>
+                {linkedEntries.map((entry) => (
+                  <button key={entry.id} type="button" className="cr-detail-row" onClick={() => financeTools.onOpenEntry(entry)} title="Abrir o lançamento em Finanças">
+                    <span className="cr-detail-desc">
+                      <strong>{entry.installmentGroup ? `${entry.installmentGroup.kind === "sessions" ? "Sessão" : "Parcela"} ${entry.installmentGroup.index}/${entry.installmentGroup.total}` : "À vista"}</strong>
+                      <span>{[entry.paymentMethod === "Crédito" && entry.invoiceMonth ? `fatura ${monthLabel(entry.invoiceMonth)}` : fmtDateBR(entry.date), entry.paymentMethod].filter(Boolean).join(" · ")}</span>
+                    </span>
+                    <span className="cr-row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                      <span className="cr-chip" style={entry.status === "pago" ? { background: "#E3EBDF", color: "#4F6B49" } : undefined}>{entry.status === "pago" ? "paga" : "a pagar"}</span>
+                      <span className="cr-detail-amount">{fmtBRL(Number(entry.amount) || 0)}</span>
+                    </span>
+                  </button>
+                ))}
+                <p className="cr-sub" style={{ margin: "6px 0 0", fontSize: 12 }}><Link2 size={12} style={{ verticalAlign: "-1px" }} /> Vinculado a Finanças: mudanças aqui atualizam o lançamento, e as de lá voltam para cá.</p>
+              </div>
+            ) : (
+              <p className="cr-sub" style={{ margin: "8px 0 0", fontSize: 12 }}>O lançamento é criado em Finanças assim que houver um valor.</p>
+            )}
+          </>
+        )}
+        {confirmUnregister && (
+          <ConfirmModal title="Tirar de Finanças" confirmLabel="Excluir lançamento"
+            message={`Desmarcar exclui ${linkedEntries.length > 1 ? `os ${linkedEntries.length} lançamentos` : "o lançamento"} deste procedimento em Finanças. Continuar?`}
+            onConfirm={() => { setConfirmUnregister(false); setForm({ ...form, financeRegister: false, _financeEdited: true }); }}
+            onCancel={() => setConfirmUnregister(false)} />
+        )}
+      </div>
       <div className="cr-row">
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Data da última realização</label>
           <input type="date" max={todayStr()} className="cr-input" value={form.dateDone || ""} onChange={(e) => setForm({ ...form, dateDone: e.target.value })} /></div>
         <div className="cr-field" style={{ flex: 1 }}><label className="cr-label">Prioridade financeira</label>
           <ManagedSelect listKey="priority" value={form.priority || "alta"} onChange={(value) => setForm({ ...form, priority: value })} /></div>
       </div>
-      {!fromFinance && (
-        <div className="cr-finance-register">
-          <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", gap: 8 }}>
-            <input type="checkbox" checked={!!form.financeRegister} onChange={(e) => setForm({ ...form, financeRegister: e.target.checked })} style={{ minHeight: 0 }} />
-            <span style={{ fontSize: 14 }}>Registrar também em Finanças <span className="cr-sub" style={{ margin: 0 }}>(Beleza · Procedimento)</span></span>
-          </label>
-          {form.financeRegister && Number(form.plannedSessions) > 1 && (
-            <div style={{ display: "grid", gap: 4, margin: "8px 0 0 24px" }}>
-              <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", gap: 8 }}>
-                <input type="radio" name="finance-mode" checked={(form.financeMode || "total") === "total"} onChange={() => setForm({ ...form, financeMode: "total" })} style={{ minHeight: 0 }} />
-                <span style={{ fontSize: 13.5 }}>Um lançamento com o valor total</span>
-              </label>
-              <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", gap: 8 }}>
-                <input type="radio" name="finance-mode" checked={form.financeMode === "sessions"} onChange={() => setForm({ ...form, financeMode: "sessions" })} style={{ minHeight: 0 }} />
-                <span style={{ fontSize: 13.5 }}>Um lançamento por sessão, na data de cada uma</span>
-              </label>
-            </div>
-          )}
-          {form.financeRegister && (
-            <p className="cr-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>
-              {item?.financeLink ? "Já registrado em Finanças: valor e data ficam sincronizados." : "O lançamento é criado assim que houver um valor."}
-            </p>
-          )}
-        </div>
-      )}
-
       <FormSection title="Agendamento" />
       <div className="cr-row" style={{ flexWrap: "wrap" }}>
         <div className="cr-field" style={{ flex: "1 1 150px" }}><label className="cr-label">Sessão agendada (data)</label>
@@ -9290,9 +9491,6 @@ function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, me
         <p className="cr-sub" role="alert" style={{ color: "#A1493C", marginTop: 0 }}>
           Você mudou a data agendada pelo app. Lembre-se de mudar também no Google Agenda, senão as duas datas vão aparecer.
         </p>
-      )}
-      {form.financeLink && (
-        <p className="cr-sub" style={{ marginTop: 0 }}><Link2 size={12} style={{ verticalAlign: "-1px" }} /> Vinculado a um lançamento em Finanças{form.financeLink.installments > 1 ? ` (${form.financeLink.installments}x de ${fmtBRL(form.financeLink.installmentAmount)})` : ""}: o valor e a data atualizam o lançamento.</p>
       )}
 
       <FormSection title="Recorrência e alertas" />
@@ -11883,7 +12081,8 @@ export default function App({ onSignOut }) {
         {tab === "finance" && <FinanceView finance={finance} setFinance={setFinance} shopping={shopping} setShopping={setShopping} beauty={beauty} setBeauty={setBeauty} hobbies={hobbies} setHobbies={setHobbies} accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} investments={investments} setInvestments={setInvestments} goTo={setTab} onOrigin={navigateToOrigin} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "study" && <StudyView study={study} setStudy={setStudy} studyAreas={studyAreas} setStudyAreas={setStudyAreas} />}
         {tab === "career" && <CareerView career={career} setCareer={setCareer} />}
-        {tab === "beauty" && <BeautyView beauty={beauty} setBeauty={setBeauty} finance={finance} setFinance={setFinance} cards={cards} setCards={setCards} places={places} setPlaces={setPlaces} settings={settings} setSettings={setSettings} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
+        {tab === "beauty" && <BeautyView beauty={beauty} setBeauty={setBeauty} finance={finance} setFinance={setFinance} cards={cards} setCards={setCards} accounts={accounts}
+          onOpenFinanceEntry={(entry) => navigateToOrigin({ type: "financeEdit", sourceId: entry.id })} places={places} setPlaces={setPlaces} settings={settings} setSettings={setSettings} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "selfcare" && <SelfCareView selfcare={selfcare} setSelfcare={setSelfcare} />}
         {tab === "hobbies" && <HobbiesView hobbies={hobbies} setHobbies={setHobbies} originTarget={originTarget} clearOriginTarget={clearOriginTarget} />}
         {tab === "personaldev" && <PersonalDevView personaldev={personaldev} setPersonaldev={setPersonaldev} settings={settings} setSettings={setSettings} />}

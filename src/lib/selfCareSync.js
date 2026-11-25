@@ -92,7 +92,7 @@ export function syncSelfCareSessions(beauty, events, { newId, today = new Date()
         region: "", degree: "", placeId: "", bodyArea: "", category: "", goal: "", image: "",
         professional: "", clinic: session.loc || "", instagram: "", priority: "alta", plannedSessions: "", nextExpenseDate: "",
         recurring: false, frequencyUnit: "meses", frequencyValue: "", result: "", notes: "", link: "",
-        gcalAuto: true, gcalSessions: [],
+        gcalAuto: true, gcalSessions: [], financeRegister: true, financeMode: "total",
       };
       created.push(card);
       assigned.set(card.id, []);
