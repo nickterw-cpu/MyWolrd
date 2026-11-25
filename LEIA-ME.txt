@@ -14,3 +14,8 @@ Para preservar os dados que já estão no central.html:
 
 O central.html continuará funcionando sem internet e sem sincronização com o
 Supabase. Os dados das duas versões são independentes após a importação.
+
+Atualizar o central.html: ele é gerado a partir do App.jsx (mesmas telas da
+versão web, sem login, sem Supabase e sem Google Agenda). Depois de mudar o
+App.jsx, rode "npm run build:central" para gerar o arquivo de novo. Os dados
+continuam nas mesmas chaves do navegador, então nada do que já foi salvo se perde.

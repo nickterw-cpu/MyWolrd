@@ -12031,7 +12031,7 @@ export default function App({ onSignOut }) {
         <button className="cr-navitem" style={{ marginTop: "auto", fontSize: 12 }} onClick={handleRefresh} disabled={refreshing}>
           <Download size={14} /> {refreshing ? "Atualizando…" : "Atualizar dados"}
         </button>
-        <button className="cr-navitem" style={{ fontSize: 12 }} onClick={onSignOut}>Sair da conta Google</button>
+        {onSignOut && <button className="cr-navitem" style={{ fontSize: 12 }} onClick={onSignOut}>Sair da conta Google</button>}
         <p className="cr-sub" style={{ margin: "4px 10px 0", fontSize: 11, opacity: 0.8 }}>MyWorld, {APP_BUILD}</p>
       </div>
       <nav className="cr-mobile-nav" aria-label="Navegação principal">
@@ -12065,7 +12065,7 @@ export default function App({ onSignOut }) {
             <button className="cr-navitem" type="button" onClick={handleRefresh} disabled={refreshing}>
               <Download size={14} /> {refreshing ? "Atualizando…" : "Atualizar dados"}
             </button>
-            <button className="cr-navitem" type="button" onClick={onSignOut}>Sair da conta Google</button>
+            {onSignOut && <button className="cr-navitem" type="button" onClick={onSignOut}>Sair da conta Google</button>}
           </section>
         </div>
       )}
