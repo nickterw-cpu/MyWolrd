@@ -8,6 +8,7 @@ import {
   procedureTotal, shiftMonth as shiftMonthStr, syncCardFromFinance, syncFinanceFromCard,
 } from "./src/lib/procedureLink.js";
 import { cleanSelfCareTitle, syncSelfCareSessions } from "./src/lib/selfCareSync.js";
+import { reprocessProcedurePlanned } from "./src/lib/procedurePlanned.js";
 import {
   applyCardInvoiceChanges, financeEntriesForProcedure, financeSettingsFromEntries, financeSettingsSignature,
   materializeFinanceEntries, procedureFinanceForm, procedureSignatureExtra,
@@ -4004,6 +4005,31 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
               </>
             );
           })()}
+          {settings.plannedReportV8 && !settings.plannedReportV8.dismissed && (
+            <div className="cr-card cr-planned-report" style={{ marginBottom: 16 }}>
+              <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "nowrap", alignItems: "flex-start" }}>
+                <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>Procedimentos agendados agora aparecem como gastos previstos</h3>
+                <button type="button" className="cr-btn ghost" aria-label="Fechar aviso" title="Fechar"
+                  onClick={() => setSettings({ ...settings, plannedReportV8: { ...settings.plannedReportV8, dismissed: true } })}><X size={15} /></button>
+              </div>
+              {[["created", "Lançamento previsto criado"], ["converted", "Lançamento que já existia passou a previsto"]].map(([key, label]) => (settings.plannedReportV8[key] || []).length > 0 && (
+                <div key={key} style={{ marginTop: 8 }}>
+                  <p className="cr-label" style={{ margin: "0 0 2px" }}>{label}</p>
+                  {settings.plannedReportV8[key].map((item) => (
+                    <p key={item.id} className="cr-sub" style={{ margin: 0 }}>{item.name} · {fmtDateBR(item.date)} · {fmtBRL(item.amount)}</p>
+                  ))}
+                </div>
+              ))}
+              {(settings.plannedReportV8.skipped || []).length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <p className="cr-label" style={{ margin: "0 0 2px" }}>Ficaram de fora</p>
+                  {settings.plannedReportV8.skipped.map((item) => (
+                    <p key={item.id} className="cr-sub" style={{ margin: 0 }}>{item.name}: {item.reason} (informe o valor no procedimento para entrar)</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {/* Previstos com data passada: lembrete discreto para efetivar, ajustar a data ou cancelar */}
           {overduePlanned.length > 0 && (
             <div className="cr-missing-finance" style={{ margin: "0 0 16px" }}>
@@ -12343,6 +12369,17 @@ export default function App({ onSignOut }) {
     const next = syncSelfCareSessions(beauty, gcalMergedEvents(gcal), { newId: uid });
     if (next !== beauty) setBeauty(next);
   }, [loaded, gcal, beauty, setBeauty]);
+  // Procedimentos agendados com valor → gastos previstos em Finanças (idempotente; não duplica).
+  // A primeira vez que mudar algo (ou encontrar procedimentos sem valor), guarda o relatório para o aviso.
+  useEffect(() => {
+    if (!loaded) return;
+    const result = reprocessProcedurePlanned(beauty, finance, { today: todayStr(), newId: uid, creditCards: cards });
+    if (result.changed) { setFinance(result.finance); setBeauty(result.beauty); }
+    const { converted, created, skipped } = result.report;
+    if (!settings.plannedReportV8 && (converted.length || created.length || skipped.length)) {
+      setSettings({ ...settings, plannedReportV8: { converted, created, skipped, at: todayStr(), dismissed: false } });
+    }
+  }, [loaded, beauty, finance]);
   const setStudyAreas = useCallback((v) => { setStudyAreasState(v); return storageSet(KEYS.studyareas, v); }, []);
   const setPages = useCallback((v) => { setPagesState(v); return storageSet(KEYS.pages, v); }, []);
   const setPlaces = useCallback((v) => { setPlacesState(v); return storageSet(KEYS.places, v); }, []);
