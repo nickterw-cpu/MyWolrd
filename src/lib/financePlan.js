@@ -1,4 +1,5 @@
 import { monthGroups } from "./monthGroups.js";
+import { monthInvestments } from "./investmentGoals.js";
 
 function amountOf(value) {
   const amount = Number(value);
@@ -178,15 +179,17 @@ export const SPENDING_LEVELS = {
 
 // Situação do mês (frase do panda e barra): o Total comprometido (gasto + agendados + crédito + previstos)
 // comparado com a renda do mês. Os números vêm de monthGroups, a mesma regra da visão mensal.
-export function monthSpendingStatus(transactions, plan, month, { cards = [], expectedIncome = 0 } = {}) {
+export function monthSpendingStatus(transactions, plan, month, { cards = [], expectedIncome = 0, investments = [], investmentGoals = {} } = {}) {
   const receivedIncome = summarizeFinanceMonth(transactions, plan, month).receivedIncome;
-  const groups = monthGroups(transactions, cards, month, { receivedIncome, expectedIncome });
+  // investimentos do mês (aba Investimentos): a meta entra no total comprometido
+  const investmentsOf = (m) => monthInvestments(investments, transactions, investmentGoals, m);
+  const groups = monthGroups(transactions, cards, month, { receivedIncome, expectedIncome, investments: investmentsOf(month) });
   const spent = groups.total;
   const { base, baseSource, available } = groups;
   const expected = amountOf(expectedIncome);
   const pct = base > 0 ? spent / base : null;
 
-  const history = [1, 2, 3].map((back) => monthGroups(transactions, cards, previousMonth(month, back)).total)
+  const history = [1, 2, 3].map((back) => monthGroups(transactions, cards, previousMonth(month, back), { investments: investmentsOf(previousMonth(month, back)) }).total)
     .filter((value) => value > 0);
   const average = history.length ? history.reduce((t, v) => t + v, 0) / history.length : 0;
 

@@ -3,6 +3,8 @@
 // B. Agendados/Pendentes: fora do crédito, lançado e ainda não pago;
 // C. Parcelas do mês: compras no crédito da fatura do mês ainda aberta (+ saldo informado à mão);
 // D. Gastos previstos: status "Previsto" e estimativas automáticas.
+// E. Investimentos (opcional, vindo da aba Investimentos): a meta do mês (investido + o que falta).
+//    No Disponível sai só o que já foi investido.
 import { buildCardInvoices } from "./cardInvoices.js";
 
 const cents = (value) => {
@@ -31,7 +33,7 @@ function group(items = [], lines = []) {
   return { items, lines, total: totalCents / 100, count: items.length + lines.length };
 }
 
-export function monthGroups(finance, cards, month, { receivedIncome = 0, expectedIncome = 0 } = {}) {
+export function monthGroups(finance, cards, month, { receivedIncome = 0, expectedIncome = 0, investments = null } = {}) {
   const list = Array.isArray(finance) ? finance : [];
   const inMonth = (entry) => typeof entry.date === "string" && entry.date.slice(0, 7) === month;
   const own = list.filter((entry) => relevant(entry) && inMonth(entry));
@@ -69,17 +71,24 @@ export function monthGroups(finance, cards, month, { receivedIncome = 0, expecte
   const credit = group(creditItems, creditLines);
   const planned = group(plannedItems);
   const plannedCreditCents = plannedItems.filter(isCreditEntry).reduce((sum, entry) => sum + cents(entry.amount), 0);
-  const totalCents = Math.round(spent.total * 100) + Math.round(scheduled.total * 100)
+  const expensesCents = Math.round(spent.total * 100) + Math.round(scheduled.total * 100)
     + Math.round(credit.total * 100) + Math.round(planned.total * 100);
+  const invested = group(investments?.items || [], investments && investments.remaining > 0
+    ? [{ label: "Falta investir (meta do mês)", amount: investments.remaining }] : []);
+  const investedOutCents = (investments?.items || []).reduce((sum, entry) => sum + cents(entry.amount), 0);
+  const totalCents = expensesCents + Math.round(invested.total * 100);
 
   const received = Number(receivedIncome) > 0 ? Number(receivedIncome) : 0;
   const expected = Number(expectedIncome) > 0 ? Number(expectedIncome) : 0;
   const base = received > 0 ? received : expected;
   return {
     spent, scheduled, credit, planned,
+    investments: { ...invested, goal: investments?.goal ?? null, goalSource: investments?.goalSource || "none",
+      invested: investedOutCents / 100, remaining: investments?.remaining || 0, exceeded: investments?.exceeded || 0, progress: investments?.progress ?? null },
+    expensesTotal: expensesCents / 100,
     total: totalCents / 100,
     toCard: (Math.round(credit.total * 100) + plannedCreditCents) / 100,
-    available: Math.round((base - spent.total) * 100) / 100,
+    available: Math.round(base * 100 - Math.round(spent.total * 100) - investedOutCents) / 100,
     base,
     baseSource: received > 0 ? "received" : expected > 0 ? "expected" : "none",
   };

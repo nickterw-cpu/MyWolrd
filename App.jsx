@@ -17,6 +17,7 @@ import { countInWeek, normalizeTarget, numericGoalProgress, shiftDays, weekStart
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, monthSpendingStatus, summarizeFinanceMonth } from "./src/lib/financePlan.js";
 import { monthGroups, monthsWithActivity } from "./src/lib/monthGroups.js";
+import { investmentGoalFor, monthInvestments, setDefaultInvestmentGoal, setMonthInvestmentGoal } from "./src/lib/investmentGoals.js";
 import {
   actualExpenseAverages, buildFinanceAlerts, buildFinanceForecast, buildIntegratedFinance,
   cardInvoiceMonthForDate, cardInvoiceMonthForEntry, cardLimitSummary, createCardFinanceInstallments,
@@ -1651,6 +1652,11 @@ const GlobalStyle = () => (
     .cr-quickbox-five { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .cr-quickbox-total { grid-column: 1 / -1; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; padding-top: 10px; }
     @media (max-width: 760px) { .cr-quickbox-five { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .cr-quickbox-five.cr-quickbox-six { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    @media (max-width: 1100px) { .cr-quickbox-five.cr-quickbox-six { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 560px) { .cr-quickbox-five.cr-quickbox-six { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .cr-quickbox-thin { height: 4px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 3px 0 1px; }
+    .cr-quickbox-thin > div { height: 100%; border-radius: 4px; }
     .cr-group-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
     .cr-quickbox-segments { display: flex; }
     .cr-quickbox-segments > div { border-radius: 0; }
@@ -2232,7 +2238,7 @@ function useToday() {
   return today;
 }
 
-function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev, gcal, setGcal, setTasks, setHabits, setSettings, goTo, onOrigin, accounts, cards, routines = [], setRoutines, fitness, setFitness, onOpenTraining }) {
+function Dashboard({ tasks, goals, habits, finance, investments = [], areas, settings, personaldev, gcal, setGcal, setTasks, setHabits, setSettings, goTo, onOrigin, accounts, cards, routines = [], setRoutines, fitness, setFitness, onOpenTraining }) {
   const [financeDetail, setFinanceDetail] = useState(null);
   const today = todayStr();
   const now = new Date();
@@ -2280,7 +2286,7 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
   const renderWidget = (id) => {
     switch (id) {
       case "panorama": {
-        const spending = spendingStatusFor(finance, settings, cards, todayStr().slice(0, 7));
+        const spending = spendingStatusFor(finance, settings, cards, todayStr().slice(0, 7), investments);
         const om = overallMood(tasks, goals, habits, spending);
         return (
           <div className="cr-card" key="panorama" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
@@ -3298,8 +3304,10 @@ function planExpectedNet(plan) {
   return Math.max(0, (Number(p.grossSalary) || 0) + (Number(p.extraIncome) || 0) - deductions);
 }
 
-function spendingStatusFor(finance, settings, cards, month) {
-  return monthSpendingStatus(finance, settings?.financePlan, month, { cards, expectedIncome: planExpectedNet(settings?.financePlan) });
+function spendingStatusFor(finance, settings, cards, month, investments = []) {
+  return monthSpendingStatus(finance, settings?.financePlan, month, {
+    cards, expectedIncome: planExpectedNet(settings?.financePlan), investments, investmentGoals: settings?.investmentGoals || {},
+  });
 }
 
 // Detalhe "como é calculado": o que entrou no gasto do mês e qual regra gerou a frase.
@@ -3309,8 +3317,11 @@ const MONTH_GROUP_META = {
   scheduled: { label: "Agendados/Pendentes", short: "agendados", color: "#B4781F", hint: "Fora do cartão, lançado e ainda não pago." },
   credit: { label: "Parcelas do mês (crédito)", short: "crédito", color: "#3F6C9E", hint: "Compras no crédito da fatura do mês ainda aberta." },
   planned: { label: "Gastos previstos", short: "previstos", color: "#A99BC0", hint: "Planejado, que ainda não aconteceu." },
+  investments: { label: "Investimentos", short: "investimentos", color: "#4E8C84", hint: "Meta de investimento do mês: o que já foi aportado mais o que ainda falta investir (aba Investimentos)." },
 };
 const MONTH_GROUP_KEYS = ["spent", "scheduled", "credit", "planned"];
+// Total comprometido: os 4 grupos de gastos + investimentos do mês
+const COMMITTED_KEYS = [...MONTH_GROUP_KEYS, "investments"];
 
 function MonthGroupDot({ group }) {
   return <span className="cr-group-dot" style={{ background: MONTH_GROUP_META[group].color }} aria-hidden="true" />;
@@ -3323,6 +3334,27 @@ function monthGroupDetail(groups, keys, title, extra = {}) {
     groups: keys.map((key) => ({ label: keys.length > 1 ? MONTH_GROUP_META[key].label : "", sign: 1, items: groups[key].items, lines: groups[key].lines })),
     note: keys.length === 1 ? MONTH_GROUP_META[keys[0]].hint : "",
     ...extra,
+  };
+}
+
+// Bloco Investimentos: aportes do mês (os mesmos que somam o "investido") + o que falta da meta.
+function investmentsDetail(groups, month, goToInvestments) {
+  const I = groups.investments;
+  return {
+    title: `Investimentos · ${monthLabel(month)}`,
+    totalLabel: "Investimentos no total comprometido",
+    note: I.goal === null
+      ? "Sem meta de investimento para este mês: só os aportes já feitos entram no total comprometido."
+      : `Meta do mês ${fmtBRL(I.goal)} · investido ${fmtBRL(I.invested)} · ${I.remaining > 0 ? `falta ${fmtBRL(I.remaining)}` : I.exceeded > 0 ? `meta batida (+${fmtBRL(I.exceeded)})` : "meta batida"}.`,
+    extra: (
+      <div className="cr-row" style={{ marginBottom: 10 }}>
+        <button type="button" className="cr-btn" onClick={goToInvestments}>{I.goal === null ? "Definir a meta na aba Investimentos" : "Ir para a aba Investimentos"}</button>
+      </div>
+    ),
+    groups: [
+      { label: "Aportes do mês", sign: 1, items: I.items, showEmpty: true },
+      { label: "Falta investir", sign: 1, items: [], lines: I.lines },
+    ],
   };
 }
 
@@ -3339,7 +3371,7 @@ function spendingRuleDetail(status, month) {
       <div className="cr-rule-box">
         <p><strong>Frase:</strong> {status.message}</p>
         <p><strong>Regra que gerou a frase:</strong> {status.rule}</p>
-        <p><strong>Conta:</strong> total comprometido {fmtBRL(status.spent)} ({fmtBRL(g.spent.total)} gastos + {fmtBRL(g.scheduled.total)} agendados + {fmtBRL(g.credit.total)} crédito + {fmtBRL(g.planned.total)} previstos) ÷ {baseText} = <strong>{pct}</strong>
+        <p><strong>Conta:</strong> total comprometido {fmtBRL(status.spent)} ({fmtBRL(g.spent.total)} gastos + {fmtBRL(g.scheduled.total)} agendados + {fmtBRL(g.credit.total)} crédito + {fmtBRL(g.planned.total)} previstos + {fmtBRL(g.investments.total)} investimentos) ÷ {baseText} = <strong>{pct}</strong>
           {status.average > 0 ? ` · média dos 3 meses anteriores: ${fmtBRL(status.average)}` : ""}</p>
         <ul>
           <li>Acima de 100% da renda: "passou do orçamento"</li>
@@ -3348,10 +3380,10 @@ function spendingRuleDetail(status, month) {
           <li>De 60% a 85%: "dentro do orçamento, mas de olho"</li>
           <li>Abaixo de 60%: "economizando bem"</li>
         </ul>
-        <p className="cr-sub" style={{ margin: 0 }}>Gasto do mês: pago fora do cartão e faturas pagas. Agendados: fora do cartão, lançados e não pagos. Crédito: compras da fatura do mês ainda aberta. Previstos: planejado que ainda não aconteceu. Não entram transferências para reserva/investimento.</p>
+        <p className="cr-sub" style={{ margin: 0 }}>Gasto do mês: pago fora do cartão e faturas pagas. Agendados: fora do cartão, lançados e não pagos. Crédito: compras da fatura do mês ainda aberta. Previstos: planejado que ainda não aconteceu. Investimentos: a meta do mês da aba Investimentos (o que já foi aportado + o que falta). Transferências para reserva não entram.</p>
       </div>
     ),
-    groups: MONTH_GROUP_KEYS.map((key) => ({ label: MONTH_GROUP_META[key].label, sign: 1, items: g[key].items, lines: g[key].lines, showEmpty: true })),
+    groups: COMMITTED_KEYS.map((key) => ({ label: MONTH_GROUP_META[key].label, sign: 1, items: g[key].items, lines: g[key].lines, showEmpty: true })),
   };
 }
 
@@ -3359,12 +3391,13 @@ function availableDetail(status, incomeItems, month) {
   return {
     title: `Disponível · ${monthLabel(month)}`,
     totalLabel: "Disponível",
-    note: `Renda do mês menos o Gasto do mês (o que já saiu da conta). Crédito, agendados e previstos não descontam aqui.${status.baseSource === "expected" ? " Nada foi recebido ainda: a base é a renda prevista no Planejamento." : ""}`,
+    note: `Renda do mês menos o Gasto do mês e os aportes já feitos em investimentos (o que já saiu da conta). Crédito, agendados, previstos e o que ainda falta investir não descontam aqui.${status.baseSource === "expected" ? " Nada foi recebido ainda: a base é a renda prevista no Planejamento." : ""}`,
     groups: [
       status.baseSource === "expected"
         ? { label: "Renda prevista (Planejamento)", sign: 1, items: [], lines: [{ label: "Renda líquida prevista", amount: status.base }] }
         : { label: "Renda recebida", sign: 1, items: incomeItems },
       { label: "Gasto do mês", sign: -1, items: status.groups.spent.items, lines: status.groups.spent.lines },
+      ...(status.groups.investments.items.length ? [{ label: "Aportes em investimentos", sign: -1, items: status.groups.investments.items }] : []),
     ],
   };
 }
@@ -3793,7 +3826,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     [finance, settings.financePlan, selectedMonth],
   );
   const averages = useMemo(() => actualExpenseAverages(finance, todayStr()), [finance]);
-  const spendingStatus = useMemo(() => spendingStatusFor(finance, settings, cards, selectedMonth), [finance, settings, cards, selectedMonth]);
+  const spendingStatus = useMemo(() => spendingStatusFor(finance, settings, cards, selectedMonth, investments), [finance, settings, cards, selectedMonth, investments]);
   // Grupos do mês: a única regra de números da visão mensal (caixa, panda, blocos e gráficos)
   const G = spendingStatus.groups;
   const overduePlanned = manualFinance.filter((f) => f.status === "previsto" && f.type === "saida" && f.date < todayStr())
@@ -3821,6 +3854,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const L = planSummary.lists;
   const openEntryFromDetail = (tx) => {
     setDetail(null);
+    if (tx.investmentId) { setTab("investimentos"); return; }
     if (tx.sourceRef) { if (onOrigin) onOrigin(tx.sourceRef); else goTo("finance"); return; }
     openEdit(manualFinance.find((entry) => entry.id === tx.id) || tx);
   };
@@ -3832,7 +3866,8 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   const scheduledVariable = G.scheduled.items.filter((e) => e.expenseClass !== "fixed");
   const spentFixed = G.spent.items.filter((e) => e.expenseClass === "fixed");
   const spentVariable = G.spent.items.filter((e) => e.expenseClass !== "fixed");
-  const availableForGoals = Math.round((income - G.total - planSummary.transferPaid - planSummary.reservedRemaining) * 100) / 100;
+  // continua com os 4 grupos de gastos: as transferências já descontam à parte (sem somar investimentos duas vezes)
+  const availableForGoals = Math.round((income - G.expensesTotal - planSummary.transferPaid - planSummary.reservedRemaining) * 100) / 100;
   const detailFor = (key) => {
     const g = (label, items, sign = 1, extra = {}) => ({ label, items, sign, ...extra });
     switch (key) {
@@ -3848,7 +3883,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
         groups: [g("", [], 1, { lines: L.protectedLines.map((line) => ({ label: line.category || "Sem categoria", sub: `meta ${fmtBRL(line.target)} − já transferido ${fmtBRL(line.done)}`, amount: line.amount })) })],
         note: "Metas protegidas da aba Planejamento menos o que já foi transferido neste mês." };
       case "transferPaid": return { title: `Reservas e investimentos realizados · ${monthName}`, groups: [g("", L.transferPaid)] };
-      case "projectedSpending": return monthGroupDetail(G, MONTH_GROUP_KEYS, `Previsão de gastos do mês · ${monthName}`, { totalLabel: "Total comprometido" });
+      case "projectedSpending": return monthGroupDetail(G, MONTH_GROUP_KEYS, `Previsão de gastos do mês · ${monthName}`, { totalLabel: "Total dos gastos", note: "Os 4 grupos de gastos. O Total comprometido da caixa de resumo soma também os investimentos do mês." });
       case "estimated": return { title: `Despesas estimadas · ${monthName}`, groups: [g("", G.planned.items)], note: MONTH_GROUP_META.planned.hint };
       case "available": return { title: `Disponível sem comprometer metas · ${monthName}`, totalLabel: "Disponível", groups: [
         g("Renda recebida", L.income),
@@ -3857,7 +3892,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
         g("Reserva protegida pendente", [], -1, { lines: L.protectedLines.map((line) => ({ label: line.category || "Sem categoria", sub: `meta ${fmtBRL(line.target)} − já transferido ${fmtBRL(line.done)}`, amount: line.amount })) }),
       ] };
       case "percent": return { title: `Percentual da renda comprometido · ${monthName}`, totalLabel: "Total comprometido ÷ renda recebida",
-        groups: [g("Renda recebida", L.income), ...MONTH_GROUP_KEYS.map((key) => g(MONTH_GROUP_META[key].label, G[key].items, 0, { lines: G[key].lines }))],
+        groups: [g("Renda recebida", L.income), ...COMMITTED_KEYS.map((key) => g(MONTH_GROUP_META[key].label, G[key].items, 0, { lines: G[key].lines }))],
         formatTotal: (_total, groups) => (groups[0].subtotal > 0 ? `${Math.round((groups.slice(1).reduce((t, x) => t + x.subtotal, 0) / groups[0].subtotal) * 100)}%` : "—") };
       case "invoice": return invoiceDetails
         ? { title: `Fatura ${invoiceDetails.card.name} · ${monthName}`, groups: [
@@ -3950,7 +3985,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                 </div>
                 {/* Resumo rápido: a primeira coisa do mês (4 grupos separados + total comprometido) */}
                 <div className="cr-card cr-quickbox" style={{ marginBottom: 16 }}>
-                  <div className="cr-quickbox-values cr-quickbox-five">
+                  <div className="cr-quickbox-values cr-quickbox-five cr-quickbox-six">
                     <button type="button" className="cr-quickbox-item" title="Ver o que compõe este valor"
                       onClick={() => setDetail(monthGroupDetail(G, ["spent"], `Gasto do mês · ${monthLabel(selectedMonth)}`))}>
                       <span className="cr-label"><MonthGroupDot group="spent" />Gasto do mês</span>
@@ -3962,7 +3997,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                       <span className="cr-quickbox-number" style={{ color: st.base > 0 ? (G.available >= 0 ? "#5C7A56" : "#A1493C") : "var(--ink-soft)" }}>
                         {st.base > 0 ? fmtBRL(G.available) : "—"}
                       </span>
-                      <span className="cr-quickbox-sub">renda − gasto do mês</span>
+                      <span className="cr-quickbox-sub">renda − gasto do mês − aportes</span>
                     </button>
                     <button type="button" className="cr-quickbox-item" title="Ver as compras no crédito do mês"
                       onClick={() => setDetail(monthGroupDetail(G, ["credit"], `Parcelas do mês · ${monthLabel(selectedMonth)}`))}>
@@ -3976,14 +4011,40 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                       <span className="cr-quickbox-number">{fmtBRL(G.planned.total)}</span>
                       <span className="cr-quickbox-sub">{G.planned.count} {G.planned.count === 1 ? "previsto" : "previstos"}</span>
                     </button>
-                    <button type="button" className="cr-quickbox-item cr-quickbox-total" title="Ver os 4 grupos"
-                      onClick={() => setDetail(monthGroupDetail(G, MONTH_GROUP_KEYS, `Total comprometido · ${monthLabel(selectedMonth)}`, {
+                    {(() => {
+                      const I = G.investments;
+                      const pct = I.progress === null ? 0 : Math.round(I.progress * 100);
+                      return (
+                        <button type="button" className="cr-quickbox-item" title="Ver os aportes do mês"
+                          onClick={() => setDetail(investmentsDetail(G, selectedMonth, () => { setDetail(null); setTab("investimentos"); }))}>
+                          <span className="cr-label"><MonthGroupDot group="investments" />Investimentos</span>
+                          {I.goal === null ? (
+                            <>
+                              <span className="cr-quickbox-number">{fmtBRL(I.invested)}</span>
+                              <span className="cr-quickbox-sub">investido · sem meta definida</span>
+                              <span className="cr-quickbox-sub" style={{ textDecoration: "underline" }}>definir meta</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="cr-quickbox-number">{fmtBRL(I.invested)}</span>
+                              <span className="cr-quickbox-sub">investido de {fmtBRL(I.goal)}</span>
+                              <span className="cr-quickbox-thin" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label="Quanto da meta de investimento já foi aportado">
+                                <div style={{ width: `${pct}%`, background: MONTH_GROUP_META.investments.color }} />
+                              </span>
+                              <span className="cr-quickbox-sub">{I.remaining > 0 ? `falta ${fmtBRL(I.remaining)}` : I.exceeded > 0 ? `meta batida · +${fmtBRL(I.exceeded)}` : "meta batida"}</span>
+                            </>
+                          )}
+                        </button>
+                      );
+                    })()}
+                    <button type="button" className="cr-quickbox-item cr-quickbox-total" title="Ver os grupos"
+                      onClick={() => setDetail(monthGroupDetail(G, COMMITTED_KEYS, `Total comprometido · ${monthLabel(selectedMonth)}`, {
                         totalLabel: "Total comprometido", note: `Vai cair no cartão (parcelas do mês + previstos no crédito): ${fmtBRL(G.toCard)}.`,
                       }))}>
                       <span className="cr-label">Total comprometido</span>
                       <span className="cr-quickbox-number">{fmtBRL(G.total)}</span>
                       <span className="cr-quickbox-sub">
-                        {fmtBRL(G.spent.total)} gastos + {fmtBRL(G.scheduled.total)} agendados + {fmtBRL(G.credit.total)} crédito + {fmtBRL(G.planned.total)} previstos
+                        {fmtBRL(G.spent.total)} gastos + {fmtBRL(G.scheduled.total)} agendados + {fmtBRL(G.credit.total)} crédito + {fmtBRL(G.planned.total)} previstos + {fmtBRL(G.investments.total)} investimentos
                       </span>
                       <span className="cr-quickbox-sub">vai cair no cartão: {fmtBRL(G.toCard)}</span>
                     </button>
@@ -3992,13 +4053,13 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                     <>
                       <div className="cr-quickbox-track cr-quickbox-segments" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usedPct}
                         aria-label="Quanto da renda do mês está comprometido">
-                        {MONTH_GROUP_KEYS.map((key) => {
+                        {COMMITTED_KEYS.map((key) => {
                           const width = Math.max(0, Math.min(100, (G[key].total / st.base) * 100));
                           return width > 0 ? <div key={key} title={`${MONTH_GROUP_META[key].label}: ${fmtBRL(G[key].total)}`} style={{ width: `${width}%`, background: MONTH_GROUP_META[key].color }} /> : null;
                         })}
                       </div>
                       <div className="cr-quickbox-legend">
-                        {MONTH_GROUP_KEYS.map((key) => <span key={key}><MonthGroupDot group={key} />{MONTH_GROUP_META[key].short}</span>)}
+                        {COMMITTED_KEYS.map((key) => <span key={key}><MonthGroupDot group={key} />{MONTH_GROUP_META[key].short}</span>)}
                       </div>
                       <p className="cr-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>
                         {Math.round(st.pct * 100)}% da renda do mês {st.baseSource === "expected" ? "prevista" : "recebida"} ({fmtBRL(st.base)}) está comprometida
@@ -4089,7 +4150,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
             <SummaryBlock label="Outras despesas pendentes" value={fmtBRL(sumOfItems(scheduledVariable))} onClick={() => showDetail("variableCommitments")} />
             <SummaryBlock label="Reserva protegida ainda pendente" value={fmtBRL(planSummary.reservedRemaining)} onClick={() => showDetail("reservedRemaining")} />
             <SummaryBlock label="Reservas e investimentos realizados" value={fmtBRL(planSummary.transferPaid)} onClick={() => showDetail("transferPaid")} />
-            <SummaryBlock label="Previsão de gastos do mês" value={fmtBRL(G.total)} onClick={() => showDetail("projectedSpending")} />
+            <SummaryBlock label="Previsão de gastos do mês" value={fmtBRL(G.expensesTotal)} onClick={() => showDetail("projectedSpending")} />
             <SummaryBlock label="Despesas estimadas (não realizadas)" value={fmtBRL(G.planned.total)} onClick={() => showDetail("estimated")} />
             <SummaryBlock label="Disponível sem comprometer metas" value={fmtBRL(availableForGoals)} valueStyle={{ color: availableForGoals >= 0 ? "#5C7A56" : "#A1493C" }} onClick={() => showDetail("available")} />
             <SummaryBlock label="Percentual da renda comprometido" value={income > 0 ? `${Math.round((G.total / income) * 100)}%` : "—"} onClick={() => showDetail("percent")} />
@@ -4359,7 +4420,8 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
         </div>
       )}
 
-      {tab === "investimentos" && <InvestmentsPanel investments={investments} setInvestments={setInvestments} settings={settings} setSettings={setSettings} />}
+      {tab === "investimentos" && <InvestmentsPanel investments={investments} setInvestments={setInvestments} settings={settings} setSettings={setSettings}
+        finance={finance} month={selectedMonth} setMonth={setSelectedMonth} />}
 
       {tab === "contas" && (
         <AccountsCardsPanel accounts={accounts} setAccounts={setAccounts} cards={cards} setCards={setCards} settings={settings} setSettings={setSettings} finance={finance} invoiceMonth={selectedMonth} />
@@ -4877,7 +4939,92 @@ function FinanceRow({ f, onEdit, onRemove, goTo, onOrigin, procedure, onEffect }
   );
 }
 
-function InvestmentsPanel({ investments, setInvestments, settings, setSettings }) {
+// Meta de investimento mensal: padrão (vale do mês visualizado em diante) e ajuste de um mês específico.
+function InvestmentGoalCard({ investments, finance, settings, setSettings, month, setMonth }) {
+  const goals = settings.investmentGoals || {};
+  const goal = investmentGoalFor(goals, month);
+  const defaultGoal = investmentGoalFor({ defaults: goals.defaults }, month);
+  const monthGoal = (goals.months || {})[month];
+  const m = monthInvestments(investments, finance, goals, month);
+  const [defaultDraft, setDefaultDraft] = useState(null);
+  const [monthDraft, setMonthDraft] = useState(null);
+  const commitDefault = () => {
+    if (defaultDraft === null) return;
+    setSettings({ ...settings, investmentGoals: setDefaultInvestmentGoal(goals, defaultDraft === "" ? null : Number(defaultDraft), month) });
+    setDefaultDraft(null);
+  };
+  const commitMonth = () => {
+    if (monthDraft === null) return;
+    setSettings({ ...settings, investmentGoals: setMonthInvestmentGoal(goals, month, monthDraft === "" ? null : Number(monthDraft)) });
+    setMonthDraft(null);
+  };
+  const onEnter = (commit) => (e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } };
+  const pct = m.progress === null ? 0 : Math.round(m.progress * 100);
+  return (
+    <div className="cr-card" style={{ marginBottom: 18 }}>
+      <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>Meta de investimento mensal</h3>
+        <div className="cr-row" style={{ gap: 4, flexWrap: "nowrap" }}>
+          <button type="button" className="cr-btn ghost" aria-label="Mês anterior" onClick={() => setMonth(shiftMonthStr(month, -1))}>←</button>
+          <span style={{ minWidth: 64, textAlign: "center" }}>{monthLabel(month)}</span>
+          <button type="button" className="cr-btn ghost" aria-label="Próximo mês" onClick={() => setMonth(shiftMonthStr(month, 1))}>→</button>
+        </div>
+      </div>
+      <div className="cr-row" style={{ gap: 12, flexWrap: "wrap", marginTop: 10 }}>
+        <div className="cr-field" style={{ flex: "1 1 180px", margin: 0 }}>
+          <label className="cr-label">Meta padrão (R$ por mês)</label>
+          <input type="number" min="0" step="0.01" className="cr-input" aria-label="Meta padrão de investimento mensal"
+            value={defaultDraft ?? (defaultGoal.amount ?? "")} placeholder="Ex.: 500"
+            onChange={(e) => setDefaultDraft(e.target.value)} onBlur={commitDefault} onKeyDown={onEnter(commitDefault)} />
+          <p className="cr-sub" style={{ margin: "4px 0 0", fontSize: 12 }}>Vale de {monthLabel(month)} em diante. Os meses anteriores mantêm a meta que tinham.</p>
+        </div>
+        <div className="cr-field" style={{ flex: "1 1 180px", margin: 0 }}>
+          <label className="cr-label">Meta só de {monthLabel(month)} (R$)</label>
+          <input type="number" min="0" step="0.01" className="cr-input" aria-label={`Meta de investimento de ${monthLabel(month)}`}
+            value={monthDraft ?? (monthGoal ?? "")} placeholder={defaultGoal.amount !== null ? `Padrão: ${fmtBRL(defaultGoal.amount)}` : "Opcional"}
+            onChange={(e) => setMonthDraft(e.target.value)} onBlur={commitMonth} onKeyDown={onEnter(commitMonth)} />
+          <p className="cr-sub" style={{ margin: "4px 0 0", fontSize: 12 }}>
+            {monthGoal !== undefined
+              ? <>Ajuste só deste mês. <button type="button" className="cr-btn ghost" style={{ padding: "0 4px", minHeight: 0, display: "inline" }}
+                onClick={() => setSettings({ ...settings, investmentGoals: setMonthInvestmentGoal(goals, month, null) })}>usar o padrão</button></>
+              : "Deixe em branco para usar o padrão."}
+          </p>
+        </div>
+      </div>
+      <div className="cr-grid cr-grid-3" style={{ marginTop: 12, gap: 8 }}>
+        <div><p className="cr-label" style={{ margin: 0 }}>Meta do mês</p><strong>{goal.amount === null ? "—" : fmtBRL(goal.amount)}</strong></div>
+        <div><p className="cr-label" style={{ margin: 0 }}>Investido no mês</p><strong>{fmtBRL(m.invested)}</strong></div>
+        <div><p className="cr-label" style={{ margin: 0 }}>{m.remaining > 0 || goal.amount === null ? "Falta investir" : "Meta batida"}</p>
+          <strong style={{ color: goal.amount !== null && m.remaining === 0 ? "#5C7A56" : undefined }}>
+            {goal.amount === null ? "—" : m.remaining > 0 ? fmtBRL(m.remaining) : m.exceeded > 0 ? `+${fmtBRL(m.exceeded)}` : "✓"}
+          </strong></div>
+      </div>
+      {goal.amount !== null && (
+        <div className="cr-progress-track" style={{ marginTop: 8 }} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label="Quanto da meta já foi investido">
+          <div className="cr-progress-fill" style={{ width: `${pct}%`, background: MONTH_GROUP_META.investments.color }} />
+        </div>
+      )}
+      <p className="cr-sub" style={{ margin: "8px 0 0", fontSize: 12 }}>
+        Investido no mês: os investimentos abaixo com data em {monthLabel(month)} e os lançamentos de Finanças classificados como Investimento (pagos). Um mesmo aporte nos dois lugares (mesma data e valor) conta uma vez só.
+      </p>
+      {m.items.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          {m.items.map((item) => (
+            <div key={item.id} className="cr-list-row" style={{ padding: "4px 0" }}>
+              <div style={{ flex: 1 }}>
+                <div>{item.desc || "Aporte"}</div>
+                <div className="cr-sub" style={{ margin: 0 }}>{[item.investmentId ? item.category : "Lançamento em Finanças", fmtDateShort(item.date)].filter(Boolean).join(" · ")}</div>
+              </div>
+              <strong>{fmtBRL(Number(item.amount) || 0)}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InvestmentsPanel({ investments, setInvestments, settings, setSettings, finance = [], month, setMonth }) {
   const [editing, setEditing] = useState(null);
   const [catModal, setCatModal] = useState(false);
   const categories = settings.investmentCategories || DEFAULT_INVESTMENT_CATEGORIES;
@@ -4919,6 +5066,8 @@ function InvestmentsPanel({ investments, setInvestments, settings, setSettings }
           <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo investimento</button>
         </div>
       </div>
+
+      {month && <InvestmentGoalCard investments={investments} finance={finance} settings={settings} setSettings={setSettings} month={month} setMonth={setMonth} />}
 
       <div className="cr-grid cr-grid-2" style={{ marginBottom: 18 }}>
         <div className="cr-card">
@@ -12654,7 +12803,7 @@ export default function App({ onSignOut }) {
         </div>
       )}
       <div className="cr-main">
-        {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={integratedFinance} areas={areas} settings={settings} personaldev={personaldev} gcal={gcal} setGcal={setGcal} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab}
+        {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={integratedFinance} investments={investments} areas={areas} settings={settings} personaldev={personaldev} gcal={gcal} setGcal={setGcal} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab}
           onOrigin={navigateToOrigin} accounts={accounts} cards={cards}
           routines={routines} setRoutines={setRoutines} fitness={fitness} setFitness={setFitness} onOpenTraining={openTraining} />}
         {tab === "search" && <GlobalSearchView query={searchQuery} setQuery={setSearchQuery} all={searchData} goTo={setTab} />}

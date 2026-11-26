@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocationValue, summarizeFinanceMonth } from "./financePlan.js";
+import { allocationValue, monthSpendingStatus, summarizeFinanceMonth } from "./financePlan.js";
 
 describe("allocationValue", () => {
   it("calculates fixed and percentage allocations", () => {
@@ -204,5 +204,21 @@ describe("previsto no resumo do mês", () => {
     ], { allocations: [] }, "2026-12");
     expect(summary.commitments).toBe(0);
     expect(summary.estimatedPurchases).toBe(140);
+  });
+});
+
+describe("panda com investimentos", () => {
+  it("o total comprometido do panda inclui a meta de investimento do mês", () => {
+    const tx = [
+      { id: "s", type: "entrada", status: "pago", amount: 1000, date: "2026-11-05" },
+      { id: "p", type: "saida", status: "pago", paymentMethod: "Pix", amount: 100, date: "2026-11-06" },
+    ];
+    const investmentGoals = { defaults: [{ from: "2026-11", amount: 500 }] };
+    const investments = [{ id: "a", amount: 200, date: "2026-11-07" }];
+    const st = monthSpendingStatus(tx, {}, "2026-11", { investments, investmentGoals });
+    expect(st.spent).toBe(600);
+    expect(st.pct).toBeCloseTo(0.6);
+    expect(st.available).toBe(700);
+    expect(st.groups.investments.total).toBe(500);
   });
 });
