@@ -27,7 +27,7 @@ import {
   Plus, Trash2, Pencil, X, Check, Search, Download, Upload, Sparkles, Flame, ChevronLeft, ChevronRight,
   GraduationCap, Briefcase, Sparkle, Image as ImageIcon, BookHeart, SearchCheck, Compass,
   HardDrive, Mail, FileText, BookOpen, ShoppingBag, ShoppingCart, Heart, Bot, Palette, ListChecks,
-  Music2, Play, Pause, SkipBack, SkipForward, Star, Instagram, Info, Merge, Camera, Ruler, Trophy, Dumbbell, ExternalLink, Bell
+  Music2, Play, Pause, SkipBack, SkipForward, Star, Instagram, Info, Merge, ChevronUp, ChevronDown, Camera, Ruler, Trophy, Dumbbell, ExternalLink, Bell
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -599,6 +599,65 @@ function CardTopicChip({ item }) {
 
 function CardExtraText({ item }) {
   return item?.cardNote ? <p style={{ fontSize: 13, margin: "8px 0", whiteSpace: "pre-wrap" }}>{item.cardNote}</p> : null;
+}
+
+// "Personalizar card" por aba: quais campos aparecem nos cards (salvo em settings.cardFields[aba]).
+const TAB_CARD_FIELDS = {
+  goals: { title: "Metas", fields: [
+    { key: "image", label: "Imagem" }, { key: "area", label: "Área" }, { key: "status", label: "Status" }, { key: "topic", label: "Tópico" },
+    { key: "deadline", label: "Prazo" }, { key: "note", label: "Texto extra" }, { key: "progress", label: "Barra de progresso" }, { key: "details", label: "Link \"Abrir detalhes\"" }] },
+  hobbies: { title: "Hobbies", fields: [
+    { key: "image", label: "Imagem" }, { key: "status", label: "Status" }, { key: "topic", label: "Tópico" }, { key: "frequency", label: "Frequência" },
+    { key: "level", label: "Nível" }, { key: "note", label: "Texto extra" }, { key: "progress", label: "Barra de progresso" }, { key: "time", label: "Horas dedicadas" },
+    { key: "link", label: "Botão \"Abrir link\"" }, { key: "details", label: "Botão \"Ver detalhes\"" }] },
+  selfcare: { title: "Self-Care & Bem-estar", fields: [
+    { key: "image", label: "Imagem" }, { key: "status", label: "Status" }, { key: "category", label: "Categoria" }, { key: "topic", label: "Tópico" },
+    { key: "note", label: "Texto extra" }, { key: "details", label: "Botão \"Ver detalhes\"" }] },
+  notes: { title: "Notas", fields: [
+    { key: "image", label: "Imagem" }, { key: "content", label: "Texto da nota" }, { key: "note", label: "Texto extra" },
+    { key: "area", label: "Área" }, { key: "topic", label: "Tópico" }, { key: "link", label: "Botão \"Abrir link\"" }] },
+  apps: { title: "Meus Apps", fields: [{ key: "topic", label: "Tópico" }, { key: "note", label: "Texto extra" }] },
+  vision: { title: "Vision Board", fields: [{ key: "topic", label: "Tópico" }, { key: "note", label: "Texto extra" }] },
+};
+function cardFieldShown(tab, key) {
+  const value = ACTIVE_SETTINGS.cardFields?.[tab]?.[key];
+  return value === undefined ? true : !!value;
+}
+
+// Ícone de paleta, sem texto, ao lado do botão de adicionar.
+function CardFieldsButton({ onClick }) {
+  return (
+    <button type="button" className="cr-btn cr-card-fields-btn" title="Personalizar card" aria-label="Personalizar card" onClick={onClick}>
+      <Palette size={14} />
+    </button>
+  );
+}
+
+function CardFieldsTabButton({ tab }) {
+  const ctx = useContext(ListsContext);
+  return <CardFieldsButton onClick={() => ctx.openCardFields && ctx.openCardFields(tab)} />;
+}
+
+function TabCardFieldsModal({ tab, settings, setSettings, onClose }) {
+  const config = TAB_CARD_FIELDS[tab];
+  const current = settings.cardFields?.[tab] || {};
+  const shown = (key) => (current[key] === undefined ? true : !!current[key]);
+  const setAll = (values) => setSettings({ ...settings, cardFields: { ...(settings.cardFields || {}), [tab]: values } });
+  return (
+    <Modal size="small" title={`Personalizar card · ${config.title}`} onClose={onClose}>
+      <p className="cr-sub" style={{ marginTop: 0 }}>Marque o que aparece nos cards desta aba. O que ficar desmarcado continua salvo e aparece ao abrir o item.</p>
+      {config.fields.map((field) => (
+        <label key={field.key} className="cr-row" style={{ cursor: "pointer", marginBottom: 6, flexWrap: "nowrap" }}>
+          <input type="checkbox" checked={shown(field.key)} onChange={() => setAll({ ...current, [field.key]: !shown(field.key) })} />
+          <span style={{ fontSize: 14 }}>{field.label}</span>
+        </label>
+      ))}
+      <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 14 }}>
+        <button className="cr-btn" onClick={() => setAll({})}>Mostrar tudo</button>
+        <button className="cr-btn primary" onClick={onClose}>Concluir</button>
+      </div>
+    </Modal>
+  );
 }
 
 function CardPersonalizationButton({ item, onSave, hasImage = false, imageSrc = item.image }) {
@@ -1208,12 +1267,34 @@ const DEFAULT_WIDGETS = [
   { id: "financeCategory", label: "Gastos por categoria", visible: true },
   { id: "wheelOfLife", label: "Roda da Vida", visible: true },
   { id: "financeChart", label: "Gráfico de Finanças", visible: true },
+  { id: "training", label: "Treino da semana", visible: true },
   { id: "habits", label: "Hábitos de hoje", visible: false },
   { id: "distribution", label: "Distribuição por área", visible: false },
 ];
 
 // Garante que widgets novos criados em atualizações futuras apareçam também
 // para quem já tinha uma lista de widgets salva antes deles existirem.
+// Ordem pedida (7ª rodada): os blocos citados ocupam, nesta sequência, os lugares que já eram deles,
+// e "Metas ativas" vai para o fim. Os demais blocos ficam exatamente onde estavam.
+const DASHBOARD_ORDER_V7 = ["weekCalendar", "focus", "upcoming", "training", "wheelOfLife", "financeCategory", "financeChart", "goals"];
+function applyDashboardOrderV7(list) {
+  const byId = new Map(list.map((w) => [w.id, w]));
+  const wanted = DASHBOARD_ORDER_V7.filter((id) => byId.has(id));
+  const rest = list.filter((w) => !wanted.includes(w.id));
+  // lugares dos citados (menos o de Metas, que vai para o fim)
+  const slots = list.map((w, i) => (wanted.includes(w.id) ? i : -1)).filter((i) => i >= 0);
+  const result = [];
+  let r = 0; let k = 0;
+  for (let i = 0; i < list.length; i += 1) {
+    if (slots.includes(i) && k < wanted.length - (byId.has("goals") ? 1 : 0)) { result.push(byId.get(wanted[k])); k += 1; }
+    else if (!slots.includes(i) && r < rest.length) { result.push(rest[r]); r += 1; }
+  }
+  while (r < rest.length) { result.push(rest[r]); r += 1; }
+  while (k < wanted.length - (byId.has("goals") ? 1 : 0)) { result.push(byId.get(wanted[k])); k += 1; }
+  if (byId.has("goals")) result.push(byId.get("goals"));
+  return result;
+}
+
 function reconcileWidgets(saved) {
   const list = (saved && saved.length ? saved.filter((widget) => widget.id !== "agenda") : DEFAULT_WIDGETS)
     .map((widget) => widget.id === "musicPlayer"
@@ -1468,6 +1549,20 @@ const GlobalStyle = () => (
     .cr-missing-finance { margin: 8px 0 0; padding: 6px 10px; border: 1px dashed #E8C9A0; border-radius: 12px; background: #FFFBF3; }
     .cr-missing-finance > .cr-btn { color: #96631C; padding: 4px 6px; }
     .cr-proc-finance-summary { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); display: grid; gap: 4px; }
+    .cr-add-row { gap: 8px; flex-wrap: nowrap; }
+    .cr-sections-edit { padding: 6px 9px; }
+    .cr-sections-editor { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+    .cr-sections-editor-row { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+    .cr-sections-editor-row .cr-input { flex: 1; min-width: 0; }
+    .cr-noreturn-toggle { font-size: 12.5px; color: var(--ink-soft); padding: 2px 6px; }
+    .cr-noreturn-box { display: grid; gap: 2px; margin: 6px 0; padding: 8px 10px; border-radius: 10px; background: #F6F1EA; font-size: 12.5px; color: var(--ink-soft); }
+    .cr-noreturn-box strong { color: #A1493C; font-size: 12px; }
+    .cr-noreturn-field { margin: 10px 0 4px; font-size: 12.5px; color: var(--ink-soft); opacity: 0.85; }
+    .cr-proc-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 3px 4px; border-radius: 8px; }
+    .cr-proc-pick.is-elsewhere { background: #FBF6EE; }
+    .cr-proc-pick-note { border: 0; background: transparent; padding: 0 2px; font: inherit; font-size: 11.5px; color: #96631C; cursor: pointer; text-decoration: underline dotted; }
+    .cr-proc-pick-list { flex-basis: 100%; font-size: 11.5px; color: var(--ink-soft); padding-left: 24px; }
+    .cr-card-fields-btn { padding: 8px 11px; justify-content: center; }
     .cr-finance-register { margin: 4px 0 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #FBF8F4; }
     .cr-place-picker { display: grid; gap: 4px; max-height: 240px; overflow-y: auto; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
     .cr-place-option { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 2px 4px; border-radius: 8px; }
@@ -1550,6 +1645,12 @@ const GlobalStyle = () => (
     .cr-quickbox-track { height: 6px; margin-top: 12px; border-radius: 999px; background: #EFE8DE; overflow: hidden; }
     .cr-quickbox-track > div { height: 100%; border-radius: 999px; transition: width 0.3s; }
     /* Treino semanal */
+    .cr-training-widget { cursor: pointer; }
+    .cr-training-widget .cr-card { cursor: default; }
+    .cr-training-day { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-top: 1px solid var(--line); }
+    .cr-training-day:first-of-type { border-top: 0; }
+    .cr-training-day-label { flex: 0 0 56px; font-size: 12px; font-weight: 700; color: var(--ink-soft); padding-top: 3px; }
+    .cr-training-day-label.is-today { color: #8F1111; }
     .cr-training { display: grid; gap: 16px; margin-top: 14px; min-width: 0; }
     .cr-training-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; align-items: start; min-width: 0; }
     .cr-streak-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
@@ -2114,7 +2215,7 @@ function useToday() {
   return today;
 }
 
-function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev, gcal, setGcal, setTasks, setHabits, setSettings, goTo, onOrigin, accounts, cards }) {
+function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev, gcal, setGcal, setTasks, setHabits, setSettings, goTo, onOrigin, accounts, cards, routines = [], setRoutines, fitness, setFitness, onOpenTraining }) {
   const [financeDetail, setFinanceDetail] = useState(null);
   const today = todayStr();
   const now = new Date();
@@ -2357,6 +2458,10 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
             </div>
           </section>
         );
+      case "training":
+        return fitness && setFitness ? (
+          <TrainingWeekWidget key="training" routines={routines} setRoutines={setRoutines} fitness={fitness} setFitness={setFitness} onOpen={onOpenTraining} />
+        ) : null;
       case "goals":
         return (
           <div className="cr-card" key="goals" style={{ marginBottom: 16 }}>
@@ -2713,7 +2818,10 @@ function GoalsView({ goals, setGoals, areas }) {
           <h1 className="cr-h1 cr-serif">Metas</h1>
           <p className="cr-sub">Objetivos de curto, médio e longo prazo.</p>
         </div>
-        <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Nova meta</button>
+        <div className="cr-row cr-add-row">
+          <CardFieldsTabButton tab="goals" />
+          <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Nova meta</button>
+        </div>
       </div>
       {(() => {
         const gm = goalsMood(goals);
@@ -2780,29 +2888,30 @@ function GoalCard({ g, areas, onView, onEdit, onRemove, onCustomize, dimmed }) {
     <div className={`cr-card ${personalizedCardClass(g)}`} role="button" tabIndex={0} onClick={onView}
       onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onView(); } }}
       style={{ cursor: "pointer", ...(dimmed ? { opacity: 0.75 } : {}), ...personalizedCardStyle(g) }}>
-      {g.image ? (
+      {cardFieldShown("goals", "image") && (g.image ? (
         <CardImage item={g} src={g.image} style={{ borderRadius: 10, marginBottom: 8 }} />
       ) : (
         <CardImagePlaceholder label="Sem imagem" />
-      )}
+      ))}
       <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{g.name}</h3>
         <div className="cr-card-heading-actions">
-          <CardPersonalizationButton item={g} onSave={onCustomize} hasImage />
           <button className="cr-btn ghost" aria-label="Editar meta" title="Editar" onClick={(event) => { event.stopPropagation(); onEdit(); }}><Pencil size={14} /></button>
           <button className="cr-btn ghost danger" aria-label="Excluir meta" title="Excluir" onClick={(event) => { event.stopPropagation(); onRemove(); }}><Trash2 size={14} /></button>
         </div>
       </div>
       <div className="cr-row" style={{ margin: "8px 0" }}>
-        <AreaBadge area={g.area} areas={areas} />
-        <span className="cr-chip">{listName("goalStatus", g.status)}</span>
-        <CardTopicChip item={g} />
-        {g.deadline && <span className="cr-chip">até {fmtDateShort(g.deadline)}</span>}
+        {cardFieldShown("goals", "area") && <AreaBadge area={g.area} areas={areas} />}
+        {cardFieldShown("goals", "status") && <span className="cr-chip">{listName("goalStatus", g.status)}</span>}
+        {cardFieldShown("goals", "topic") && <CardTopicChip item={g} />}
+        {cardFieldShown("goals", "deadline") && g.deadline && <span className="cr-chip">até {fmtDateShort(g.deadline)}</span>}
       </div>
-      <CardExtraText item={g} />
-      <div className="cr-progress-track"><div className="cr-progress-fill" style={{ width: `${g.progress}%`, background: progressColor(g.progress) }} /></div>
-      <p className="cr-sub" style={{ marginTop: 6 }}>{g.progress}% concluído</p>
-      <p className="cr-sub" style={{ marginTop: 6 }}>Abrir detalhes da meta</p>
+      {cardFieldShown("goals", "note") && <CardExtraText item={g} />}
+      {cardFieldShown("goals", "progress") && <>
+        <div className="cr-progress-track"><div className="cr-progress-fill" style={{ width: `${g.progress}%`, background: progressColor(g.progress) }} /></div>
+        <p className="cr-sub" style={{ marginTop: 6 }}>{g.progress}% concluído</p>
+      </>}
+      {cardFieldShown("goals", "details") && <p className="cr-sub" style={{ marginTop: 6 }}>Abrir detalhes da meta</p>}
     </div>
   );
 }
@@ -5311,27 +5420,29 @@ function NotesView({ notes, setNotes, areas }) {
     <div>
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <div><h1 className="cr-h1 cr-serif">Notas</h1><p className="cr-sub">Seu segundo cérebro pessoal.</p></div>
-        <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Nova nota</button>
+        <div className="cr-row cr-add-row">
+          <CardFieldsTabButton tab="notes" />
+          <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Nova nota</button>
+        </div>
       </div>
       <input className="cr-input" style={{ maxWidth: 260, margin: "14px 0" }} placeholder="Buscar notas…" value={query} onChange={(e) => setQuery(e.target.value)} />
       <div className="cr-grid cr-grid-3">
         {filtered.length === 0 && <p className="cr-empty">Nenhuma nota encontrada.</p>}
         {filtered.map((n) => (
           <div className={`cr-card ${personalizedCardClass(n)}`} key={n.id} style={personalizedCardStyle(n)}>
-            {n.image && <CardImage item={n} src={n.image} alt="" style={{ borderRadius: 10, marginBottom: 8 }} />}
+            {cardFieldShown("notes", "image") && n.image && <CardImage item={n} src={n.image} alt="" style={{ borderRadius: 10, marginBottom: 8 }} />}
             <div className="cr-row cr-card-heading">
               <h3 style={{ margin: 0, fontSize: 15 }} className="cr-serif">{n.title}</h3>
               <div className="cr-card-heading-actions">
-                <CardPersonalizationButton item={n} onSave={(patch) => save({ ...n, ...patch })} />
                 <button className="cr-btn ghost" aria-label="Editar nota" title="Editar" onClick={() => setEditing(n)}><Pencil size={13} /></button>
                 <button className="cr-btn ghost danger" aria-label="Excluir nota" title="Excluir" onClick={() => remove(n.id)}><Trash2 size={13} /></button>
               </div>
             </div>
-            <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "8px 0" }}>{n.content}</p>
-            <CardExtraText item={n} />
+            {cardFieldShown("notes", "content") && <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "8px 0" }}>{n.content}</p>}
+            {cardFieldShown("notes", "note") && <CardExtraText item={n} />}
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
-              <div className="cr-row"><AreaBadge area={n.area} areas={areas} /><CardTopicChip item={n} /></div>
-              {n.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(n.link)}><Link2 size={12} /> Abrir link</button>}
+              <div className="cr-row">{cardFieldShown("notes", "area") && <AreaBadge area={n.area} areas={areas} />}{cardFieldShown("notes", "topic") && <CardTopicChip item={n} />}</div>
+              {cardFieldShown("notes", "link") && n.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(n.link)}><Link2 size={12} /> Abrir link</button>}
             </div>
           </div>
         ))}
@@ -5390,7 +5501,10 @@ function AppsView({ apps, setApps }) {
     <div>
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <div><h1 className="cr-h1 cr-serif">Meus Apps</h1><p className="cr-sub">Atalhos para o que você mais usa.</p></div>
-        <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo atalho</button>
+        <div className="cr-row cr-add-row">
+          <CardFieldsTabButton tab="apps" />
+          <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo atalho</button>
+        </div>
       </div>
       <div className="cr-grid cr-grid-4" style={{ marginTop: 16 }}>
         {apps.map((a) => {
@@ -5410,10 +5524,9 @@ function AppsView({ apps, setApps }) {
               </div>
               <div style={{ fontSize: 13.5, marginTop: 8 }}>{a.name}</div>
             </button>
-            <CardTopicChip item={a} />
-            <CardExtraText item={a} />
+            {cardFieldShown("apps", "topic") && <CardTopicChip item={a} />}
+            {cardFieldShown("apps", "note") && <CardExtraText item={a} />}
             <div className="cr-row" style={{ justifyContent: "center", marginTop: 8 }}>
-              <CardPersonalizationButton item={a} onSave={(patch) => save({ ...a, ...patch })} />
               <button className="cr-btn ghost" onClick={() => setEditing(a)}><Pencil size={13} /></button>
               <button className="cr-btn ghost danger" onClick={() => remove(a.id)}><Trash2 size={13} /></button>
             </div>
@@ -6969,10 +7082,10 @@ function isWorkoutRoutine(r) {
   return routineCategoryId(r) === "treino" || !!(workoutWords && workoutWords.test(r.name || ""));
 }
 
-function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal, fitness, setFitness, fitnessMedia, setFitnessMedia }) {
+function RoutinesView({ routines, setRoutines, embedded, gcal, setGcal, fitness, setFitness, fitnessMedia, setFitnessMedia, initialView }) {
   const ctx = useContext(ListsContext);
   const [editing, setEditing] = useState(null);
-  const [view, setView] = useState("calendario");
+  const [view, setView] = useState(initialView || "calendario");
   const [filterCategory, setFilterCategory] = useState("todas");
   const [confirmDel, setConfirmDel] = useState(null);
   const [dayOpen, setDayOpen] = useState(null);
@@ -7167,7 +7280,7 @@ function PlanningTracker({ tasks, setTasks, routines }) {
   );
 }
 
-function PlanningHub({ tasks, setTasks, routines, setRoutines, areas, initial, gcal, setGcal, fitness, setFitness, fitnessMedia, setFitnessMedia }) {
+function PlanningHub({ tasks, setTasks, routines, setRoutines, areas, initial, gcal, setGcal, fitness, setFitness, fitnessMedia, setFitnessMedia, routinesView }) {
   const [section, setSection] = useState(initial || "tarefas");
   return (
     <div>
@@ -7181,8 +7294,8 @@ function PlanningHub({ tasks, setTasks, routines, setRoutines, areas, initial, g
         <button className={`cr-tabbtn ${section === "acompanhamento" ? "active" : ""}`} onClick={() => setSection("acompanhamento")}>Acompanhamento</button>
       </div>
       {section === "tarefas" && <TasksView embedded tasks={tasks} setTasks={setTasks} areas={areas} />}
-      {section === "rotinas" && <RoutinesView embedded routines={routines} setRoutines={setRoutines} gcal={gcal} setGcal={setGcal}
-        fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} />}
+      {section === "rotinas" && <RoutinesView key={routinesView || "rotinas"} embedded routines={routines} setRoutines={setRoutines} gcal={gcal} setGcal={setGcal}
+        fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} initialView={routinesView} />}
       {section === "acompanhamento" && <PlanningTracker tasks={tasks} setTasks={setTasks} routines={routines} />}
     </div>
   );
@@ -7946,6 +8059,70 @@ function FitnessGoalsSection({ fitness, setFitness }) {
   );
 }
 
+// Card do Dashboard: o mesmo contador/mensagem do Treino semanal e os treinos planejados da semana.
+function TrainingWeekWidget({ routines, setRoutines, fitness, setFitness, onOpen }) {
+  const today = useToday();
+  const weekStart = weekStartOf(today);
+  const workoutSteps = [];
+  routines.forEach((r) => (r.steps || []).forEach((step) => {
+    if (isWorkoutRoutine(r) || stepCategoryId(step) === "treino") workoutSteps.push({ routine: r, step });
+  }));
+  const days = WEEKDAY_LABELS.map((label, i) => {
+    const date = shiftDays(weekStart, i);
+    return { label, date, items: workoutSteps.filter(({ step }) => stepDays(step).includes(i)) };
+  }).filter((day) => day.items.length);
+  // mesmo "feito" da rotina: marcar aqui aparece no Treino semanal e no calendário
+  const toggle = (routine, stepId, date) => setRoutines && setRoutines(routines.map((r) => {
+    if (r.id !== routine.id) return r;
+    return { ...r, steps: r.steps.map((s) => {
+      if (s.id !== stepId) return s;
+      const log = { ...(s.log || {}) };
+      if (log[date]) delete log[date]; else log[date] = true;
+      return { ...s, log };
+    }) };
+  }));
+  const openFromCard = (event) => {
+    if (event.target.closest("button, input, label, .cr-checkbox, a")) return;
+    if (onOpen) onOpen();
+  };
+  return (
+    <div className="cr-training-widget" onClick={openFromCard} role="group" aria-label="Treino da semana">
+      <div className="cr-row" style={{ justifyContent: "space-between", margin: "0 0 8px" }}>
+        <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}><Dumbbell size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />Treino da semana</h3>
+        <button type="button" className="cr-btn ghost" onClick={() => onOpen && onOpen()}>ver tudo</button>
+      </div>
+      <WeeklyStreakCard fitness={fitness} setFitness={setFitness} />
+      <div className="cr-card" style={{ marginTop: 10 }}>
+        <p className="cr-label" style={{ marginTop: 0 }}>Treinos planejados da semana</p>
+        {days.length === 0 && <p className="cr-empty" style={{ margin: 0 }}>Nenhum treino planejado. Crie uma rotina com a categoria Treino.</p>}
+        {days.map((day) => (
+          <div key={day.date} className="cr-training-day">
+            <span className={`cr-training-day-label ${day.date === today ? "is-today" : ""}`}>{day.label} {day.date.slice(8)}</span>
+            <div style={{ display: "grid", gap: 2, flex: 1, minWidth: 0 }}>
+              {day.items.map(({ routine, step }) => {
+                const done = !!step.log?.[day.date];
+                return (
+                  <div key={routine.id + step.id} className="cr-row" style={{ gap: 8, flexWrap: "nowrap", minWidth: 0 }}>
+                    <div className={`cr-checkbox ${done ? "checked" : ""}`} role="checkbox" aria-checked={done} tabIndex={0}
+                      aria-label={`${stepLabel(step)}: ${done ? "feito" : "marcar como feito"}`}
+                      onClick={() => toggle(routine, step.id, day.date)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(routine, step.id, day.date); } }}>
+                      {done && <Check size={13} />}
+                    </div>
+                    <span style={{ fontSize: 13.5, textDecoration: done ? "line-through" : "none", opacity: done ? 0.7 : 1, overflowWrap: "anywhere" }}>
+                      {stepLabel(step)}{stepRangeLabel(step) ? <span className="cr-sub" style={{ margin: 0 }}> · {stepRangeLabel(step)}</span> : null}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Aba "Treino semanal" dentro de Planejamento > Rotinas.
 function WeeklyTrainingView({ routines, fitness, setFitness, fitnessMedia, setFitnessMedia, onOpenDay, onToggle, onEdit, onDelete, showDoneSteps, setShowDoneSteps }) {
   const workoutRoutines = routines.filter(isWorkoutRoutine);
@@ -8545,7 +8722,16 @@ function BeautyRemoveModal({ item, linkedCount, onConfirm, onCancel }) {
 }
 
 // Gastos realizados de um procedimento: histórico de realizações ou, sem histórico, a última realização.
-function procedureSpendRecords(b) {
+// Realizações (valores já pagos) de um procedimento. Com vínculo em Finanças, vêm dos lançamentos pagos
+// (o dado financeiro é sempre o lançamento); sem vínculo, do histórico ou da última realização.
+function procedureSpendRecords(b, finance = []) {
+  if (b.financeLink?.key) {
+    const linked = (finance || []).filter((entry) => financeLinkKey(entry) === b.financeLink.key);
+    if (linked.length) {
+      return linked.filter((entry) => entry.status === "pago" && entry.date)
+        .map((entry) => ({ date: entry.date, amount: Number(entry.amount) || 0 }));
+    }
+  }
   const history = Array.isArray(b.history) ? b.history : [];
   if (history.length) return history.filter((entry) => entry.date).map((entry) => ({ date: entry.date, amount: Number(entry.cost) || 0 }));
   return b.dateDone ? [{ date: b.dateDone, amount: Number(b.cost) || 0 }] : [];
@@ -8580,7 +8766,7 @@ function RankingBars({ items, format }) {
   );
 }
 
-function ProcedureAnalysis({ procedures, onOpen }) {
+function ProcedureAnalysis({ procedures, onOpen, finance = [] }) {
   const today = useToday();
   const [period, setPeriod] = useState("ano");
   const [category, setCategory] = useState("todas");
@@ -8603,7 +8789,7 @@ function ProcedureAnalysis({ procedures, onOpen }) {
     .filter((item) => item.value > 0).sort((a, b) => b.value - a.value).slice(0, 8);
   const onlyOnce = list.filter((b) => procedureDoneDates(b, today).length === 1);
 
-  const records = list.flatMap((b) => procedureSpendRecords(b).map((r) => ({ ...r, b })));
+  const records = list.flatMap((b) => procedureSpendRecords(b, finance).map((r) => ({ ...r, b })));
   const sumIn = (pred) => records.filter((r) => pred(r.date)).reduce((t, r) => t + r.amount, 0);
   const monthTotal = sumIn((d) => d.slice(0, 7) === today.slice(0, 7));
   const yearTotal = sumIn((d) => d.slice(0, 4) === today.slice(0, 4));
@@ -8796,7 +8982,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
     notify(`"${source.name}" foi mesclado em "${target.name}".`);
   };
   const placeTools = {
-    usage: (id) => beauty.filter((b) => !b.archived && b.placeId === id),
+    usage: (id) => beauty.filter((b) => !b.archived && placeIdsOf(b).includes(id)),
     add: (name) => {
       const place = { id: uid(), name, address: "", instagram: "", site: "", booking: "", professional: "", notes: "", rating: 0 };
       setPlaces([...places, place]);
@@ -8875,13 +9061,12 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
   ].filter(Boolean))).sort((a, b) => b.localeCompare(a));
   const inPeriod = (date) => !!date && date.slice(0, 4) === financeYear && (financeMonth === "todos" || date.slice(5, 7) === financeMonth);
   const allRealizedRecords = procedures.flatMap((procedure) => {
-    const history = Array.isArray(procedure.history) ? procedure.history : [];
-    const meta = { name: procedure.name, category: procedure.category || "" };
-    if (history.length) return history.filter((entry) => inPeriod(entry.date)).map((entry) => ({ date: entry.date, amount: Number(entry.cost) || 0, ...meta }));
-    return procedure.dateDone && inPeriod(procedure.dateDone)
-      ? [{ date: procedure.dateDone, amount: Number(procedure.cost) || 0, ...meta }]
-      : [];
+    const meta = { name: procedure.name, category: procedure.category || "", id: procedure.id };
+    return procedureSpendRecords(procedure, finance).filter((entry) => inPeriod(entry.date)).map((entry) => ({ ...entry, ...meta }));
   });
+  // Procedimentos com valor que não aparecem em nenhuma realização (nada é alterado sozinho)
+  const withoutRealization = procedures.filter((procedure) => procedureTotal(procedure) > 0
+    && procedureSpendRecords(procedure, finance).length === 0 && inferProcStatus(procedure) === "jafiz");
   const inFinanceCategory = (cat) => financeCategory === "todas" || (financeCategory === "" ? !cat : cat === financeCategory);
   const realizedRecords = section === "financeiro" ? allRealizedRecords.filter((entry) => inFinanceCategory(entry.category)) : allRealizedRecords;
   const realizedTotal = realizedRecords.reduce((sum, entry) => sum + entry.amount, 0);
@@ -8945,9 +9130,11 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
         <div><h1 className="cr-h1 cr-serif">Procedimentos Estéticos</h1><p className="cr-sub">{fmtBRL(realizedTotal)} realizados · {fmtBRL(plannedTotal)} planejados no período selecionado.</p></div>
         {section === "procedimentos" && (
           <div className="cr-row" style={{ flexWrap: "wrap" }}>
-            <button className="cr-btn ghost" title="Personalizar" aria-label="Personalizar" onClick={() => setCustomize(true)}><Palette size={14} /></button>
             <button className="cr-btn" onClick={() => ctx.openManager("procStatus")}><Plus size={14} /> Novo título</button>
-            <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo procedimento</button>
+            <div className="cr-row cr-add-row">
+              <CardFieldsButton onClick={() => setCustomize(true)} />
+              <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo procedimento</button>
+            </div>
           </div>
         )}
       </div>
@@ -8985,7 +9172,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
         <button className={`cr-tabbtn ${section === "financeiro" ? "active" : ""}`} onClick={() => setSection("financeiro")}>Financeiro</button>
         <button className={`cr-tabbtn ${section === "analises" ? "active" : ""}`} onClick={() => setSection("analises")}>Análises</button>
       </div>
-      {section === "analises" && <ProcedureAnalysis procedures={procedures} onOpen={(b) => setEditing(originalOf(b))} />}
+      {section === "analises" && <ProcedureAnalysis procedures={procedures} finance={finance || []} onOpen={(b) => setEditing(originalOf(b))} />}
 
       {section === "lugares" && <PlacesPanel places={places} setPlaces={setPlaces} beauty={beauty} setBeauty={setBeauty} />}
       {section === "financeiro" && (
@@ -9025,6 +9212,20 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
           <div className="cr-card">
             <h3 className="cr-serif" style={{ marginTop: 0 }}>Realizações</h3>
             {realizedRecords.length === 0 && <p className="cr-empty">Nenhuma realização cadastrada nesse período.</p>}
+            {withoutRealization.length > 0 && (
+              <div className="cr-missing-finance" style={{ marginTop: 10 }}>
+                <p className="cr-sub" style={{ margin: "0 0 4px", fontSize: 12.5, color: "#96631C" }}>
+                  {withoutRealization.length === 1 ? "1 procedimento marcado como \"Já fiz\" tem valor, mas nenhuma realização registrada" : `${withoutRealization.length} procedimentos marcados como "Já fiz" têm valor, mas nenhuma realização registrada`} (sem lançamento pago em Finanças, sem histórico e sem data da última realização). Nada foi alterado:
+                </p>
+                {withoutRealization.map((b) => (
+                  <button key={b.id} type="button" className="cr-detail-row" onClick={() => setEditing(originalOf(b) || b)}>
+                    <span className="cr-detail-desc"><strong>{b.name || "Sem nome"}</strong>
+                      <span>{b.financeLink ? "lançamento em Finanças ainda não está pago" : "sem lançamento em Finanças"}</span></span>
+                    <span className="cr-detail-amount">{fmtBRL(procedureTotal(b))}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {realizedRecords.map((entry, index) => (
               <div className="cr-list-row" key={`${entry.date}-${index}`}><span className="cr-chip">{fmtDateShort(entry.date)}</span><span className="cr-list-title" style={{ flex: 1 }}>{entry.name}</span>{entry.category && <span className="cr-chip">{listName("procCategory", entry.category)}</span>}<strong>{fmtBRL(entry.amount)}</strong></div>
             ))}
@@ -9184,7 +9385,6 @@ function BeautyCard({ b, on, onEdit, onRemove, onCustomize, onRegister, onRate }
         {on("image") && !b.image && (
           <button type="button" className="cr-btn ghost" aria-label="Adicionar imagem" title="Adicionar imagem" onClick={stop(onEdit)}><ImageIcon size={13} /></button>
         )}
-        <CardPersonalizationButton item={b} onSave={onCustomize} hasImage={!!b.image} />
         <button className="cr-btn ghost danger" aria-label="Excluir procedimento" title="Excluir" onClick={stop(onRemove)}><Trash2 size={13} /></button>
       </div>
       {chips.length > 0 && <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>{chips}<CardTopicChip item={b} /></div>}
@@ -9602,6 +9802,12 @@ function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, me
   );
 }
 
+// Lugares de um procedimento: o principal e os adicionais (mesmo procedimento feito em mais de um lugar).
+function placeIdsOf(b) {
+  return Array.from(new Set([b.placeId, ...(Array.isArray(b.extraPlaceIds) ? b.extraPlaceIds : [])].filter(Boolean)));
+}
+const procNameKey = (name) => String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+
 // Remove um lugar; procedimentos que o usavam ficam com o nome no campo Clínica ("keep") ou em branco ("blank").
 function removePlaceFrom(places, beauty, id, mode) {
   const place = places.find((p) => p.id === id);
@@ -9609,6 +9815,7 @@ function removePlaceFrom(places, beauty, id, mode) {
   return {
     places: places.filter((p) => p.id !== id),
     beauty: beauty.map((b) => {
+      if ((b.extraPlaceIds || []).includes(id)) b = { ...b, extraPlaceIds: b.extraPlaceIds.filter((x) => x !== id) };
       if (b.placeId !== id) return b;
       if (mode === "keep") return { ...b, placeId: "", clinic: b.clinic || name };
       return { ...b, placeId: "", clinic: (b.clinic || "").trim().toLowerCase() === name.toLowerCase() ? "" : b.clinic };
@@ -9668,7 +9875,7 @@ function PlacePicker({ places, value, onChange, tools }) {
         <div className={`cr-place-option ${!value ? "is-selected" : ""}`}>
           <label><input type="radio" name="place-pick" checked={!value} onChange={() => onChange("")} /> Nenhum local escolhido</label>
         </div>
-        {places.map((place) => (
+        {places.filter((place) => !place.noReturn || place.id === value).map((place) => (
           <div key={place.id} className={`cr-place-option ${value === place.id ? "is-selected" : ""}`}>
             {renaming?.id === place.id ? (
               <>
@@ -9708,25 +9915,40 @@ function PlacePicker({ places, value, onChange, tools }) {
   );
 }
 
-function PlacesPanel({ places, setPlaces, beauty, setBeauty }) {
+function PlacesPanel({ places: allPlaces, setPlaces: setAllPlaces, beauty, setBeauty }) {
   const [editing, setEditing] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
+  const [showNoReturn, setShowNoReturn] = useState(false);
+  // lugares marcados "Não quero voltar" saem da lista normal (continuam guardados)
+  const places = showNoReturn ? allPlaces.filter((p) => p.noReturn) : allPlaces.filter((p) => !p.noReturn);
+  const noReturnCount = allPlaces.filter((p) => p.noReturn).length;
+  const setPlaces = setAllPlaces;
 
   const savePlace = (data) => {
     const { procedureIds, ...place } = data;
-    setPlaces(upsertById(places, place));
+    setPlaces(upsertById(allPlaces, place));
     if (Array.isArray(procedureIds)) {
       let changed = false;
       const next = beauty.map((b) => {
-        if (procedureIds.includes(b.id) && b.placeId !== place.id) { changed = true; return { ...b, placeId: place.id }; }
-        if (!procedureIds.includes(b.id) && b.placeId === place.id) { changed = true; return { ...b, placeId: "" }; }
+        const has = placeIdsOf(b).includes(place.id);
+        const extras = Array.isArray(b.extraPlaceIds) ? b.extraPlaceIds : [];
+        if (procedureIds.includes(b.id) && !has) {
+          changed = true;
+          // já tem outro lugar: este entra como lugar adicional (o mesmo procedimento em mais de um lugar)
+          return b.placeId ? { ...b, extraPlaceIds: [...extras, place.id] } : { ...b, placeId: place.id };
+        }
+        if (!procedureIds.includes(b.id) && has) {
+          changed = true;
+          if (b.placeId === place.id) return { ...b, placeId: extras[0] || "", extraPlaceIds: extras.slice(1) };
+          return { ...b, extraPlaceIds: extras.filter((x) => x !== place.id) };
+        }
         return b;
       });
       if (changed) setBeauty(next);
     }
   };
   const removePlace = (id, mode) => {
-    const next = removePlaceFrom(places, beauty, id, mode);
+    const next = removePlaceFrom(allPlaces, beauty, id, mode);
     setPlaces(next.places);
     if (next.beauty.some((b, i) => b !== beauty[i])) setBeauty(next.beauty);
     setConfirmDel(null);
@@ -9738,10 +9960,17 @@ function PlacesPanel({ places, setPlaces, beauty, setBeauty }) {
         <p className="cr-sub" style={{ margin: 0 }}>Os locais e profissionais que você já conheceu ou quer conhecer.</p>
         <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo lugar</button>
       </div>
-      {places.length === 0 && <p className="cr-empty">Nenhum lugar cadastrado ainda. Clique em "Novo lugar" para começar.</p>}
+      {(noReturnCount > 0 || showNoReturn) && (
+        <div className="cr-row" style={{ margin: "-6px 0 12px" }}>
+          <button type="button" className="cr-btn ghost cr-noreturn-toggle" onClick={() => setShowNoReturn(!showNoReturn)}>
+            {showNoReturn ? "← Voltar para os lugares" : `Ver lugares que não quero voltar (${noReturnCount})`}
+          </button>
+        </div>
+      )}
+      {places.length === 0 && <p className="cr-empty">{showNoReturn ? "Nenhum lugar marcado." : "Nenhum lugar cadastrado ainda. Clique em \"Novo lugar\" para começar."}</p>}
       <div className="cr-grid cr-grid-3">
         {places.map((p) => {
-          const procs = beauty.filter((b) => !b.archived && (b.placeId === p.id || (!b.placeId && b.clinic && b.clinic.trim().toLowerCase() === (p.name || "").trim().toLowerCase())));
+          const procs = beauty.filter((b) => !b.archived && (placeIdsOf(b).includes(p.id) || (!b.placeId && b.clinic && b.clinic.trim().toLowerCase() === (p.name || "").trim().toLowerCase())));
           return (
             <div className="cr-card" key={p.id}>
               <div className="cr-row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -9753,6 +9982,14 @@ function PlacesPanel({ places, setPlaces, beauty, setBeauty }) {
               </div>
               {Number(p.rating) > 0 && (
                 <p style={{ margin: "4px 0", color: "#C9962E", letterSpacing: 2 }}>{"★".repeat(Number(p.rating))}<span style={{ color: "#D9D2C5" }}>{"★".repeat(5 - Number(p.rating))}</span></p>
+              )}
+              {p.noReturn && (
+                <div className="cr-noreturn-box">
+                  <strong>Não quero voltar</strong>
+                  {p.noReturnNote && <span>{p.noReturnNote}</span>}
+                  <button type="button" className="cr-btn ghost" style={{ padding: "2px 6px", minHeight: 0, justifySelf: "start" }}
+                    onClick={() => setPlaces(allPlaces.map((x) => (x.id === p.id ? { ...x, noReturn: false } : x)))}>Voltar a mostrar este lugar</button>
+                </div>
               )}
               {p.professional && <p className="cr-sub" style={{ margin: "4px 0" }}>Profissional: {p.professional}</p>}
               {p.address && (
@@ -9776,21 +10013,30 @@ function PlacesPanel({ places, setPlaces, beauty, setBeauty }) {
           );
         })}
       </div>
-      {editing && <PlaceModal item={editing === "new" ? null : editing} beauty={beauty} onSave={savePlace} onClose={() => setEditing(null)} />}
+      {editing && <PlaceModal item={editing === "new" ? null : editing} beauty={beauty} places={allPlaces} onSave={savePlace} onClose={() => setEditing(null)} />}
       {confirmDel && (
-        <PlaceRemoveModal place={confirmDel} usedBy={beauty.filter((b) => !b.archived && b.placeId === confirmDel.id)}
+        <PlaceRemoveModal place={confirmDel} usedBy={beauty.filter((b) => !b.archived && placeIdsOf(b).includes(confirmDel.id))}
           onConfirm={(mode) => removePlace(confirmDel.id, mode)} onCancel={() => setConfirmDel(null)} />
       )}
     </div>
   );
 }
 
-function PlaceModal({ item, beauty, onSave, onClose }) {
+function PlaceModal({ item, beauty, places = [], onSave, onClose }) {
+  const [openNote, setOpenNote] = useState(null);
   const [form, setForm] = useState(item
-    ? { ...item, procedureIds: beauty.filter((b) => b.placeId === item.id).map((b) => b.id) }
+    ? { ...item, procedureIds: beauty.filter((b) => placeIdsOf(b).includes(item.id)).map((b) => b.id) }
     : { name: "", address: "", instagram: "", site: "", booking: "", professional: "", notes: "", rating: 0, procedureIds: [] });
   // procedimentos excluídos ficam arquivados (por terem histórico): não aparecem mais na lista
   const activeProcedures = beauty.filter((b) => !b.archived);
+  // em quais OUTROS lugares o procedimento (ou outro card com o mesmo nome) já foi registrado
+  const otherPlacesOf = (b) => {
+    const ids = new Set();
+    activeProcedures.filter((x) => x.id === b.id || procNameKey(x.name) === procNameKey(b.name))
+      .forEach((x) => placeIdsOf(x).forEach((id) => ids.add(id)));
+    if (item?.id) ids.delete(item.id);
+    return [...ids].map((id) => places.find((p) => p.id === id)?.name).filter(Boolean);
+  };
   const autoStatus = useAutoSave(form, onSave);
   const toggleProc = (id) => {
     const has = form.procedureIds.includes(id);
@@ -9824,16 +10070,39 @@ function PlaceModal({ item, beauty, onSave, onClose }) {
       {activeProcedures.length > 0 && (
         <div className="cr-field"><label className="cr-label">Procedimentos feitos ou planejados aqui</label>
           <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 10, padding: 8 }}>
-            {activeProcedures.map((b) => (
-              <label key={b.id} className="cr-row" style={{ cursor: "pointer", marginBottom: 4 }}>
-                <input type="checkbox" checked={form.procedureIds.includes(b.id)} onChange={() => toggleProc(b.id)} />
-                <span style={{ fontSize: 13 }}>{b.name}</span>
-              </label>
-            ))}
+            {activeProcedures.map((b) => {
+              const others = otherPlacesOf(b);
+              return (
+                <div key={b.id} className={`cr-proc-pick ${others.length ? "is-elsewhere" : ""}`}>
+                  <label className="cr-row" style={{ cursor: "pointer", flexWrap: "nowrap", minWidth: 0 }}>
+                    <input type="checkbox" checked={form.procedureIds.includes(b.id)} onChange={() => toggleProc(b.id)} />
+                    <span style={{ fontSize: 13, overflowWrap: "anywhere" }}>{b.name}</span>
+                  </label>
+                  {others.length > 0 && (
+                    <button type="button" className="cr-proc-pick-note" title={`Já registrado em: ${others.join(", ")}`}
+                      aria-expanded={openNote === b.id} onClick={() => setOpenNote(openNote === b.id ? null : b.id)}>
+                      {others.length === 1 ? `já registrado em ${others[0]}` : `já em ${others.length} lugares`}
+                    </button>
+                  )}
+                  {openNote === b.id && <span className="cr-proc-pick-list">Já registrado em: {others.join(", ")}</span>}
+                </div>
+              );
+            })}
           </div></div>
       )}
       <div className="cr-field"><label className="cr-label">Observações</label>
         <textarea className="cr-textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
+      {/* opção discreta: tira o lugar da lista normal, sem apagar nada */}
+      <div className="cr-noreturn-field">
+        <label className="cr-row" style={{ cursor: "pointer", gap: 8, flexWrap: "nowrap" }}>
+          <input type="checkbox" checked={!!form.noReturn} onChange={(e) => setForm({ ...form, noReturn: e.target.checked })} style={{ minHeight: 0 }} />
+          <span>Não quero voltar</span>
+        </label>
+        {form.noReturn && (
+          <textarea className="cr-textarea" style={{ marginTop: 6, minHeight: 60 }} placeholder="Motivo (ex.: atendimento ruim, resultado ruim)"
+            value={form.noReturnNote || ""} onChange={(e) => setForm({ ...form, noReturnNote: e.target.value })} />
+        )}
+      </div>
       <AutoSaveFooter status={autoStatus} onClose={onClose} />
     </Modal>
   );
@@ -9861,7 +10130,10 @@ function VisionView({ vision, setVision }) {
     <div>
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <div><h1 className="cr-h1 cr-serif">Vision Board</h1><p className="cr-sub">Imagens e frases que representam onde você quer chegar. Clique numa imagem para ver em tela cheia.</p></div>
-        <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Adicionar imagem ou frase</button>
+        <div className="cr-row cr-add-row">
+          <CardFieldsTabButton tab="vision" />
+          <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Adicionar imagem ou frase</button>
+        </div>
       </div>
       {vision.length === 0 && <p className="cr-empty">Seu quadro de inspiração está vazio. Clique em "Adicionar imagem ou frase" para começar.</p>}
       <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 380px), 1fr))", gap: 20 }}>
@@ -9874,11 +10146,10 @@ function VisionView({ vision, setVision }) {
             {v.type === "quote" && (
               <p className="cr-serif" style={{ fontSize: 22, lineHeight: 1.35, fontStyle: "italic", margin: "18px 8px 22px", textAlign: "center" }}>"{v.content}"</p>
             )}
-            <CardExtraText item={v} />
+            {cardFieldShown("vision", "note") && <CardExtraText item={v} />}
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
-              <div className="cr-row"><span className="cr-chip">{v.category}</span><CardTopicChip item={v} /></div>
+              <div className="cr-row"><span className="cr-chip">{v.category}</span>{cardFieldShown("vision", "topic") && <CardTopicChip item={v} />}</div>
               <div className="cr-row" style={{ gap: 2 }}>
-                <CardPersonalizationButton item={v} onSave={(patch) => save({ ...v, ...patch })} hasImage={v.type === "image"} imageSrc={v.type === "image" ? v.content : ""} />
                 <button className="cr-btn ghost" disabled={i === 0} onClick={() => move(v.id, -1)}>↑</button>
                 <button className="cr-btn ghost" disabled={i === vision.length - 1} onClick={() => move(v.id, 1)}>↓</button>
                 <button className="cr-btn ghost" onClick={() => setEditing(v)}><Pencil size={13} /></button>
@@ -10181,14 +10452,21 @@ const DEFAULT_WISHLIST_SECTIONS = [
   { id: "comprinhas", name: "Comprinhas" },
 ];
 
-function wishlistSections(settings) {
+// Todas as seções na ordem salva (inclusive as padrão excluídas, marcadas como ocultas).
+function wishlistSectionsAll(settings) {
   const saved = Array.isArray(settings?.wishlistSections) ? settings.wishlistSections.filter((section) => section && section.id) : [];
-  const merged = DEFAULT_WISHLIST_SECTIONS.map((def) => ({ ...def, ...(saved.find((section) => section.id === def.id) || {}) }));
-  saved.forEach((section) => { if (!merged.some((entry) => entry.id === section.id)) merged.push(section); });
+  const merged = saved.map((section) => ({ ...(DEFAULT_WISHLIST_SECTIONS.find((def) => def.id === section.id) || {}), ...section }));
+  DEFAULT_WISHLIST_SECTIONS.forEach((def, index) => {
+    if (!merged.some((entry) => entry.id === def.id)) merged.splice(Math.min(index, merged.length), 0, { ...def });
+  });
   return merged.map((section) => ({
     ...section,
     name: String(section.name || "").trim() || DEFAULT_WISHLIST_SECTIONS.find((def) => def.id === section.id)?.name || "Seção",
   }));
+}
+
+function wishlistSections(settings) {
+  return wishlistSectionsAll(settings).filter((section) => !section.hidden);
 }
 
 // Itens antigos não têm "section": os marcados como essenciais vão para Meus essenciais, o resto para Minha Wishlist.
@@ -10208,6 +10486,7 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
   const [filtersBySection, setFiltersBySection] = useState({});
   const [customizingCards, setCustomizingCards] = useState(false);
   const [namingSection, setNamingSection] = useState(null); // { id?, name }
+  const [editingSections, setEditingSections] = useState(false);
   const [financeFilters, setFinanceFilters] = useState({ query: "", category: "todas", purchaseClass: "todas", month: "", year: "", section: "todas" });
   const wishStatuses = getList("wishStatus");
   const sections = wishlistSections(settings);
@@ -10287,16 +10566,16 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
   const saveSectionName = ({ id, name }) => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    const current = wishlistSections(settings);
+    const current = wishlistSectionsAll(settings);
     const next = id
       ? current.map((section) => section.id === id ? { ...section, name: trimmed } : section)
       : [...current, { id: `secao-${uid()}`, name: trimmed, custom: true }];
     setSettings({ ...settings, wishlistSections: next });
-    if (!id) setTab(next[next.length - 1].id);
+    if (!id) setTab(next.filter((section) => !section.hidden).at(-1).id);
     setNamingSection(null);
   };
   const deleteSection = (id) => {
-    setSettings({ ...settings, wishlistSections: wishlistSections(settings).filter((section) => section.id !== id) });
+    setSettings({ ...settings, wishlistSections: wishlistSectionsAll(settings).filter((section) => section.id !== id) });
     setTab("wishlist");
     setNamingSection(null);
   };
@@ -10414,23 +10693,37 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
         </div>
         {activeSection && (
           <div className="cr-row" style={{ flexWrap: "wrap" }}>
-            <button className="cr-btn ghost" title="Personalizar" aria-label="Personalizar" onClick={() => setCustomizingCards(true)}><Palette size={14} /></button>
-            <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
+            <div className="cr-row cr-add-row">
+              <CardFieldsButton onClick={() => setCustomizingCards(true)} />
+              <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="cr-tabbar cr-section-tabs" style={{ marginTop: 14 }}>
-        {sections.map((section) => (
-          <span key={section.id} className={`cr-section-tab ${tab === section.id ? "active" : ""}`}>
-            <button type="button" className="cr-section-tab-main" onClick={() => setTab(section.id)} aria-pressed={tab === section.id}>{section.name}</button>
-            <button type="button" className="cr-section-tab-edit" aria-label={`Renomear ${section.name}`} title="Renomear"
-              onClick={() => setNamingSection({ id: section.id, name: section.name, custom: !!section.custom })}><Pencil size={12} /></button>
-          </span>
-        ))}
-        <button type="button" className="cr-tabbtn" title="Criar nova seção" onClick={() => setNamingSection({ name: "" })}><Plus size={12} /> Nova seção</button>
-        <button className={`cr-tabbtn ${tab === "finance" ? "active" : ""}`} onClick={() => setTab("finance")}>Financeiro</button>
-      </div>
+      {editingSections ? (
+        <WishlistSectionsEditor sections={sections}
+          itemCount={(id) => withKind.filter((item) => item._section === id).length}
+          onDone={(edited) => {
+            // seções padrão excluídas ficam ocultas; seções criadas por você saem da lista. Os itens vão para Minha Wishlist.
+            const all = wishlistSectionsAll(settings);
+            const removedDefaults = all.filter((section) => !edited.some((e) => e.id === section.id) && (!section.custom || section.hidden))
+              .filter((section) => DEFAULT_WISHLIST_SECTIONS.some((def) => def.id === section.id))
+              .map((section) => ({ ...section, hidden: true }));
+            setSettings({ ...settings, wishlistSections: [...edited.map((section) => ({ ...section, hidden: false })), ...removedDefaults] });
+            if (!edited.some((section) => section.id === tab) && tab !== "finance") setTab("wishlist");
+            setEditingSections(false);
+          }} />
+      ) : (
+        <div className="cr-tabbar cr-section-tabs" style={{ marginTop: 14 }}>
+          {sections.map((section) => (
+            <button key={section.id} type="button" className={`cr-tabbtn ${tab === section.id ? "active" : ""}`} onClick={() => setTab(section.id)} aria-pressed={tab === section.id}>{section.name}</button>
+          ))}
+          <button className={`cr-tabbtn ${tab === "finance" ? "active" : ""}`} onClick={() => setTab("finance")}>Financeiro</button>
+          <button type="button" className="cr-tabbtn" title="Criar nova seção" aria-label="Nova seção" onClick={() => setNamingSection({ name: "" })}><Plus size={13} /></button>
+          <button type="button" className="cr-btn ghost cr-sections-edit" title="Editar seções" aria-label="Editar seções" onClick={() => setEditingSections(true)}><Pencil size={14} /></button>
+        </div>
+      )}
 
       {activeSection && restockDue.length > 0 && (
         <div className="cr-card" role="status" style={{ marginTop: 14, borderColor: "#E3B5AB", color: "#7A1712" }}>
@@ -10568,6 +10861,47 @@ function ShoppingView({ shopping, setShopping, settings, setSettings, originTarg
   );
 }
 
+// Modo de edição das seções da Wishlist: renomear, reordenar e excluir todas de uma vez; "Concluir" salva.
+function WishlistSectionsEditor({ sections, itemCount, onDone }) {
+  const [draft, setDraft] = useState(sections.map((section) => ({ ...section })));
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const move = (index, delta) => {
+    const target = index + delta;
+    if (target < 0 || target >= draft.length) return;
+    const next = [...draft];
+    [next[index], next[target]] = [next[target], next[index]];
+    setDraft(next);
+  };
+  const valid = draft.every((section) => section.name.trim());
+  return (
+    <div className="cr-sections-editor">
+      <p className="cr-sub" style={{ margin: "0 0 8px" }}>Renomeie, mude a ordem ou exclua seções. As mudanças valem ao tocar em Concluir.</p>
+      {draft.map((section, index) => (
+        <div key={section.id} className="cr-sections-editor-row">
+          <input className="cr-input" value={section.name} maxLength={40} aria-label={`Nome da seção ${index + 1}`}
+            onChange={(e) => setDraft(draft.map((x) => (x.id === section.id ? { ...x, name: e.target.value } : x)))} />
+          <button type="button" className="cr-btn ghost" aria-label="Mover para cima" title="Mover para cima" disabled={index === 0} onClick={() => move(index, -1)}><ChevronUp size={15} /></button>
+          <button type="button" className="cr-btn ghost" aria-label="Mover para baixo" title="Mover para baixo" disabled={index === draft.length - 1} onClick={() => move(index, 1)}><ChevronDown size={15} /></button>
+          <button type="button" className="cr-btn ghost danger" aria-label={`Excluir ${section.name}`}
+            title={section.id === "wishlist" ? "Minha Wishlist recebe os itens das seções excluídas e não pode ser excluída" : "Excluir seção"}
+            disabled={section.id === "wishlist"} onClick={() => setConfirmDelete(section)}><Trash2 size={14} /></button>
+        </div>
+      ))}
+      <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
+        <button type="button" className="cr-btn primary" disabled={!valid} onClick={() => onDone(draft.map((section) => ({ ...section, name: section.name.trim() })))}>Concluir</button>
+      </div>
+      {confirmDelete && (
+        <ConfirmModal title="Excluir seção" confirmLabel="Excluir"
+          message={itemCount(confirmDelete.id) > 0
+            ? `A seção "${confirmDelete.name}" tem ${itemCount(confirmDelete.id)} item(ns). Ao excluir, eles vão para Minha Wishlist (nada é apagado). Excluir mesmo assim?`
+            : `Excluir a seção "${confirmDelete.name}"? Ela está vazia.`}
+          onConfirm={() => { setDraft(draft.filter((x) => x.id !== confirmDelete.id)); setConfirmDelete(null); }}
+          onCancel={() => setConfirmDelete(null)} />
+      )}
+    </div>
+  );
+}
+
 function SectionNameModal({ section, itemCount, onSave, onDelete, onClose }) {
   const [name, setName] = useState(section.name || "");
   const isNew = !section.id;
@@ -10659,7 +10993,6 @@ function ShoppingCard({ s, settings, sectionId, onEdit, onRemove, onPurchase, on
       <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{s.name}</h3>
         <div className="cr-card-heading-actions">
-          <CardPersonalizationButton item={s} onSave={onCustomize} />
           <button className="cr-btn ghost" aria-label={`Editar ${s.name}`} title="Editar" onClick={onEdit}><Pencil size={13} /></button>
           <button className="cr-btn ghost danger" aria-label={`Excluir ${s.name}`} title="Excluir" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
@@ -10843,7 +11176,10 @@ function HobbiesView({ hobbies, setHobbies, originTarget, clearOriginTarget }) {
     <div>
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <div><h1 className="cr-h1 cr-serif">Hobbies</h1><p className="cr-sub">Suas atividades por prazer: o que você pratica e o que quer experimentar.</p></div>
-        <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo hobby</button>
+        <div className="cr-row cr-add-row">
+          <CardFieldsTabButton tab="hobbies" />
+          <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo hobby</button>
+        </div>
       </div>
 
       <div className="cr-row" style={{ margin: "14px 0", flexWrap: "wrap" }}>
@@ -10929,34 +11265,33 @@ function HobbiesView({ hobbies, setHobbies, originTarget, clearOriginTarget }) {
 function HobbyCard({ h, onView, onEdit, onRemove, onCustomize }) {
   return (
     <div className={`cr-card ${personalizedCardClass(h)}`} style={personalizedCardStyle(h)}>
-      {h.image ? <CardImage item={h} src={h.image} style={{ borderRadius: 10, marginBottom: 8 }} />
-        : <CardImagePlaceholder onClick={onEdit} />}
+      {cardFieldShown("hobbies", "image") && (h.image ? <CardImage item={h} src={h.image} style={{ borderRadius: 10, marginBottom: 8 }} />
+        : <CardImagePlaceholder onClick={onEdit} />)}
       <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>{h.name}</h3>
         <div className="cr-card-heading-actions">
-          <CardPersonalizationButton item={h} onSave={onCustomize} hasImage />
           <button className="cr-btn ghost" aria-label={`Editar ${h.name}`} title="Editar" onClick={onEdit}><Pencil size={13} /></button>
           <button className="cr-btn ghost danger" aria-label={`Excluir ${h.name}`} title="Excluir" onClick={onRemove}><Trash2 size={13} /></button>
         </div>
       </div>
       <div className="cr-row" style={{ margin: "6px 0", flexWrap: "wrap" }}>
-        <span className="cr-chip">{listName("hobbyStatus", h.status || "quero experimentar")}</span>
-        <CardTopicChip item={h} />
-        {h.frequency && <span className="cr-chip">{h.frequency}</span>}
-        {h.level && <span className="cr-chip">nível: {h.level}</span>}
+        {cardFieldShown("hobbies", "status") && <span className="cr-chip">{listName("hobbyStatus", h.status || "quero experimentar")}</span>}
+        {cardFieldShown("hobbies", "topic") && <CardTopicChip item={h} />}
+        {cardFieldShown("hobbies", "frequency") && h.frequency && <span className="cr-chip">{h.frequency}</span>}
+        {cardFieldShown("hobbies", "level") && h.level && <span className="cr-chip">nível: {h.level}</span>}
       </div>
-      <CardExtraText item={h} />
-      {typeof h.progress === "number" && (
+      {cardFieldShown("hobbies", "note") && <CardExtraText item={h} />}
+      {cardFieldShown("hobbies", "progress") && typeof h.progress === "number" && (
         <>
           <div className="cr-progress-track" style={{ marginTop: 6 }}><div className="cr-progress-fill" style={{ width: `${h.progress}%`, background: progressColor(h.progress) }} /></div>
           <p className="cr-sub" style={{ margin: "4px 0 0" }}>{h.progress}%</p>
         </>
       )}
       <div className="cr-row" style={{ justifyContent: "space-between", marginTop: 8 }}>
-        <span className="cr-sub" style={{ margin: 0 }}>{h.timeSpent ? `${h.timeSpent}h dedicadas` : ""}</span>
-        {h.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(h.link)}><Link2 size={12} /> Abrir link</button>}
+        <span className="cr-sub" style={{ margin: 0 }}>{cardFieldShown("hobbies", "time") && h.timeSpent ? `${h.timeSpent}h dedicadas` : ""}</span>
+        {cardFieldShown("hobbies", "link") && h.link && <button className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openExternalLink(h.link)}><Link2 size={12} /> Abrir link</button>}
       </div>
-      <button className="cr-btn ghost" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={onView}>Ver detalhes</button>
+      {cardFieldShown("hobbies", "details") && <button className="cr-btn ghost" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={onView}>Ver detalhes</button>}
     </div>
   );
 }
@@ -11119,7 +11454,7 @@ function SelfCareView({ selfcare, setSelfcare }) {
 
   const card = (s) => (
     <div className={`cr-card ${personalizedCardClass(s)}`} key={s.id} style={{ display: "flex", flexDirection: "column", ...personalizedCardStyle(s) }}>
-      {s.image ? (
+      {!cardFieldShown("selfcare", "image") ? null : s.image ? (
         <div style={{ marginBottom: 10 }}>
           <CardImage item={s} src={s.image} style={{ borderRadius: 10 }} />
           <div className="cr-row" style={{ gap: 4, marginTop: 4 }}>
@@ -11133,21 +11468,20 @@ function SelfCareView({ selfcare, setSelfcare }) {
       <div className="cr-row cr-card-heading">
         <h3 className="cr-serif" style={{ margin: 0, fontSize: 16 }}>{s.title}</h3>
         <div className="cr-card-heading-actions">
-          <CardPersonalizationButton item={s} onSave={(patch) => save({ ...(selfcare.find((item) => item.id === s.id) || s), ...patch })} hasImage />
           <button className="cr-btn ghost" aria-label={`Editar ${s.title}`} title="Editar" onClick={() => setEditing(s)}><Pencil size={13} /></button>
           <button className="cr-btn ghost danger" aria-label={`Excluir ${s.title}`} title="Excluir" onClick={() => remove(s.id)}><Trash2 size={13} /></button>
         </div>
       </div>
       <div className="cr-row" style={{ marginTop: 6, flexWrap: "wrap" }}>
-        {s._status && <span className="cr-chip" style={{ background: "var(--clay)", color: "#fff" }}>{listName("selfcareStatus", s._status)}</span>}
-        {s.category && <span className="cr-chip">{s.category}</span>}
-        <CardTopicChip item={s} />
+        {cardFieldShown("selfcare", "status") && s._status && <span className="cr-chip" style={{ background: "var(--clay)", color: "#fff" }}>{listName("selfcareStatus", s._status)}</span>}
+        {cardFieldShown("selfcare", "category") && s.category && <span className="cr-chip">{s.category}</span>}
+        {cardFieldShown("selfcare", "topic") && <CardTopicChip item={s} />}
       </div>
-      <CardExtraText item={s} />
+      {cardFieldShown("selfcare", "note") && <CardExtraText item={s} />}
       {(s.content || "").trim() ? (
         <div style={{ flex: 1, minHeight: 8 }} />
       ) : <div style={{ flex: 1, minHeight: 8 }} />}
-      <button className="cr-btn ghost" style={{ alignSelf: "flex-start" }} onClick={() => setViewing(s)}>Ver detalhes</button>
+      {cardFieldShown("selfcare", "details") && <button className="cr-btn ghost" style={{ alignSelf: "flex-start" }} onClick={() => setViewing(s)}>Ver detalhes</button>}
     </div>
   );
 
@@ -11155,7 +11489,10 @@ function SelfCareView({ selfcare, setSelfcare }) {
     <div>
       <div className="cr-row" style={{ justifyContent: "space-between" }}>
         <div><h1 className="cr-h1 cr-serif">Self-Care & Bem-estar</h1><p className="cr-sub">Relaxamento e bem-estar, separado de procedimentos estéticos.</p></div>
-        <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
+        <div className="cr-row cr-add-row">
+          <CardFieldsTabButton tab="selfcare" />
+          <button className="cr-btn primary" onClick={() => setEditing("new")}><Plus size={14} /> Novo item</button>
+        </div>
       </div>
       <FilterGroups groups={[{ key: "status", label: "Status", value: fStatus, onChange: setFStatus, onManage: () => ctx.openManager("selfcareStatus"), options }]} />
       {selfcare.length === 0 && <p className="cr-empty">Nada registrado ainda.</p>}
@@ -11498,6 +11835,10 @@ export default function App({ onSignOut }) {
     if (window.location.hash !== nextHash) window.history.pushState(null, "", nextHash);
   }, []);
   const [originTarget, setOriginTarget] = useState(null);
+  // Atalho do Dashboard para Planejamento > Rotina > Treino semanal
+  const [routinesView, setRoutinesView] = useState("");
+  const openTraining = useCallback(() => { setRoutinesView("treino"); setTab("routines"); }, [setTab]);
+  useEffect(() => { if (tab !== "routines" && routinesView) setRoutinesView(""); }, [tab, routinesView]);
   const clearOriginTarget = useCallback(() => setOriginTarget(null), []);
   const navigateToOrigin = useCallback((sourceRef) => {
     const sourceTabs = { shopping: "shopping", beauty: "beauty", hobbies: "hobbies", receiptSchedule: "finance", financeEdit: "finance" };
@@ -11635,8 +11976,11 @@ export default function App({ onSignOut }) {
         reconciled = reconciled.map((w) => (w.id === "habits" || w.id === "distribution") ? { ...w, visible: false } : w);
         bg(storageSet(DASHBOARD_LAYOUT_V2_FLAG_KEY, true));
       }
-      if (reconciled !== st.dashboardWidgets) {
-        finalSettings = { ...st, dashboardWidgets: reconciled };
+      if (!st.dashboardOrderV7) {
+        reconciled = applyDashboardOrderV7(reconciled);
+      }
+      if (reconciled !== st.dashboardWidgets || !st.dashboardOrderV7) {
+        finalSettings = { ...st, dashboardWidgets: reconciled, dashboardOrderV7: true };
         bg(storageSet(KEYS.settings, finalSettings));
       }
       // Atualiza pro novo tema de cores (vermelho/preto/off-white), só pra quem
@@ -11976,9 +12320,11 @@ export default function App({ onSignOut }) {
   deletedPages.forEach((id) => (hiddenKeys[id] || []).forEach((k) => { searchData[k] = []; }));
 
   const collectionsMap = { vision: [vision, setVision], apps: [apps, setApps], notes: [notes, setNotes], accounts: [accounts, setAccounts], personaldev: [personaldev, setPersonaldev], tasks: [tasks, setTasks], shopping: [shopping, setShopping], habits: [habits, setHabits], goals: [goals, setGoals], beauty: [beauty, setBeauty], selfcare: [selfcare, setSelfcare], hobbies: [hobbies, setHobbies], career: [career, setCareer], study: [study, setStudy], finance: [finance, setFinance] };
-  const listsCtx = { openManager: (key, target) => setManager({ kind: "list", key, target }), openAreas: () => setManager({ kind: "areas" }), openPrices: () => setManager({ kind: "prices" }) };
+  const listsCtx = { openManager: (key, target) => setManager({ kind: "list", key, target }), openAreas: () => setManager({ kind: "areas" }), openPrices: () => setManager({ kind: "prices" }),
+    openCardFields: (tabKey) => setManager({ kind: "cardFields", key: tabKey }) };
   const renderManager = () => {
     if (!manager) return null;
+    if (manager.kind === "cardFields") return <TabCardFieldsModal tab={manager.key} settings={settings} setSettings={setSettings} onClose={() => setManager(null)} />;
     if (manager.kind === "prices") return <PriceBandsManager bands={getPriceBands()} setBands={(arr) => setSettings({ ...settings, priceBands: arr })} onClose={() => setManager(null)} />;
     if (manager.kind === "areas") {
       const usage = (id) => [tasks, goals, habits, notes].reduce((n, arr) => n + arr.filter((x) => x.area === id).length, 0);
@@ -12089,10 +12435,11 @@ export default function App({ onSignOut }) {
       )}
       <div className="cr-main">
         {tab === "dashboard" && <Dashboard tasks={tasks} goals={goals} habits={habits} finance={integratedFinance} areas={areas} settings={settings} personaldev={personaldev} gcal={gcal} setGcal={setGcal} setTasks={setTasks} setHabits={setHabits} setSettings={setSettings} goTo={setTab}
-          onOrigin={navigateToOrigin} accounts={accounts} cards={cards} />}
+          onOrigin={navigateToOrigin} accounts={accounts} cards={cards}
+          routines={routines} setRoutines={setRoutines} fitness={fitness} setFitness={setFitness} onOpenTraining={openTraining} />}
         {tab === "search" && <GlobalSearchView query={searchQuery} setQuery={setSearchQuery} all={searchData} goTo={setTab} />}
         {tab === "tasks" && <PlanningHub tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="tarefas" gcal={gcal} setGcal={setGcal} fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} />}
-        {tab === "routines" && <PlanningHub key="routines" tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="rotinas" gcal={gcal} setGcal={setGcal} fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} />}
+        {tab === "routines" && <PlanningHub key={`routines:${routinesView}`} routinesView={routinesView} tasks={tasks} setTasks={setTasks} routines={routines} setRoutines={setRoutines} areas={areas} initial="rotinas" gcal={gcal} setGcal={setGcal} fitness={fitness} setFitness={setFitness} fitnessMedia={fitnessMedia} setFitnessMedia={setFitnessMedia} />}
         {currentPage && <CustomPageView key={currentPage.id} page={currentPage} setPage={(updated) => setPages(pages.map((pg) => pg.id === updated.id ? updated : pg))} />}
         {tab === "goals" && <GoalsView goals={goals} setGoals={setGoals} areas={areas} />}
         {tab === "habits" && <HabitsView habits={habits} setHabits={setHabits} areas={areas} />}
