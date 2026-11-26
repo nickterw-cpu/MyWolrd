@@ -6,7 +6,7 @@ import { cardLinkedDate, planInstallments, procedureSessionCount, procedureSessi
 
 const FORM_ONLY_KEYS = [
   "installmentsCount", "recurringEnabled", "recurringMonths", "_editScope", "paidCount", "amountMode",
-  "firstInvoiceMonth", "_original", "_structural",
+  "firstInvoiceMonth", "_original", "_structural", "statusExplicit",
 ];
 
 export function isCreditForm(form) {
@@ -126,15 +126,21 @@ export function procedureFinanceForm(card, settings = {}, today) {
   return {
     type: "saida", category: "Beleza", expenseClass: "procedure", desc: card.name || "Procedimento", link: "",
     amount: procedureTotal(card), date,
+    // status escolhido na ficha é respeitado sempre; sem escolha, a data só sugere:
     // procedimento que ainda vai acontecer é um gasto previsto (a menos que já tenha sido pago adiantado)
-    status: date > today
+    status: settings.statusExplicit && settings.status ? settings.status : date > today
       ? (["pago", "cancelado"].includes(settings.status) ? settings.status : "previsto")
       : (settings.status && settings.status !== "previsto" ? settings.status : "pago"),
+    statusExplicit: !!(settings.statusExplicit && settings.status),
     paymentMethod: settings.paymentMethod ?? "Pix",
     cardId: settings.cardId || "", accountId: settings.accountId || "",
     installmentsCount: Number(settings.installmentsCount) || 1,
     paidCount: Number(settings.paidCount) || 0,
     firstInvoiceMonth: settings.firstInvoiceMonth || "",
+    // data de pagamento da fatura informada na ficha (senão a fatura sai do fechamento do cartão)
+    invoiceMonth: settings.invoiceMonthExplicit ? settings.invoiceMonth || "" : "",
+    invoiceMonthExplicit: !!(settings.invoiceMonthExplicit && settings.invoiceMonth),
+    invoiceDueDate: settings.invoiceMonthExplicit ? settings.invoiceDueDate || "" : "",
   };
 }
 
@@ -155,7 +161,7 @@ export function financeEntriesForProcedure(card, { mode = "total", settings = {}
       const amount = index === count - 1 ? Math.round((form.amount - per * (count - 1)) * 100) / 100 : per;
       const [entry] = materializeFinanceEntries({
         // cada sessão: paga se a data já passou, a pagar se ainda vai acontecer
-        ...form, amount, date, status: date <= today ? "pago" : "previsto",
+        ...form, amount, date, status: form.statusExplicit ? form.status : date <= today ? "pago" : "previsto",
         installmentsCount: 1, paidCount: 0, firstInvoiceMonth: "",
       }, { card: cc, today, newId, entryId: `${gid}:${index + 1}` }).entries;
       return { ...entry, installmentGroup: { id: gid, index: index + 1, total: count, totalAmount: form.amount, purchaseDate: dates[0], kind: "sessions" } };

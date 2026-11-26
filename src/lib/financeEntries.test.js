@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyCardInvoiceChanges, financeEntriesForProcedure, financeSettingsFromEntries, financeSettingsSignature, materializeFinanceEntries } from "./financeEntries.js";
+import { applyCardInvoiceChanges, financeEntriesForProcedure, financeSettingsFromEntries, financeSettingsSignature, materializeFinanceEntries, procedureFinanceForm } from "./financeEntries.js";
 import { syncCardFromFinance } from "./procedureLink.js";
 
 const today = "2026-11-25";
@@ -86,5 +86,38 @@ describe("previsto parcelado no crédito", () => {
       { card, today, newId, groupId: "gp" });
     expect(entries.map((e) => e.status)).toEqual(["previsto", "previsto", "previsto"]);
     expect(payments).toEqual([]);
+  });
+});
+
+describe("status escolhido na ficha do procedimento", () => {
+  const today = "2026-11-26";
+  const past = { id: "pp", name: "Botox", cost: 900, dateDone: "2026-11-20" };
+  const future = { id: "pf", name: "Lash", cost: 140, scheduledDate: "2026-12-05" };
+  const credit = { paymentMethod: "Crédito", cardId: "c1", invoiceMonth: "2026-12", invoiceMonthExplicit: true, invoiceDueDate: "2026-12-31" };
+
+  it("sem escolha, a data ainda sugere o status", () => {
+    expect(procedureFinanceForm(past, credit, today).status).toBe("pago");
+    expect(procedureFinanceForm(future, credit, today).status).toBe("previsto");
+  });
+  it("status escolhido nunca é trocado pela data", () => {
+    for (const status of ["pendente", "previsto", "agendado", "pago", "minha-opcao"]) {
+      expect(procedureFinanceForm(past, { ...credit, status, statusExplicit: true }, today).status).toBe(status);
+      expect(procedureFinanceForm(future, { ...credit, status, statusExplicit: true }, today).status).toBe(status);
+    }
+  });
+  it("o lançamento gerado usa o status escolhido e não grava a marca da ficha", () => {
+    const { entries } = financeEntriesForProcedure(past, { settings: { ...credit, status: "previsto", statusExplicit: true }, creditCards: [{ id: "c1", closingDay: 3, dueDay: 10 }], today, newId: () => "n1" });
+    expect(entries[0].status).toBe("previsto");
+    expect(entries[0].invoiceMonth).toBe("2026-12");
+    expect(entries[0]).not.toHaveProperty("statusExplicit");
+  });
+  it("data de pagamento da fatura escolhida vai para o lançamento", () => {
+    const { entries } = financeEntriesForProcedure(future, { settings: { ...credit, status: "pendente", statusExplicit: true }, creditCards: [{ id: "c1", closingDay: 3, dueDay: 10 }], today, newId: () => "n2" });
+    expect(entries[0]).toMatchObject({ invoiceMonth: "2026-12", invoiceMonthExplicit: true, invoiceDueDate: "2026-12-31", status: "pendente" });
+  });
+  it("por sessão: status escolhido vale para todas as sessões", () => {
+    const card = { id: "ps", name: "Laser", cost: 100, plannedSessions: 2, scheduledDate: "2026-11-10" };
+    const { entries } = financeEntriesForProcedure(card, { mode: "sessions", settings: { paymentMethod: "Pix", status: "pendente", statusExplicit: true }, today, newId: () => "n" });
+    expect(entries.map((e) => e.status)).toEqual(["pendente", "pendente"]);
   });
 });

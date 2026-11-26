@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { financeEntriesForCard, financeUnregisterRequested, isProcedureExpense, planInstallments, procedureTotal, syncCardFromFinance, syncFinanceFromCard } from "./procedureLink.js";
+import { currentFinanceLink, financeEntriesForCard, financeUnregisterRequested, isProcedureExpense, planInstallments, procedureTotal, syncCardFromFinance, syncFinanceFromCard } from "./procedureLink.js";
 
 const today = "2026-11-24";
 let n = 0;
@@ -79,5 +79,15 @@ describe("pedido de tirar de Finanças", () => {
     expect(financeUnregisterRequested({ financeRegister: false, financeLink: { key: "x" } })).toBe(true);
     expect(financeUnregisterRequested({ financeRegister: false })).toBe(false);
     expect(financeUnregisterRequested({ financeRegister: true, financeLink: { key: "x" } })).toBe(false);
+  });
+});
+
+describe("vínculo atual do procedimento", () => {
+  it("o vínculo salvo no card vale mais que o do formulário aberto (que pode estar desatualizado)", () => {
+    const stored = { id: "p", financeLink: { key: "novo" } };
+    expect(currentFinanceLink(stored, { financeLink: { key: "antigo" } })).toEqual({ key: "novo" });
+    expect(currentFinanceLink(stored, {})).toEqual({ key: "novo" });
+    expect(currentFinanceLink({ id: "p" }, { financeLink: { key: "f" } })).toEqual({ key: "f" });
+    expect(currentFinanceLink(undefined, {})).toBeUndefined();
   });
 });

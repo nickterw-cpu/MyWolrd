@@ -89,6 +89,12 @@ export function syncCardFromFinance(beauty, entries, { today, newId, previousKey
 
 // "Registrar em Finanças" desmarcado na ficha: só vale se a ficha já conhecia o vínculo
 // (uma ficha aberta antes de um vínculo automático não pode apagar o lançamento criado depois).
+// Vínculo atual do procedimento: o salvo no card vale mais que o do formulário aberto, que pode ter
+// ficado desatualizado depois que a ficha refez o lançamento (senão o próximo salvamento duplica).
+export function currentFinanceLink(stored, formData) {
+  return stored?.financeLink || formData?.financeLink;
+}
+
 export function financeUnregisterRequested(formData) {
   return formData?.financeRegister === false && !!formData?.financeLink?.key;
 }

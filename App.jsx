@@ -4,7 +4,7 @@ import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
 import { habitStreak } from "./src/lib/habitStreak.js";
 import {
-  financeLinkKey, financeUnregisterRequested, groupEntries, isProcedureExpense, linkedCardFor, planInstallments, procedureSessionCount,
+  financeLinkKey, currentFinanceLink, financeUnregisterRequested, groupEntries, isProcedureExpense, linkedCardFor, planInstallments, procedureSessionCount,
   procedureTotal, shiftMonth as shiftMonthStr, syncCardFromFinance, syncFinanceFromCard,
 } from "./src/lib/procedureLink.js";
 import { cleanSelfCareTitle, syncSelfCareSessions } from "./src/lib/selfCareSync.js";
@@ -9102,7 +9102,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
     const existing = beauty.find((entry) => entry.id === data.id);
     const { _financeEdited, ...clean } = data;
     let card = { ...(existing || {}), ...clean, userEdited: true };
-    if (existing?.financeLink && !clean.financeLink) card.financeLink = existing.financeLink;
+    if (currentFinanceLink(existing, clean)) card.financeLink = currentFinanceLink(existing, clean);
     let nextFinance = finance || [];
     let nextCards = cards || [];
     const link = card.financeLink;
@@ -9691,7 +9691,12 @@ function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, me
   const [form, setForm] = useState(() => item ? {
     ...item,
     // a ficha financeira vem do lançamento que existe em Finanças (nunca de uma cópia antiga)
-    financeSettings: financeSettingsFromEntries(linkedEntries) || item.financeSettings || {},
+    // o status do lançamento que já existe é o que vale na ficha (não é recalculado pela data)
+    financeSettings: (() => {
+      const fromEntries = financeSettingsFromEntries(linkedEntries);
+      if (!fromEntries) return item.financeSettings || {};
+      return item.financeLink?.mode === "sessions" ? fromEntries : { ...fromEntries, statusExplicit: !!fromEntries.status };
+    })(),
     financeRegister: item.financeLink ? true : item.financeRegister === true,
     financeMode: item.financeLink?.mode || item.financeMode || "total",
   } : {
@@ -9708,7 +9713,9 @@ function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, me
     invoiceMonthExplicit: !!form.financeSettings?.invoiceMonthExplicit, invoiceDueDate: form.financeSettings?.invoiceDueDate || "" };
   const setFinanceForm = (next) => {
     const keys = ["paymentMethod", "status", "cardId", "accountId", "installmentsCount", "paidCount", "firstInvoiceMonth", "invoiceMonth", "invoiceMonthExplicit", "invoiceDueDate"];
-    setForm((current) => ({ ...current, financeSettings: Object.fromEntries(keys.map((key) => [key, next[key]])), _financeEdited: true }));
+    // status trocado por você vira escolha: nenhuma sugestão automática (data, fatura) troca de volta
+    const statusExplicit = next.status !== financeForm.status || !!financeForm.statusExplicit;
+    setForm((current) => ({ ...current, financeSettings: { ...Object.fromEntries(keys.map((key) => [key, next[key]])), statusExplicit }, _financeEdited: true }));
   };
   const linkedTotal = linkedEntries.reduce((t, entry) => t + (Number(entry.amount) || 0), 0);
   const linkedPaid = linkedEntries.filter((entry) => entry.status === "pago").reduce((t, entry) => t + (Number(entry.amount) || 0), 0);
