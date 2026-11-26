@@ -15,12 +15,13 @@ import {
 import { countInWeek, normalizeTarget, numericGoalProgress, shiftDays, weekStartOf, weeklyMessage, weeklyStreak } from "./src/lib/workoutWeek.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, monthSpendingStatus, summarizeFinanceMonth } from "./src/lib/financePlan.js";
+import { monthGroups } from "./src/lib/monthGroups.js";
 import {
   actualExpenseAverages, buildFinanceAlerts, buildFinanceForecast, buildIntegratedFinance,
   cardInvoiceMonthForDate, cardInvoiceMonthForEntry, cardLimitSummary, createCardFinanceInstallments,
   financeEntryWithInvoiceMonth, createFinanceInstallments, nextFinanceDate,
 } from "./src/lib/financeIntegration.js";
-import { buildCardInvoices, cardInvoiceDueDate, defaultInvoicePaymentDate, ensureInvoiceRecord, monthInstallments } from "./src/lib/cardInvoices.js";
+import { buildCardInvoices, cardInvoiceDueDate, defaultInvoicePaymentDate, ensureInvoiceRecord } from "./src/lib/cardInvoices.js";
 import { notify } from "./src/components/ToastHost.jsx";
 import {
   Home, CalendarDays, Target, Repeat, Wallet, NotebookPen, Link2, Settings as SettingsIcon,
@@ -1544,6 +1545,13 @@ const GlobalStyle = () => (
     .cr-installment-preview li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; padding: 4px 6px; border-radius: 8px; }
     .cr-installment-preview li.is-current { background: #F7E9E4; }
     .cr-detail-row.is-active { background: #F7E9E4; }
+    .cr-detail-row-wrap { display: flex; align-items: center; gap: 6px; }
+    .cr-overdue-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 4px; border-top: 1px solid #F1E2C8; }
+    .cr-invoice-preview { margin-top: 6px; padding: 4px 10px 8px; border: 1px dashed #CFC4E0; border-radius: 10px; background: #FAF8FD; }
+    .cr-detail-row-wrap > .cr-detail-row { flex: 1; min-width: 0; }
+    .is-planned { opacity: 0.78; }
+    .is-planned .cr-detail-amount, .cr-list-row.is-planned { font-style: italic; }
+    .central-root .cr-effect-btn, .cr-effect-btn { padding: 4px 10px; font-size: 12.5px; min-height: 32px; border-color: #A99BC0; color: #5E4F86; }
     .cr-analysis-bar { width: 100%; border: 0; background: transparent; font: inherit; color: inherit; text-align: left; padding: 2px 0; border-radius: 6px; }
     .cr-analysis-bar:hover, .cr-analysis-bar:focus-visible { background: #F6F1EA; outline: none; }
     .cr-summary-block:disabled { cursor: default; }
@@ -1639,6 +1647,13 @@ const GlobalStyle = () => (
     .cr-quickbox-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
     @media (max-width: 560px) { .cr-quickbox-values { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .cr-quickbox-sub { font-size: 12px; color: var(--ink-soft); }
+    .cr-quickbox-five { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .cr-quickbox-total { grid-column: 1 / -1; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; padding-top: 10px; }
+    @media (max-width: 760px) { .cr-quickbox-five { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .cr-group-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+    .cr-quickbox-segments { display: flex; }
+    .cr-quickbox-segments > div { border-radius: 0; }
+    .cr-quickbox-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 11.5px; color: var(--ink-soft); }
     .cr-quickbox-item { display: grid; gap: 2px; padding: 4px 6px; border: 0; border-radius: 10px; background: transparent; text-align: left; font: inherit; color: inherit; cursor: pointer; min-width: 0; }
     .cr-quickbox-item:hover, .cr-quickbox-item:focus-visible { background: #F6F1EA; outline: none; }
     .cr-quickbox-item .cr-label { margin: 0; }
@@ -2399,17 +2414,19 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
         return <GoogleAgendaView gcal={gcal} setGcal={setGcal} dashboardMode />;
       }
       case "financeCategory": {
-        const catData = expenseCategoryData(finance, todayStr().slice(0, 7));
+        const chartGroup = categoryChartGroupOf(settings);
+        const catData = expenseCategoryData(finance, todayStr().slice(0, 7), { group: chartGroup, cards });
         return (
           <div className="cr-card" key="financeCategory" style={{ marginBottom: 16 }}>
             <div className="cr-row" style={{ justifyContent: "space-between" }}>
               <h3 className="cr-serif" style={{ margin: "0 0 12px", fontSize: 16 }}>Gastos por categoria — este mês</h3>
               <button className="cr-btn ghost" onClick={() => goTo("finance")}>ver detalhes</button>
             </div>
+            <CategoryGroupSelector value={chartGroup} onChange={(value) => setSettings({ ...settings, categoryChartGroup: value })} />
             {catData.length === 0
-              ? <p className="cr-empty">Nenhum gasto registrado este mês ainda.</p>
+              ? <p className="cr-empty">Nada neste grupo este mês.</p>
               : <CategoryExpenseChart data={catData} settings={settings} setSettings={setSettings}
-                onCategoryClick={(label) => setFinanceDetail(categoryDetail(finance, todayStr().slice(0, 7), label))} />}
+                onCategoryClick={(label) => setFinanceDetail(categoryDetail(finance, todayStr().slice(0, 7), label, { group: chartGroup, cards }))} />}
           </div>
         );
       }
@@ -2438,7 +2455,7 @@ function Dashboard({ tasks, goals, habits, finance, areas, settings, personaldev
               <h3 className="cr-serif" style={{ margin: "0 0 12px", fontSize: 16 }}>Finanças — últimos meses</h3>
               <button className="cr-btn" onClick={() => goTo("finance")}>Ir para finanças</button>
             </div>
-            <FinanceChartContent finance={finance} chartMonth={settings.financeChartMonth || "todos"}
+            <FinanceChartContent finance={finance} cards={cards} chartMonth={settings.financeChartMonth || "todos"}
               onChartMonthChange={(value) => setSettings({ ...settings, financeChartMonth: value })} />
           </div>
         );
@@ -3108,21 +3125,23 @@ function monthLabel(m) {
   return `${names[Number(mo) - 1]}/${y.slice(2)}`;
 }
 
-function financeChartMonths(finance) {
+// Gráfico dos últimos meses: entradas = renda recebida; saídas = Gasto do mês (fora do cartão + faturas pagas).
+function financeChartMonths(finance, cards = []) {
   const map = {};
   finance.forEach((entry) => {
-    if (typeof entry.date !== "string" || entry.status === "cancelado"
-      || (entry.status && entry.status !== "pago")
-      || (entry.type === "saida" && ["reserve", "investment"].includes(entry.expenseClass))) return;
+    if (typeof entry.date !== "string" || entry.status === "cancelado") return;
     const month = entry.date.slice(0, 7);
     map[month] = map[month] || { month: monthLabel(month), _m: month, entrada: 0, saida: 0 };
-    map[month][entry.type === "entrada" ? "entrada" : "saida"] += Number(entry.amount) || 0;
+    if (entry.type === "entrada" && (!entry.status || entry.status === "pago")) map[month].entrada += Number(entry.amount) || 0;
   });
-  return Object.values(map).sort((a, b) => a._m.localeCompare(b._m));
+  return Object.values(map)
+    .map((entry) => ({ ...entry, saida: monthGroups(finance, cards, entry._m).spent.total }))
+    .filter((entry) => entry.entrada > 0 || entry.saida > 0)
+    .sort((a, b) => a._m.localeCompare(b._m));
 }
 
-function FinanceChartContent({ finance, chartMonth, onChartMonthChange }) {
-  const months = financeChartMonths(finance);
+function FinanceChartContent({ finance, cards = [], chartMonth, onChartMonthChange }) {
+  const months = financeChartMonths(finance, cards);
   const chartData = chartMonth === "todos"
     ? months.slice(-6)
     : months.filter((entry) => entry._m === chartMonth);
@@ -3140,6 +3159,7 @@ function FinanceChartContent({ finance, chartMonth, onChartMonthChange }) {
       {chartData.length === 0
         ? <p className="cr-empty">Nenhum lançamento financeiro ainda.</p>
         : <MiniBarChartFinance data={chartData} height={220} />}
+      <p className="cr-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>Saídas = gasto do mês (o que saiu da conta: fora do cartão e faturas pagas).</p>
     </>
   );
 }
@@ -3171,31 +3191,58 @@ const EXPENSE_CLASS_LABEL = {
   investment: "Investimento",
 };
 
-// Mesma regra para o gráfico e para a lista de lançamentos de cada categoria.
-function categoryExpenseEntries(finance, month) {
-  return finance.filter((f) => f.date?.slice(0, 7) === month && f.status !== "cancelado"
-    && f.type === "saida"
-    && (!f.status || f.status === "pago")
-    && !["reserve", "investment"].includes(f.expenseClass));
+// Gráfico por categoria: usa os grupos do mês (mesma regra da caixa de resumo). As faturas pagas entram como
+// a categoria "Fatura do cartão" (as compras delas já saíram da conta juntas).
+const CATEGORY_GROUP_OPTIONS = [
+  { id: "all", label: "Tudo comprometido" }, { id: "spent", label: "Gasto do mês" }, { id: "scheduled", label: "Agendados" },
+  { id: "credit", label: "Crédito" }, { id: "planned", label: "Previstos" },
+];
+function categoryGroupEntries(finance, month, { group = "all", cards = [] } = {}) {
+  const groups = monthGroups(finance, cards, month);
+  const keys = group === "all" ? MONTH_GROUP_KEYS : [group];
+  return keys.flatMap((key) => [
+    ...groups[key].items,
+    ...groups[key].lines.map((line, index) => ({ id: `line:${key}:${index}`, type: "saida", desc: line.label, category: "Fatura do cartão", amount: line.amount, date: `${month}-01`, _line: true })),
+  ]);
 }
 
-function categoryDetail(finance, month, label) {
+function categoryDetail(finance, month, label, options = {}) {
+  const groupLabel = CATEGORY_GROUP_OPTIONS.find((option) => option.id === (options.group || "all"))?.label || "";
+  const entries = categoryGroupEntries(finance, month, options).filter((f) => (f.category || "Outros") === label);
   return {
     title: `${label} · ${monthLabel(month)}`,
-    note: "Saídas pagas desta categoria no mês (as mesmas do gráfico).",
-    groups: [{ label: "", sign: 1, items: categoryExpenseEntries(finance, month).filter((f) => (f.category || "Outros") === label) }],
+    note: `${groupLabel}: os mesmos lançamentos do gráfico.`,
+    groups: [{ label: "", sign: 1, items: entries.filter((f) => !f._line), lines: entries.filter((f) => f._line).map((f) => ({ label: f.desc, amount: f.amount })) }],
   };
 }
 
-function expenseCategoryData(finance, month) {
+function expenseCategoryData(finance, month, options = {}) {
   const catMap = {};
-  categoryExpenseEntries(finance, month).forEach((f) => {
+  categoryGroupEntries(finance, month, options).forEach((f) => {
     const cat = f.category || "Outros";
-    catMap[cat] = (catMap[cat] || 0) + Number(f.amount);
+    catMap[cat] = (catMap[cat] || 0) + Math.round((Number(f.amount) || 0) * 100);
   });
   return Object.entries(catMap)
     .sort((a, b) => b[1] - a[1])
-    .map(([label, value], i) => ({ label, value, color: CATEGORY_PALETTE[i % CATEGORY_PALETTE.length] }));
+    .map(([label, value], i) => ({ label, value: value / 100, color: CATEGORY_PALETTE[i % CATEGORY_PALETTE.length] }));
+}
+
+// Seletor do grupo mostrado no gráfico por categoria (fica salvo e vale para Finanças e Dashboard).
+function CategoryGroupSelector({ value, onChange }) {
+  return (
+    <div className="cr-catchart-types" role="group" aria-label="Grupo mostrado no gráfico" style={{ marginBottom: 8 }}>
+      {CATEGORY_GROUP_OPTIONS.map((option) => (
+        <button key={option.id} type="button" className={`cr-tabbtn ${value === option.id ? "active" : ""}`} aria-pressed={value === option.id}
+          onClick={() => onChange(option.id)}>
+          {option.id !== "all" && <MonthGroupDot group={option.id} />}{option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function categoryChartGroupOf(settings) {
+  return CATEGORY_GROUP_OPTIONS.some((option) => option.id === settings?.categoryChartGroup) ? settings.categoryChartGroup : "all";
 }
 
 function generateRecurringOccurrences(base, monthsAhead) {
@@ -3252,19 +3299,43 @@ function spendingStatusFor(finance, settings, cards, month) {
 }
 
 // Detalhe "como é calculado": o que entrou no gasto do mês e qual regra gerou a frase.
+// Grupos do mês (8ª rodada): rótulo, cor e ícone de cada um, iguais em toda a visão mensal.
+const MONTH_GROUP_META = {
+  spent: { label: "Gasto do mês", short: "gastos", color: "#5C7A56", hint: "Pago fora do cartão e faturas pagas." },
+  scheduled: { label: "Agendados/Pendentes", short: "agendados", color: "#B4781F", hint: "Fora do cartão, lançado e ainda não pago." },
+  credit: { label: "Parcelas do mês (crédito)", short: "crédito", color: "#3F6C9E", hint: "Compras no crédito da fatura do mês ainda aberta." },
+  planned: { label: "Gastos previstos", short: "previstos", color: "#A99BC0", hint: "Planejado, que ainda não aconteceu." },
+};
+const MONTH_GROUP_KEYS = ["spent", "scheduled", "credit", "planned"];
+
+function MonthGroupDot({ group }) {
+  return <span className="cr-group-dot" style={{ background: MONTH_GROUP_META[group].color }} aria-hidden="true" />;
+}
+
+// Lista de um ou mais grupos para o painel de detalhe (o total da lista é o número do bloco).
+function monthGroupDetail(groups, keys, title, extra = {}) {
+  return {
+    title,
+    groups: keys.map((key) => ({ label: keys.length > 1 ? MONTH_GROUP_META[key].label : "", sign: 1, items: groups[key].items, lines: groups[key].lines })),
+    note: keys.length === 1 ? MONTH_GROUP_META[keys[0]].hint : "",
+    ...extra,
+  };
+}
+
 function spendingRuleDetail(status, month) {
   const pct = status.pct === null ? "—" : `${Math.round(status.pct * 100)}%`;
   const baseText = status.baseSource === "received" ? `renda recebida no mês (${fmtBRL(status.base)})`
     : status.baseSource === "expected" ? `renda prevista no Planejamento (${fmtBRL(status.base)}), porque nada foi recebido ainda`
     : "nenhuma renda registrada";
+  const g = status.groups;
   return {
     title: `Como é calculado · ${monthLabel(month)}`,
-    totalLabel: "Gasto no mês",
+    totalLabel: "Total comprometido",
     extra: (
       <div className="cr-rule-box">
         <p><strong>Frase:</strong> {status.message}</p>
         <p><strong>Regra que gerou a frase:</strong> {status.rule}</p>
-        <p><strong>Conta:</strong> gasto do mês {fmtBRL(status.spent)} ÷ {baseText} = <strong>{pct}</strong>
+        <p><strong>Conta:</strong> total comprometido {fmtBRL(status.spent)} ({fmtBRL(g.spent.total)} gastos + {fmtBRL(g.scheduled.total)} agendados + {fmtBRL(g.credit.total)} crédito + {fmtBRL(g.planned.total)} previstos) ÷ {baseText} = <strong>{pct}</strong>
           {status.average > 0 ? ` · média dos 3 meses anteriores: ${fmtBRL(status.average)}` : ""}</p>
         <ul>
           <li>Acima de 100% da renda: "passou do orçamento"</li>
@@ -3273,10 +3344,10 @@ function spendingRuleDetail(status, month) {
           <li>De 60% a 85%: "dentro do orçamento, mas de olho"</li>
           <li>Abaixo de 60%: "economizando bem"</li>
         </ul>
-        <p className="cr-sub" style={{ margin: 0 }}>Entram todas as saídas do mês (pagas e a pagar): contas, débito, Pix, cartão de crédito, parcelas e o saldo de fatura informado à mão. Não entram transferências para reserva/investimento nem estimativas.</p>
+        <p className="cr-sub" style={{ margin: 0 }}>Gasto do mês: pago fora do cartão e faturas pagas. Agendados: fora do cartão, lançados e não pagos. Crédito: compras da fatura do mês ainda aberta. Previstos: planejado que ainda não aconteceu. Não entram transferências para reserva/investimento.</p>
       </div>
     ),
-    groups: status.groups.map((group) => ({ label: group.label, sign: 1, items: group.items, lines: group.lines })),
+    groups: MONTH_GROUP_KEYS.map((key) => ({ label: MONTH_GROUP_META[key].label, sign: 1, items: g[key].items, lines: g[key].lines, showEmpty: true })),
   };
 }
 
@@ -3284,12 +3355,12 @@ function availableDetail(status, incomeItems, month) {
   return {
     title: `Disponível · ${monthLabel(month)}`,
     totalLabel: "Disponível",
-    note: status.baseSource === "expected" ? "Nada foi recebido ainda neste mês: a base é a renda prevista no Planejamento." : "",
+    note: `Renda do mês menos o Gasto do mês (o que já saiu da conta). Crédito, agendados e previstos não descontam aqui.${status.baseSource === "expected" ? " Nada foi recebido ainda: a base é a renda prevista no Planejamento." : ""}`,
     groups: [
       status.baseSource === "expected"
         ? { label: "Renda prevista (Planejamento)", sign: 1, items: [], lines: [{ label: "Renda líquida prevista", amount: status.base }] }
         : { label: "Renda recebida", sign: 1, items: incomeItems },
-      ...status.groups.map((group) => ({ label: group.label, sign: -1, items: group.items, lines: group.lines })),
+      { label: "Gasto do mês", sign: -1, items: status.groups.spent.items, lines: status.groups.spent.lines },
     ],
   };
 }
@@ -3415,7 +3486,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     if (card && card.financeAuto && !card.userEdited && !(card.history || []).length) setBeauty(beauty.filter((item) => item.id !== card.id));
   };
   const save = (data) => {
-    const { installmentsCount, recurringEnabled, recurringMonths, invoiceMonthExplicit, _editScope, paidCount, amountMode, firstInvoiceMonth, ...base } = data;
+    const { installmentsCount, recurringEnabled, recurringMonths, invoiceMonthExplicit, _editScope, paidCount, amountMode, firstInvoiceMonth, _effecting, ...base } = data;
     if (base.type === "saida" && base.paymentMethod === "Crédito" && base.cardId) {
       const card = cards.find((entry) => entry.id === base.cardId);
       base.invoiceMonthExplicit = !!invoiceMonthExplicit;
@@ -3534,6 +3605,21 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     // o rascunho virou parcelamento: o card criado para ele (ainda intocado) sai também
     const card = (beauty || []).find((item) => item.financeLink?.key === id);
     if (card && card.financeAuto && !card.userEdited && !(card.history || []).length) setBeauty(beauty.filter((item) => item.id !== card.id));
+  };
+  // Efetivar um previsto: abre a ficha do mesmo lançamento já como pago (hoje) para conferir valor, data e pagamento.
+  // Previsto parcelado: todas as parcelas viram lançadas de uma vez (ficam no crédito do mês de cada fatura).
+  const effect = (entry) => {
+    const original = manualFinance.find((item) => item.id === entry.id) || entry;
+    setDetail(null);
+    if (original.installmentGroup && original.installmentGroup.kind !== "sessions") {
+      const ids = groupEntries(manualFinance, original).map((item) => item.id);
+      const next = manualFinance.map((item) => (ids.includes(item.id) ? { ...item, status: "agendado" } : item));
+      setFinance(next);
+      syncLinkedCard(next, original);
+      notify(`${original.desc || "Compra"}: ${ids.length} parcelas lançadas na fatura.`);
+      return;
+    }
+    setEditing({ ...original, status: "pago", date: todayStr(), _effecting: true });
   };
   // Parcela: pergunta se a edição vale só para ela ou para todas as parcelas da compra.
   const [editScopeAsk, setEditScopeAsk] = useState(null);
@@ -3698,8 +3784,10 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
   );
   const averages = useMemo(() => actualExpenseAverages(finance, todayStr()), [finance]);
   const spendingStatus = useMemo(() => spendingStatusFor(finance, settings, cards, selectedMonth), [finance, settings, cards, selectedMonth]);
-  // Parcelas do mês: mesma regra da fatura (mês da fatura de cada parcela, todos os cartões)
-  const installmentsOfMonth = useMemo(() => monthInstallments(cards, finance, selectedMonth), [cards, finance, selectedMonth]);
+  // Grupos do mês: a única regra de números da visão mensal (caixa, panda, blocos e gráficos)
+  const G = spendingStatus.groups;
+  const overduePlanned = manualFinance.filter((f) => f.status === "previsto" && f.type === "saida" && f.date < todayStr())
+    .sort((a, b) => a.date.localeCompare(b.date));
   const income = planSummary.receivedIncome;
   const expense = planSummary.spent;
   const balance = income - expense;
@@ -3727,37 +3815,40 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     openEdit(manualFinance.find((entry) => entry.id === tx.id) || tx);
   };
   const monthName = monthLabel(selectedMonth);
+  // Partes dos grupos usadas pelos blocos (mesmas listas, então os números batem com as listas)
+  const sumOfItems = (items, lines = []) => (items.reduce((t, e) => t + Math.round((Number(e.amount) || 0) * 100), 0)
+    + lines.reduce((t, l) => t + Math.round((Number(l.amount) || 0) * 100), 0)) / 100;
+  const scheduledFixed = G.scheduled.items.filter((e) => e.expenseClass === "fixed");
+  const scheduledVariable = G.scheduled.items.filter((e) => e.expenseClass !== "fixed");
+  const spentFixed = G.spent.items.filter((e) => e.expenseClass === "fixed");
+  const spentVariable = G.spent.items.filter((e) => e.expenseClass !== "fixed");
+  const availableForGoals = Math.round((income - G.total - planSummary.transferPaid - planSummary.reservedRemaining) * 100) / 100;
   const detailFor = (key) => {
     const g = (label, items, sign = 1, extra = {}) => ({ label, items, sign, ...extra });
     switch (key) {
       case "income": return { title: `Renda recebida · ${monthName}`, groups: [g("", L.income)], note: "Entradas com status pago neste mês." };
-      case "spent": return { title: `Gastos realizados · ${monthName}`, groups: [g("", L.spent)], note: "Saídas pagas, sem transferências para reserva/investimento." };
-      case "balance": return { title: `Saldo após gastos de consumo · ${monthName}`, groups: [g("Renda recebida", L.income), g("Gastos realizados", L.spent, -1)], totalLabel: "Saldo" };
+      case "spent": return { title: `Gastos realizados · ${monthName}`, groups: [g("", G.spent.items, 1, { lines: G.spent.lines })], note: MONTH_GROUP_META.spent.hint };
+      case "balance": return { title: `Saldo após gastos de consumo · ${monthName}`, groups: [g("Renda recebida", L.income), g("Gasto do mês", G.spent.items, -1, { lines: G.spent.lines })], totalLabel: "Saldo" };
       case "commitments": return { title: `Comprometido (pendente) · ${monthName}`, groups: [g("", L.commitments)], note: "Saídas pendentes ou agendadas do mês, inclusive transferências; não inclui estimativas." };
-      case "fixedCommitments": return { title: `Despesas fixas pendentes · ${monthName}`, groups: [g("", L.fixedCommitments)] };
-      case "fixedSpent": return { title: `Gastos fixos realizados · ${monthName}`, groups: [g("", L.fixedSpent)] };
-      case "variableSpent": return { title: `Gastos variáveis realizados · ${monthName}`, groups: [g("", L.variableSpent)] };
-      case "variableCommitments": return { title: `Outras despesas pendentes · ${monthName}`, groups: [g("", L.variableCommitments)], note: "Saídas pendentes que não são fixas nem transferências." };
+      case "fixedCommitments": return { title: `Despesas fixas pendentes · ${monthName}`, groups: [g("", scheduledFixed)], note: "Agendados/Pendentes com classificação Fixo." };
+      case "fixedSpent": return { title: `Gastos fixos realizados · ${monthName}`, groups: [g("", spentFixed)], note: "Gasto do mês com classificação Fixo." };
+      case "variableSpent": return { title: `Gastos variáveis realizados · ${monthName}`, groups: [g("", spentVariable, 1, { lines: G.spent.lines })], note: "Gasto do mês que não é Fixo (faturas pagas contam aqui)." };
+      case "variableCommitments": return { title: `Outras despesas pendentes · ${monthName}`, groups: [g("", scheduledVariable)], note: "Agendados/Pendentes que não são Fixos." };
       case "reservedRemaining": return { title: `Reserva protegida ainda pendente · ${monthName}`, noSort: true,
         groups: [g("", [], 1, { lines: L.protectedLines.map((line) => ({ label: line.category || "Sem categoria", sub: `meta ${fmtBRL(line.target)} − já transferido ${fmtBRL(line.done)}`, amount: line.amount })) })],
         note: "Metas protegidas da aba Planejamento menos o que já foi transferido neste mês." };
       case "transferPaid": return { title: `Reservas e investimentos realizados · ${monthName}`, groups: [g("", L.transferPaid)] };
-      case "projectedSpending": {
-        const P = L.projectedSpending;
-        return { title: `Previsão de gastos do mês · ${monthName}`, groups: [
-          g("Já pago", P.paid), g("Pendente", P.pending), g("Fatura do cartão (a pagar)", P.card),
-          g("Contas fixas/recorrentes (a pagar)", P.fixed), g("Estimativas das outras abas", P.estimated),
-        ] };
-      }
-      case "estimated": return { title: `Despesas estimadas · ${monthName}`, groups: [g("", L.estimated)], note: "Previsões de Wishlist, Procedimentos e Hobbies; não são gastos reais." };
+      case "projectedSpending": return monthGroupDetail(G, MONTH_GROUP_KEYS, `Previsão de gastos do mês · ${monthName}`, { totalLabel: "Total comprometido" });
+      case "estimated": return { title: `Despesas estimadas · ${monthName}`, groups: [g("", G.planned.items)], note: MONTH_GROUP_META.planned.hint };
       case "available": return { title: `Disponível sem comprometer metas · ${monthName}`, totalLabel: "Disponível", groups: [
-        g("Renda recebida", L.income), g("Gastos realizados", L.spent, -1), g("Compromissos pendentes", L.commitments, -1),
+        g("Renda recebida", L.income),
+        ...MONTH_GROUP_KEYS.map((key) => g(MONTH_GROUP_META[key].label, G[key].items, -1, { lines: G[key].lines })),
         g("Transferências realizadas", L.transferPaid, -1),
         g("Reserva protegida pendente", [], -1, { lines: L.protectedLines.map((line) => ({ label: line.category || "Sem categoria", sub: `meta ${fmtBRL(line.target)} − já transferido ${fmtBRL(line.done)}`, amount: line.amount })) }),
       ] };
-      case "percent": return { title: `Percentual da renda recebido já gasto · ${monthName}`, totalLabel: "Gasto ÷ renda recebida",
-        groups: [g("Renda recebida", L.income), g("Gastos realizados", L.spent)],
-        formatTotal: (_total, groups) => (groups[0].subtotal > 0 ? `${Math.round((groups[1].subtotal / groups[0].subtotal) * 100)}%` : "—") };
+      case "percent": return { title: `Percentual da renda comprometido · ${monthName}`, totalLabel: "Total comprometido ÷ renda recebida",
+        groups: [g("Renda recebida", L.income), ...MONTH_GROUP_KEYS.map((key) => g(MONTH_GROUP_META[key].label, G[key].items, 0, { lines: G[key].lines }))],
+        formatTotal: (_total, groups) => (groups[0].subtotal > 0 ? `${Math.round((groups.slice(1).reduce((t, x) => t + x.subtotal, 0) / groups[0].subtotal) * 100)}%` : "—") };
       case "invoice": return invoiceDetails
         ? { title: `Fatura ${invoiceDetails.card.name} · ${monthName}`, groups: [
           g("Compras na fatura", invoiceDetails.purchases),
@@ -3780,7 +3871,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
       case "futureInstallments": return { title: `Parcelas futuras (depois de ${monthName})`, groups: [g("", futureInstallmentList)] };
       case "installmentTotal": return { title: "Valor original parcelado", noSort: true, note: "Valor total de cada compra parcelada (uma linha por compra).",
         groups: [g("", [...installmentGroups.values()].map((item) => ({ ...item.entry, amount: item.amount, desc: `${item.entry.desc || item.entry.category || "Compra"} · ${item.entry.installmentGroup.total}x` })))] };
-      case "monthInstallments": return { title: `Parcelas com vencimento em ${monthName}`, groups: [g("", currentMonthInstallmentList)] };
+      case "monthInstallments": return monthGroupDetail(G, ["credit"], `Parcelas do mês · ${monthName}`);
       case "monthCount": return { title: `Lançamentos de ${monthName}`, groups: [g("Entradas", monthTx.filter((tx) => tx.type === "entrada")), g("Saídas", monthTx.filter((tx) => tx.type !== "entrada"))],
         formatTotal: () => `${monthTx.length} lançamento(s)`, totalLabel: "Quantidade" };
       default: return null;
@@ -3847,39 +3938,60 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                     </button>
                   </div>
                 </div>
-                {/* Resumo rápido: a primeira coisa do mês */}
+                {/* Resumo rápido: a primeira coisa do mês (4 grupos separados + total comprometido) */}
                 <div className="cr-card cr-quickbox" style={{ marginBottom: 16 }}>
-                  <div className="cr-quickbox-values">
-                    <button type="button" className="cr-quickbox-item" onClick={() => setDetail(spendingRuleDetail(st, selectedMonth))} title="Ver o que compõe este valor">
-                      <span className="cr-label">Gasto no mês</span>
-                      <span className="cr-quickbox-number">{fmtBRL(st.spent)}</span>
+                  <div className="cr-quickbox-values cr-quickbox-five">
+                    <button type="button" className="cr-quickbox-item" title="Ver o que compõe este valor"
+                      onClick={() => setDetail(monthGroupDetail(G, ["spent"], `Gasto do mês · ${monthLabel(selectedMonth)}`))}>
+                      <span className="cr-label"><MonthGroupDot group="spent" />Gasto do mês</span>
+                      <span className="cr-quickbox-number">{fmtBRL(G.spent.total)}</span>
+                      <span className="cr-quickbox-sub">já saiu da conta</span>
                     </button>
                     <button type="button" className="cr-quickbox-item" onClick={() => setDetail(availableDetail(st, planSummary.lists.income, selectedMonth))} title="Ver o que compõe este valor">
                       <span className="cr-label">Disponível</span>
-                      <span className="cr-quickbox-number" style={{ color: st.base > 0 ? (st.available >= 0 ? "#5C7A56" : "#A1493C") : "var(--ink-soft)" }}>
-                        {st.base > 0 ? fmtBRL(st.available) : "—"}
+                      <span className="cr-quickbox-number" style={{ color: st.base > 0 ? (G.available >= 0 ? "#5C7A56" : "#A1493C") : "var(--ink-soft)" }}>
+                        {st.base > 0 ? fmtBRL(G.available) : "—"}
                       </span>
+                      <span className="cr-quickbox-sub">renda − gasto do mês</span>
                     </button>
-                    {/* destaque de quanto do gasto vem de parcelas (já está dentro de "Gasto no mês") */}
-                    <button type="button" className="cr-quickbox-item" title="Ver as parcelas do mês"
-                      onClick={() => setDetail({
-                        title: `Parcelas do mês · ${monthLabel(selectedMonth)}`,
-                        note: "Parcelas de compras parceladas no crédito que caem na fatura deste mês (todos os cartões), pagas e a pagar. É só um destaque: não muda o \"Gasto no mês\".",
-                        totalLabel: "Parcelas do mês",
-                        groups: [{ label: "", sign: 1, items: installmentsOfMonth.items }],
-                      })}>
-                      <span className="cr-label">Parcelas do mês</span>
-                      <span className="cr-quickbox-number">{fmtBRL(installmentsOfMonth.total)}</span>
-                      <span className="cr-quickbox-sub">em {installmentsOfMonth.count} {installmentsOfMonth.count === 1 ? "parcela" : "parcelas"}</span>
+                    <button type="button" className="cr-quickbox-item" title="Ver as compras no crédito do mês"
+                      onClick={() => setDetail(monthGroupDetail(G, ["credit"], `Parcelas do mês · ${monthLabel(selectedMonth)}`))}>
+                      <span className="cr-label"><MonthGroupDot group="credit" />Parcelas do mês</span>
+                      <span className="cr-quickbox-number">{fmtBRL(G.credit.total)}</span>
+                      <span className="cr-quickbox-sub">em {G.credit.count} {G.credit.count === 1 ? "lançamento" : "lançamentos"} no crédito</span>
+                    </button>
+                    <button type="button" className="cr-quickbox-item" title="Ver os gastos previstos"
+                      onClick={() => setDetail(monthGroupDetail(G, ["planned"], `Gastos previstos · ${monthLabel(selectedMonth)}`))}>
+                      <span className="cr-label"><MonthGroupDot group="planned" />Gastos previstos</span>
+                      <span className="cr-quickbox-number">{fmtBRL(G.planned.total)}</span>
+                      <span className="cr-quickbox-sub">{G.planned.count} {G.planned.count === 1 ? "previsto" : "previstos"}</span>
+                    </button>
+                    <button type="button" className="cr-quickbox-item cr-quickbox-total" title="Ver os 4 grupos"
+                      onClick={() => setDetail(monthGroupDetail(G, MONTH_GROUP_KEYS, `Total comprometido · ${monthLabel(selectedMonth)}`, {
+                        totalLabel: "Total comprometido", note: `Vai cair no cartão (parcelas do mês + previstos no crédito): ${fmtBRL(G.toCard)}.`,
+                      }))}>
+                      <span className="cr-label">Total comprometido</span>
+                      <span className="cr-quickbox-number">{fmtBRL(G.total)}</span>
+                      <span className="cr-quickbox-sub">
+                        {fmtBRL(G.spent.total)} gastos + {fmtBRL(G.scheduled.total)} agendados + {fmtBRL(G.credit.total)} crédito + {fmtBRL(G.planned.total)} previstos
+                      </span>
+                      <span className="cr-quickbox-sub">vai cair no cartão: {fmtBRL(G.toCard)}</span>
                     </button>
                   </div>
                   {st.base > 0 ? (
                     <>
-                      <div className="cr-quickbox-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usedPct} aria-label="Quanto da renda do mês já foi usado">
-                        <div style={{ width: `${usedPct}%`, background: st.color }} />
+                      <div className="cr-quickbox-track cr-quickbox-segments" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usedPct}
+                        aria-label="Quanto da renda do mês está comprometido">
+                        {MONTH_GROUP_KEYS.map((key) => {
+                          const width = Math.max(0, Math.min(100, (G[key].total / st.base) * 100));
+                          return width > 0 ? <div key={key} title={`${MONTH_GROUP_META[key].label}: ${fmtBRL(G[key].total)}`} style={{ width: `${width}%`, background: MONTH_GROUP_META[key].color }} /> : null;
+                        })}
+                      </div>
+                      <div className="cr-quickbox-legend">
+                        {MONTH_GROUP_KEYS.map((key) => <span key={key}><MonthGroupDot group={key} />{MONTH_GROUP_META[key].short}</span>)}
                       </div>
                       <p className="cr-sub" style={{ margin: "6px 0 0", fontSize: 12 }}>
-                        {Math.round(st.pct * 100)}% da renda do mês {st.baseSource === "expected" ? "prevista" : "recebida"} ({fmtBRL(st.base)})
+                        {Math.round(st.pct * 100)}% da renda do mês {st.baseSource === "expected" ? "prevista" : "recebida"} ({fmtBRL(st.base)}) está comprometida
                       </p>
                     </>
                   ) : (
@@ -3892,24 +4004,64 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
               </>
             );
           })()}
+          {/* Previstos com data passada: lembrete discreto para efetivar, ajustar a data ou cancelar */}
+          {overduePlanned.length > 0 && (
+            <div className="cr-missing-finance" style={{ margin: "0 0 16px" }}>
+              <p className="cr-sub" style={{ margin: "0 0 4px", fontSize: 12.5, color: "#96631C" }}>
+                {overduePlanned.length === 1 ? "1 gasto previsto já passou da data" : `${overduePlanned.length} gastos previstos já passaram da data`}: efetive, ajuste a data ou cancele.
+              </p>
+              {overduePlanned.map((f) => (
+                <div key={f.id} className="cr-overdue-row">
+                  <span className="cr-detail-desc"><strong>{f.desc || f.category || "Previsto"}</strong><span>{fmtDateBR(f.date)} · {fmtBRL(Number(f.amount) || 0)}</span></span>
+                  <span className="cr-row" style={{ gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button type="button" className="cr-btn cr-effect-btn" onClick={() => effect(f)}>Efetivar</button>
+                    <button type="button" className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openEdit(f)}>Ajustar data</button>
+                    <button type="button" className="cr-btn ghost danger" style={{ padding: "4px 8px" }}
+                      onClick={() => setFinance(manualFinance.map((item) => (item.id === f.id ? { ...item, status: "cancelado" } : item)))}>Cancelar</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Os dois gráficos logo abaixo da caixa de resumo */}
+          {(() => {
+            const chartGroup = categoryChartGroupOf(settings);
+            const catData = expenseCategoryData(finance, selectedMonth, { group: chartGroup, cards });
+            return (
+              <div className="cr-card" style={{ marginBottom: 16 }}>
+                <p className="cr-label" style={{ marginBottom: 8 }}>Gastos por categoria — {monthLabel(selectedMonth)} · {CATEGORY_GROUP_OPTIONS.find((o) => o.id === chartGroup).label}</p>
+                <CategoryGroupSelector value={chartGroup} onChange={(value) => setSettings({ ...settings, categoryChartGroup: value })} />
+                {catData.length === 0
+                  ? <p className="cr-empty">Nada neste grupo neste mês.</p>
+                  : <CategoryExpenseChart data={catData} settings={settings} setSettings={setSettings}
+                    onCategoryClick={(label) => setDetail(categoryDetail(finance, selectedMonth, label, { group: chartGroup, cards }))} />}
+              </div>
+            );
+          })()}
+          {financeChartMonths(finance, cards).length > 0 && (
+            <div className="cr-card" style={{ marginBottom: 16 }}>
+              <FinanceChartContent finance={finance} cards={cards} chartMonth={chartMonth}
+                onChartMonthChange={(value) => setSettings({ ...settings, financeChartMonth: value })} />
+            </div>
+          )}
           <div className="cr-grid cr-grid-3" style={{ marginBottom: 16 }}>
             <SummaryBlock label="Renda efetivamente recebida" value={fmtBRL(income)} onClick={() => showDetail("income")} />
-            <SummaryBlock label="Gastos efetivamente realizados" value={fmtBRL(expense)} onClick={() => showDetail("spent")} />
-            <SummaryBlock label="Saldo após gastos de consumo" value={fmtBRL(balance)} valueStyle={{ color: balance >= 0 ? "#5C7A56" : "#A1493C" }} onClick={() => showDetail("balance")} />
-            <SummaryBlock label="Despesas fixas pendentes" value={fmtBRL(planSummary.fixedCommitments)} onClick={() => showDetail("fixedCommitments")} />
-            <SummaryBlock label="Gastos fixos realizados" value={fmtBRL(planSummary.fixedSpent)} onClick={() => showDetail("fixedSpent")} />
-            <SummaryBlock label="Gastos variáveis realizados" value={fmtBRL(planSummary.variableSpent)} onClick={() => showDetail("variableSpent")} />
-            <SummaryBlock label="Outras despesas pendentes" value={fmtBRL(planSummary.variableCommitments)} onClick={() => showDetail("variableCommitments")} />
+            <SummaryBlock label="Gastos efetivamente realizados" value={fmtBRL(G.spent.total)} onClick={() => showDetail("spent")} />
+            <SummaryBlock label="Saldo após gastos de consumo" value={fmtBRL(income - G.spent.total)} valueStyle={{ color: income - G.spent.total >= 0 ? "#5C7A56" : "#A1493C" }} onClick={() => showDetail("balance")} />
+            <SummaryBlock label="Despesas fixas pendentes" value={fmtBRL(sumOfItems(scheduledFixed))} onClick={() => showDetail("fixedCommitments")} />
+            <SummaryBlock label="Gastos fixos realizados" value={fmtBRL(sumOfItems(spentFixed))} onClick={() => showDetail("fixedSpent")} />
+            <SummaryBlock label="Gastos variáveis realizados" value={fmtBRL(sumOfItems(spentVariable, G.spent.lines))} onClick={() => showDetail("variableSpent")} />
+            <SummaryBlock label="Outras despesas pendentes" value={fmtBRL(sumOfItems(scheduledVariable))} onClick={() => showDetail("variableCommitments")} />
             <SummaryBlock label="Reserva protegida ainda pendente" value={fmtBRL(planSummary.reservedRemaining)} onClick={() => showDetail("reservedRemaining")} />
             <SummaryBlock label="Reservas e investimentos realizados" value={fmtBRL(planSummary.transferPaid)} onClick={() => showDetail("transferPaid")} />
-            <SummaryBlock label="Previsão de gastos do mês" value={fmtBRL(planSummary.projectedSpending)} onClick={() => showDetail("projectedSpending")} />
-            <SummaryBlock label="Despesas estimadas (não realizadas)" value={fmtBRL(planSummary.estimatedPurchases)} onClick={() => showDetail("estimated")} />
-            <SummaryBlock label="Disponível sem comprometer metas" value={fmtBRL(planSummary.available)} valueStyle={{ color: planSummary.available >= 0 ? "#5C7A56" : "#A1493C" }} onClick={() => showDetail("available")} />
-            <SummaryBlock label="Percentual da renda recebido já gasto" value={income > 0 ? `${Math.round((expense / income) * 100)}%` : "—"} onClick={() => showDetail("percent")} />
+            <SummaryBlock label="Previsão de gastos do mês" value={fmtBRL(G.total)} onClick={() => showDetail("projectedSpending")} />
+            <SummaryBlock label="Despesas estimadas (não realizadas)" value={fmtBRL(G.planned.total)} onClick={() => showDetail("estimated")} />
+            <SummaryBlock label="Disponível sem comprometer metas" value={fmtBRL(availableForGoals)} valueStyle={{ color: availableForGoals >= 0 ? "#5C7A56" : "#A1493C" }} onClick={() => showDetail("available")} />
+            <SummaryBlock label="Percentual da renda comprometido" value={income > 0 ? `${Math.round((G.total / income) * 100)}%` : "—"} onClick={() => showDetail("percent")} />
             <SummaryBlock label="Fatura do cartão (crédito)" value={fmtBRL(invoiceTotal)} onClick={() => showDetail("invoice")} />
             <SummaryBlock label="Parcelas futuras" value={fmtBRL(futureInstallments)} onClick={() => showDetail("futureInstallments")} />
             <SummaryBlock label="Valor original parcelado" value={fmtBRL(installmentTotal)} onClick={() => showDetail("installmentTotal")} />
-            <SummaryBlock label="Parcelas com vencimento no mês" value={fmtBRL(currentMonthInstallments)} onClick={() => showDetail("monthInstallments")} />
+            <SummaryBlock label="Parcelas com vencimento no mês" value={fmtBRL(G.credit.total)} onClick={() => showDetail("monthInstallments")} />
             <SummaryBlock label="Lançamentos no mês" value={monthTx.length} onClick={() => showDetail("monthCount")} />
           </div>
           <div className="cr-card" style={{ marginBottom: 16 }}>
@@ -3972,28 +4124,11 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                 </div>
               ))}
           </div>
-          {financeChartMonths(finance).length > 0 && (
-            <div className="cr-card" style={{ marginBottom: 16 }}>
-              <FinanceChartContent finance={finance} chartMonth={chartMonth}
-                onChartMonthChange={(value) => setSettings({ ...settings, financeChartMonth: value })} />
-            </div>
-          )}
-          {(() => {
-            const catData = expenseCategoryData(finance, selectedMonth);
-            if (catData.length === 0) return null;
-            return (
-              <div className="cr-card" style={{ marginBottom: 16 }}>
-                <p className="cr-label" style={{ marginBottom: 10 }}>Gastos por categoria — {monthLabel(selectedMonth)}</p>
-                <CategoryExpenseChart data={catData} settings={settings} setSettings={setSettings}
-                  onCategoryClick={(label) => setDetail(categoryDetail(finance, selectedMonth, label))} />
-              </div>
-            );
-          })()}
           <div className="cr-card">
             <p className="cr-label" style={{ marginBottom: 6 }}>Lançamentos do mês</p>
             {monthTx.length === 0 && <p className="cr-empty">Nada neste mês.</p>}
             {monthTx.slice().sort((a, b) => b.date.localeCompare(a.date)).map((f) => (
-              <FinanceRow key={f.id} f={f} onEdit={() => openEdit(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} procedure={f.sourceRef ? null : linkedCardFor(beauty, f)} />
+              <FinanceRow key={f.id} f={f} onEdit={() => openEdit(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} procedure={f.sourceRef ? null : linkedCardFor(beauty, f)} onEffect={effect} />
             ))}
           </div>
         </div>
@@ -4012,7 +4147,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           <div className="cr-card">
             {filteredTx.length === 0 && <p className="cr-empty">Nenhum lançamento encontrado.</p>}
             {filteredTx.map((f) => (
-              <FinanceRow key={f.id} f={f} onEdit={() => openEdit(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} procedure={f.sourceRef ? null : linkedCardFor(beauty, f)} />
+              <FinanceRow key={f.id} f={f} onEdit={() => openEdit(f)} onRemove={() => remove(f.id)} goTo={goTo} onOrigin={onOrigin} procedure={f.sourceRef ? null : linkedCardFor(beauty, f)} onEffect={effect} />
             ))}
           </div>
         </div>
@@ -4046,6 +4181,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           {cards.length === 0 && <div className="cr-card"><p className="cr-empty">Cadastre um cartão em "Contas & Cartões" para acompanhar compras e faturas.</p><button className="cr-btn" onClick={() => setTab("contas")}>Cadastrar cartão</button></div>}
           {invoiceDetails && (() => {
             const { card, window, purchases, existingAmount, total, payments, paid, remaining, status, dueDate } = invoiceDetails;
+            const plannedInInvoice = invoiceDetails.planned || [];
             const limitSummary = cardLimitSummary(card, finance);
             const limitProgress = Math.min(100, Math.max(0, limitSummary.usedPercent));
             const hasCycleDays = Number(card.closingDay) >= 1 && Number(card.dueDay) >= 1;
@@ -4100,6 +4236,21 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                     </div>
                   ))}
 
+                  {plannedInInvoice.length > 0 && (
+                    <div className="cr-invoice-preview">
+                      <h3 className="cr-serif" style={{ fontSize: 15, margin: "16px 0 4px" }}>Prévia: previstos que cairiam nesta fatura</h3>
+                      <p className="cr-sub" style={{ margin: "0 0 6px" }}>Ainda não aconteceram: não entram no total da fatura nem no limite. Total previsto: {fmtBRL(invoiceDetails.plannedTotal || 0)}.</p>
+                      {plannedInInvoice.map((f) => (
+                        <div className="cr-list-row is-planned" key={f.id}>
+                          <span className="cr-list-title">{f.desc || f.category || "Previsto"}</span>
+                          <span className="cr-chip">previsto {fmtDateShort(f.date)}</span>
+                          {f.installmentGroup && <span className="cr-chip">{f.installmentGroup.index}/{f.installmentGroup.total}</span>}
+                          <span style={{ fontWeight: 600, fontSize: 13.5, whiteSpace: "nowrap" }}>{fmtBRL(f.amount)}</span>
+                          {!f.sourceRef && <button type="button" className="cr-btn cr-effect-btn" onClick={() => effect(f)}>Efetivar</button>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <h3 className="cr-serif" style={{ fontSize: 15, marginTop: 18 }}>Pagamentos registrados</h3>
                   {payments.map((payment) => (
                     <div className="cr-list-row" key={payment.id}>
@@ -4184,7 +4335,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           accounts={accounts} cards={cards} paymentMethods={settings.paymentMethods || DEFAULT_SETTINGS.paymentMethods}
           categories={settings.financeCategories || DEFAULT_SETTINGS.financeCategories} />
       )}
-      {detail && <FinanceDetailModal detail={detail} accounts={accounts} cards={cards} onOpenEntry={openEntryFromDetail} onClose={() => setDetail(null)} />}
+      {detail && <FinanceDetailModal detail={detail} accounts={accounts} cards={cards} onOpenEntry={openEntryFromDetail} onClose={() => setDetail(null)} onEffect={effect} />}
       {editScopeAsk && (
         <Modal size="small" title="Editar parcela" onClose={() => setEditScopeAsk(null)}>
           <p style={{ fontSize: 14, lineHeight: 1.5, marginTop: 0 }}>
@@ -4227,7 +4378,7 @@ function financePaymentLabel(tx, accounts, cards) {
 
 // Painel com os lançamentos de um bloco, agrupados e com subtotal; o total final é a soma das mesmas listas do bloco.
 // groups: [{ label, sign: 1 | -1, items: [lançamentos], lines: [{ label, amount }] }]
-function FinanceDetailModal({ detail, accounts, cards, onOpenEntry, onClose }) {
+function FinanceDetailModal({ detail, accounts, cards, onOpenEntry, onClose, onEffect }) {
   const [sortBy, setSortBy] = useState("data");
   const today = todayStr();
   const distance = (date) => Math.abs(new Date(`${date || today}T00:00:00`) - new Date(`${today}T00:00:00`));
@@ -4265,7 +4416,8 @@ function FinanceDetailModal({ detail, accounts, cards, onOpenEntry, onClose }) {
             )}
             {!(group.items || []).length && !(group.lines || []).length && <p className="cr-sub" style={{ margin: "2px 0 6px" }}>Nenhum lançamento.</p>}
             {sortItems(group.items || []).map((tx) => (
-              <button key={tx.id} type="button" className="cr-detail-row" onClick={() => onOpenEntry(tx)}
+              <div key={tx.id} className={`cr-detail-row-wrap ${tx.status === "previsto" || tx.sourceKind === "previsao" ? "is-planned" : ""}`}>
+              <button type="button" className="cr-detail-row" onClick={() => onOpenEntry(tx)}
                 title={tx.sourceRef ? "Abrir na área de origem" : "Abrir para editar"}>
                 <span className="cr-detail-desc">
                   <strong>{tx.desc || tx.category || "Lançamento"}{tx.installmentGroup ? ` (${tx.installmentGroup.index}/${tx.installmentGroup.total})` : ""}</strong>
@@ -4275,6 +4427,10 @@ function FinanceDetailModal({ detail, accounts, cards, onOpenEntry, onClose }) {
                 </span>
                 <span className="cr-detail-amount">{fmtBRL(Number(tx.amount) || 0)}</span>
               </button>
+              {onEffect && tx.status === "previsto" && !tx.sourceRef && (
+                <button type="button" className="cr-btn cr-effect-btn" onClick={() => onEffect(tx)} title="Virar lançamento real">Efetivar</button>
+              )}
+              </div>
             ))}
             {(group.lines || []).map((line, li) => (
               <div key={li} className="cr-detail-row is-info">
@@ -4650,12 +4806,12 @@ function ProcedureLinkChip({ card, onOrigin }) {
   );
 }
 
-function FinanceRow({ f, onEdit, onRemove, goTo, onOrigin, procedure }) {
+function FinanceRow({ f, onEdit, onRemove, goTo, onOrigin, procedure, onEffect }) {
   const st = effectiveStatus(f);
   const originTabs = { shopping: "shopping", beauty: "beauty", hobbies: "hobbies", receiptSchedule: "finance" };
   const deletableSource = ["receiptSchedule", "shopping", "beauty", "hobbies"].includes(f.sourceRef?.type);
   return (
-    <div className="cr-list-row">
+    <div className={`cr-list-row ${f.status === "previsto" || f.sourceKind === "previsao" ? "is-planned" : ""}`}>
       <span className="cr-chip">{fmtDateShort(f.date)}</span>
       <span className="cr-list-title" style={{ flex: 1 }}>{f.desc || f.category}</span>
       <span className="cr-chip">{f.category}</span>
@@ -4678,6 +4834,7 @@ function FinanceRow({ f, onEdit, onRemove, goTo, onOrigin, procedure }) {
           {deletableSource && f.sourceKind !== "previsao" && <button className="cr-btn ghost danger" aria-label="Excluir lançamento integrado" onClick={onRemove}><Trash2 size={14} /></button>}
         </>
         : <>
+          {onEffect && f.status === "previsto" && <button type="button" className="cr-btn cr-effect-btn" onClick={() => onEffect(f)} title="Virar lançamento real">Efetivar</button>}
           <button className="cr-btn ghost" onClick={onEdit}><Pencil size={14} /></button>
           <button className="cr-btn ghost danger" onClick={onRemove}><Trash2 size={14} /></button>
         </>}
@@ -5126,7 +5283,10 @@ function FinanceModal({ item, initialCardId = "", initialInvoiceMonth = "", onSa
   const excludeIds = item ? (item.installmentGroup ? (finance || []).filter((e) => e.installmentGroup?.id === item.installmentGroup.id).map((e) => e.id) : [item.id]) : [];
 
   return (
-    <Modal title={item ? (item._editScope === "all" ? "Editar todas as parcelas" : item.installmentGroup ? `Editar parcela ${item.installmentGroup.index}/${item.installmentGroup.total}` : "Editar lançamento") : "Novo lançamento"} onClose={onClose}>
+    <Modal title={item?._effecting ? "Efetivar previsto" : item ? (item._editScope === "all" ? "Editar todas as parcelas" : item.installmentGroup ? `Editar parcela ${item.installmentGroup.index}/${item.installmentGroup.total}` : "Editar lançamento") : "Novo lançamento"} onClose={onClose}>
+      {item?._effecting && (
+        <p className="cr-sub" style={{ marginTop: 0 }}>Confira o valor final, a data e a forma de pagamento e toque em "Salvar lançamento". Ele deixa de ser previsto e passa a contar no grupo certo (gasto, agendado ou crédito).</p>
+      )}
       {item?._editScope === "all" && (
         <p className="cr-sub" style={{ marginTop: 0 }}>O valor é o total da compra, dividido entre as parcelas. Categoria, classificação, descrição e forma de pagamento valem para todas; a data e o status continuam de cada parcela. Mudar o número de parcelas, a parcela atual ou a fatura refaz as parcelas.</p>
       )}
