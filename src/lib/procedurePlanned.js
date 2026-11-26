@@ -12,6 +12,8 @@ export function procedureNextDate(card, today) {
   if (gcal) return gcal;
   if (future(card.plannedDate)) return card.plannedDate;
   if (future(card.nextExpenseDate)) return card.nextExpenseDate;
+  // data do procedimento informada no futuro (ainda vai acontecer)
+  if (future(card.dateDone)) return card.dateDone;
   return "";
 }
 
@@ -20,10 +22,13 @@ const round2 = (value) => Math.round(value * 100) / 100;
 
 // convertExisting: regra 1 (vinculados agendado/pendente → previsto) só no primeiro carregamento;
 // depois disso, um lançamento efetivado como agendado não volta a previsto.
-export function reprocessProcedurePlanned(beauty, finance, { today, newId, creditCards = [], convertExisting = true }) {
+// reportMissingDate: lista no relatório os procedimentos com valor, ainda a fazer, sem data de sessão futura.
+// "Registrar em Finanças" só deixa o procedimento de fora quando foi desmarcado por você (financeOptOut):
+// a ficha antiga gravava "desmarcado" sozinha ao abrir um card sem vínculo.
+export function reprocessProcedurePlanned(beauty, finance, { today, newId, creditCards = [], convertExisting = true, reportMissingDate = false }) {
   const cards = Array.isArray(beauty) ? beauty : [];
   let list = Array.isArray(finance) ? finance : [];
-  const report = { converted: [], created: [], skipped: [] };
+  const report = { converted: [], created: [], skipped: [], linked: [] };
   let beautyChanged = false;
   let financeChanged = false;
   const nextBeauty = cards.map((card) => {
@@ -31,9 +36,23 @@ export function reprocessProcedurePlanned(beauty, finance, { today, newId, credi
     const status = String(card.procStatus || "").toLowerCase();
     if (status === "nunca" || status.startsWith("paus")) return card;
     const next = procedureNextDate(card, today);
-    if (!next) return card;
+    if (!next) {
+      if (reportMissingDate && !card.financeLink?.key && !card.financeOptOut && procedureTotal(card) > 0
+        && ["quero", "comecei", "novamente"].includes(status)) {
+        report.skipped.push({ id: card.id, name: card.name || "Sem nome", reason: "sem data de sessão futura" });
+      }
+      return card;
+    }
     if (card.financeLink?.key) {
-      if (!convertExisting) return card;
+      if (!convertExisting) {
+        const entries = list.filter((entry) => financeLinkKey(entry) === card.financeLink.key && entry.status !== "cancelado");
+        if (entries.length) {
+          report.linked.push({ id: card.id, name: card.name || "Sem nome", date: next,
+            amount: round2(entries.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)),
+            status: [...new Set(entries.map((entry) => entry.status || "pago"))].join(", ") });
+        }
+        return card;
+      }
       // 1) vinculado: lançamentos futuros ainda "agendado/pendente" passam a previsto
       const ids = new Set(list.filter((entry) => financeLinkKey(entry) === card.financeLink.key
         && ["agendado", "pendente"].includes(entry.status) && entry.date > today
@@ -45,7 +64,10 @@ export function reprocessProcedurePlanned(beauty, finance, { today, newId, credi
       report.converted.push({ id: card.id, name: card.name || "Sem nome", date: next, amount: round2(amount) });
       return card;
     }
-    if (card.financeRegister === false) return card;
+    if (card.financeOptOut) {
+      report.skipped.push({ id: card.id, name: card.name || "Sem nome", reason: "\"Registrar em Finanças\" desmarcado por você" });
+      return card;
+    }
     if (!(procedureTotal(card) > 0)) {
       report.skipped.push({ id: card.id, name: card.name || "Sem nome", reason: "sem valor informado" });
       return card;

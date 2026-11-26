@@ -51,7 +51,7 @@ describe("reprocessProcedurePlanned", () => {
   it("pago antecipado continua pago e registro desligado é respeitado", () => {
     const beauty = [
       { id: "b5", name: "Botox", cost: 900, scheduledDate: "2026-12-05", financeLink: { key: "f5", origin: "beauty" } },
-      { id: "b6", name: "Peeling", cost: 300, scheduledDate: "2026-12-06", financeRegister: false },
+      { id: "b6", name: "Peeling", cost: 300, scheduledDate: "2026-12-06", financeRegister: false, financeOptOut: true },
     ];
     const finance = [{ id: "f5", type: "saida", amount: 900, date: "2026-11-20", status: "pago", paymentMethod: "Pix" }];
     const out = run(beauty, finance);
@@ -84,5 +84,50 @@ describe("conversão só no primeiro carregamento", () => {
     const out = reprocessProcedurePlanned(beauty, finance, { today, newId, creditCards: [], convertExisting: false });
     expect(out.changed).toBe(false);
     expect(out.finance[0].status).toBe("agendado");
+  });
+});
+
+describe("previstos que ficavam de fora (9ª rodada)", () => {
+  const today = "2026-11-26";
+  let n = 0; const newId = () => `id${++n}`;
+  const lash = { id: "lash", name: "Lash lifting", procStatus: "quero", cost: 140, scheduledDate: "2026-12-05", history: [], financeRegister: false };
+
+  it("card com 'Registrar em Finanças' gravado como desmarcado sem você ter escolhido ganha o previsto", () => {
+    const r = reprocessProcedurePlanned([lash], [], { today, newId, convertExisting: false });
+    expect(r.finance).toHaveLength(1);
+    expect(r.finance[0]).toMatchObject({ status: "previsto", amount: 140, date: "2026-12-05" });
+    expect(r.beauty[0].financeRegister).toBe(true);
+    expect(r.report.created.map((c) => c.name)).toEqual(["Lash lifting"]);
+  });
+  it("quem desmarcou de propósito continua fora", () => {
+    const r = reprocessProcedurePlanned([{ ...lash, financeOptOut: true }], [], { today, newId, convertExisting: false });
+    expect(r.finance).toHaveLength(0);
+    expect(r.report.skipped[0]).toMatchObject({ name: "Lash lifting", reason: "\"Registrar em Finanças\" desmarcado por você" });
+  });
+  it("data futura informada como data do procedimento também vale", () => {
+    const card = { ...lash, scheduledDate: "", dateDone: "2026-12-12" };
+    expect(procedureNextDate(card, today)).toBe("2026-12-12");
+  });
+  it("lista quem ficou de fora por não ter data futura", () => {
+    const card = { id: "c", name: "Coloração", procStatus: "quero", cost: 200, history: [] };
+    const r = reprocessProcedurePlanned([card], [], { today, newId, convertExisting: false, reportMissingDate: true });
+    expect(r.finance).toHaveLength(0);
+    expect(r.report.skipped[0]).toMatchObject({ name: "Coloração", reason: "sem data de sessão futura" });
+  });
+  it("rodar de novo não duplica", () => {
+    const first = reprocessProcedurePlanned([lash], [], { today, newId, convertExisting: false });
+    const again = reprocessProcedurePlanned(first.beauty, first.finance, { today, newId, convertExisting: false });
+    expect(again.changed).toBe(false);
+    expect(again.finance).toHaveLength(1);
+  });
+});
+
+describe("relatório: procedimentos que já estavam vinculados", () => {
+  it("lista os vinculados com sessão futura e o status dos lançamentos", () => {
+    const card = { id: "r", name: "Raiz", cost: 120, scheduledDate: "2026-12-20", financeLink: { key: "fr" } };
+    const finance = [{ id: "fr", type: "saida", status: "previsto", amount: 120, date: "2026-12-20" }];
+    const r = reprocessProcedurePlanned([card], finance, { today: "2026-11-26", newId: () => "x", convertExisting: false });
+    expect(r.changed).toBe(false);
+    expect(r.report.linked).toEqual([{ id: "r", name: "Raiz", date: "2026-12-20", amount: 120, status: "previsto" }]);
   });
 });

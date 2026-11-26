@@ -3691,7 +3691,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           if (item.id !== card.id) return item;
           const { financeLink, financeAuto, ...rest } = item;
           // o lançamento foi excluído em Finanças: não recria sozinho
-          return { ...rest, financeRegister: false };
+          return { ...rest, financeRegister: false, financeOptOut: true };
         }));
       }
     } else {
@@ -4075,6 +4075,34 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
               </>
             );
           })()}
+          {settings.plannedReportV9 && !settings.plannedReportV9.dismissed && (
+            <div className="cr-card cr-planned-report" style={{ marginBottom: 16 }}>
+              <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "nowrap", alignItems: "flex-start" }}>
+                <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>Previstos dos procedimentos reprocessados</h3>
+                <button type="button" className="cr-btn ghost" aria-label="Fechar aviso" title="Fechar"
+                  onClick={() => setSettings({ ...settings, plannedReportV9: { ...settings.plannedReportV9, dismissed: true } })}><X size={15} /></button>
+              </div>
+              {[["created", "Lançamento previsto criado agora"], ["linked", "Já estavam em Finanças"]].map(([key, label]) => (settings.plannedReportV9[key] || []).length > 0 && (
+                <div key={key} style={{ marginTop: 8 }}>
+                  <p className="cr-label" style={{ margin: "0 0 2px" }}>{label}</p>
+                  {settings.plannedReportV9[key].map((item) => (
+                    <p key={item.id} className="cr-sub" style={{ margin: 0 }}>{item.name} · {fmtDateBR(item.date)} · {fmtBRL(item.amount)}{item.status ? ` · ${listName("financeStatus", item.status.split(", ")[0])}${item.status.includes(",") ? " e outros" : ""}` : ""}</p>
+                  ))}
+                </div>
+              ))}
+              {(settings.plannedReportV9.skipped || []).length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <p className="cr-label" style={{ margin: "0 0 2px" }}>Ficaram de fora</p>
+                  {settings.plannedReportV9.skipped.map((item) => (
+                    <p key={item.id} className="cr-sub" style={{ margin: 0 }}>{item.name}: {item.reason}</p>
+                  ))}
+                </div>
+              )}
+              {!(settings.plannedReportV9.created || []).length && !(settings.plannedReportV9.linked || []).length && !(settings.plannedReportV9.skipped || []).length && (
+                <p className="cr-sub" style={{ margin: "6px 0 0" }}>Nenhum procedimento com sessão futura encontrado.</p>
+              )}
+            </div>
+          )}
           {settings.plannedReportV8 && !settings.plannedReportV8.dismissed && (
             <div className="cr-card cr-planned-report" style={{ marginBottom: 16 }}>
               <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "nowrap", alignItems: "flex-start" }}>
@@ -9967,7 +9995,8 @@ function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, me
           <input type="checkbox" checked={!!form.financeRegister} style={{ minHeight: 0 }}
             onChange={(e) => {
               if (!e.target.checked && linkedEntries.length) { setConfirmUnregister(true); return; }
-              setForm({ ...form, financeRegister: e.target.checked, _financeEdited: true });
+              // desmarcar de propósito fica guardado (o reprocessamento dos previstos respeita); marcar desfaz
+              setForm({ ...form, financeRegister: e.target.checked, financeOptOut: !e.target.checked, _financeEdited: true });
             }} />
           <span style={{ fontSize: 14 }}>Registrar em Finanças <span className="cr-sub" style={{ margin: 0 }}>(Beleza · Procedimento)</span></span>
         </label>
@@ -10022,7 +10051,7 @@ function BeautyModal({ item, places, onSave, onClose, onRegister, placeTools, me
         {confirmUnregister && (
           <ConfirmModal title="Tirar de Finanças" confirmLabel="Excluir lançamento"
             message={`Desmarcar exclui ${linkedEntries.length > 1 ? `os ${linkedEntries.length} lançamentos` : "o lançamento"} deste procedimento em Finanças. Continuar?`}
-            onConfirm={() => { setConfirmUnregister(false); setForm({ ...form, financeRegister: false, _financeEdited: true }); }}
+            onConfirm={() => { setConfirmUnregister(false); setForm({ ...form, financeRegister: false, financeOptOut: true, _financeEdited: true }); }}
             onCancel={() => setConfirmUnregister(false)} />
         )}
       </div>
@@ -12542,13 +12571,19 @@ export default function App({ onSignOut }) {
   useEffect(() => {
     if (!loaded) return;
     const firstRun = !settings.plannedReprocessV8Done;
-    const result = reprocessProcedurePlanned(beauty, finance, { today: todayStr(), newId: uid, creditCards: cards, convertExisting: firstRun });
+    // 9ª rodada: procedimentos gravados como "desmarcado" sem escolha sua também ganham o previsto (uma vez, com relatório)
+    const firstRunV9 = !firstRun && !settings.plannedReprocessV9Done;
+    const result = reprocessProcedurePlanned(beauty, finance, { today: todayStr(), newId: uid, creditCards: cards, convertExisting: firstRun, reportMissingDate: firstRunV9 });
     if (result.changed) { setFinance(result.finance); setBeauty(result.beauty); }
     if (firstRun) {
       const { converted, created, skipped } = result.report;
       const hasReport = converted.length || created.length || skipped.length;
       setSettings({ ...settings, plannedReprocessV8Done: true,
         ...(hasReport ? { plannedReportV8: { converted, created, skipped, at: todayStr(), dismissed: false } } : {}) });
+    } else if (firstRunV9) {
+      const { created, skipped, linked } = result.report;
+      setSettings({ ...settings, plannedReprocessV9Done: true,
+        plannedReportV9: { created, skipped, linked, at: todayStr(), dismissed: false } });
     }
   }, [loaded, beauty, finance, cards, settings]);
   const setStudyAreas = useCallback((v) => { setStudyAreasState(v); return storageSet(KEYS.studyareas, v); }, []);
