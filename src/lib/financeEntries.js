@@ -124,7 +124,10 @@ export function procedureFinanceForm(card, settings = {}, today) {
   return {
     type: "saida", category: "Beleza", expenseClass: "procedure", desc: card.name || "Procedimento", link: "",
     amount: procedureTotal(card), date,
-    status: settings.status || (date <= today ? "pago" : "agendado"),
+    // procedimento que ainda vai acontecer é um gasto previsto (a menos que já tenha sido pago adiantado)
+    status: date > today
+      ? (["pago", "cancelado"].includes(settings.status) ? settings.status : "previsto")
+      : (settings.status && settings.status !== "previsto" ? settings.status : "pago"),
     paymentMethod: settings.paymentMethod ?? "Pix",
     cardId: settings.cardId || "", accountId: settings.accountId || "",
     installmentsCount: Number(settings.installmentsCount) || 1,
@@ -150,14 +153,18 @@ export function financeEntriesForProcedure(card, { mode = "total", settings = {}
       const amount = index === count - 1 ? Math.round((form.amount - per * (count - 1)) * 100) / 100 : per;
       const [entry] = materializeFinanceEntries({
         // cada sessão: paga se a data já passou, a pagar se ainda vai acontecer
-        ...form, amount, date, status: date <= today ? "pago" : "agendado",
+        ...form, amount, date, status: date <= today ? "pago" : "previsto",
         installmentsCount: 1, paidCount: 0, firstInvoiceMonth: "",
       }, { card: cc, today, newId, entryId: `${gid}:${index + 1}` }).entries;
       return { ...entry, installmentGroup: { id: gid, index: index + 1, total: count, totalAmount: form.amount, purchaseDate: dates[0], kind: "sessions" } };
     });
     return { entries, payments: [], link: { key: gid, installments: count, installmentAmount: entries[count - 1].amount, origin, mode: "sessions" } };
   }
-  const { entries, payments } = materializeFinanceEntries(form, { card: cc, today, newId });
+  const made = materializeFinanceEntries(form, { card: cc, today, newId });
+  // compra que ainda não aconteceu: todas as parcelas ficam previstas (nada pago, nada na fatura real)
+  const planned = form.status === "previsto";
+  const entries = planned ? made.entries.map((entry) => ({ ...entry, status: "previsto" })) : made.entries;
+  const payments = planned ? [] : made.payments;
   const grouped = entries.length > 1;
   return {
     entries, payments,

@@ -59,7 +59,7 @@ describe("procedimento → Finanças", () => {
   it("por sessão no cartão, cada sessão na fatura da sua data", () => {
     const r = financeEntriesForProcedure({ ...proc, scheduledDate: "2026-12-15" }, { mode: "sessions", settings: { paymentMethod: "Crédito", cardId: "c1" }, creditCards: [card], today, newId });
     expect(r.entries.map((e) => [e.date, e.amount, e.invoiceMonth, e.installmentGroup.kind, e.status])).toEqual([
-      ["2026-11-20", 300, "2026-12", "sessions", "pago"], ["2026-12-15", 300, "2027-01", "sessions", "agendado"], ["2027-01-14", 300, "2027-02", "sessions", "agendado"]]);
+      ["2026-11-20", 300, "2026-12", "sessions", "pago"], ["2026-12-15", 300, "2027-01", "sessions", "previsto"], ["2027-01-14", 300, "2027-02", "sessions", "previsto"]]);
   });
   it("lançamento refeito continua no mesmo card", () => {
     const beauty = [{ id: "b1", name: "Laser", financeLink: { key: "old", origin: "beauty", mode: "total" } }];
@@ -67,5 +67,15 @@ describe("procedimento → Finanças", () => {
     const out = syncCardFromFinance(beauty, entries, { today, newId, previousKey: "old" });
     expect(out).toHaveLength(1);
     expect(out[0].financeLink).toMatchObject({ key: "new1", origin: "beauty" });
+  });
+});
+
+describe("procedimento futuro nasce previsto", () => {
+  it("financeEntriesForProcedure com data futura nasce previsto", () => {
+    const r = financeEntriesForProcedure({ id: "bf", name: "Lash", cost: 140, scheduledDate: "2026-12-05" }, { today, newId, settings: { paymentMethod: "Pix" } });
+    expect(r.entries[0].status).toBe("previsto");
+    const s = financeEntriesForProcedure({ id: "bs", name: "Laser", cost: 100, plannedSessions: 2, dateDone: "2026-11-20", scheduledDate: "2026-12-20" },
+      { mode: "sessions", today, newId, settings: { paymentMethod: "Pix" } });
+    expect(s.entries.map((e) => e.status)).toEqual(["pago", "previsto"]);
   });
 });
