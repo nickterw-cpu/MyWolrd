@@ -47,7 +47,8 @@ export function monthGroups(finance, cards, month, { receivedIncome = 0, expecte
   (Array.isArray(cards) ? cards : []).forEach((card) => {
     const invoice = buildCardInvoices(card, list).find((entry) => entry.month === month);
     if (!invoice) return;
-    const purchases = invoice.purchases.filter((entry) => relevant(entry) && !isPlannedEntry(entry));
+    // todas as compras reais da fatura (o mesmo total da tela de Fatura), sem os previstos
+    const purchases = invoice.purchases.filter((entry) => !isPlannedEntry(entry));
     const informedCents = cents(invoice.informed);
     const name = card.name || "do cartão";
     if (invoice.status === "paga") {
@@ -58,6 +59,10 @@ export function monthGroups(finance, cards, month, { receivedIncome = 0, expecte
     creditItems.push(...purchases);
     if (informedCents > 0) creditLines.push({ label: `Fatura ${name}: saldo informado à mão`, amount: informedCents / 100, cardId: card.id, month });
   });
+
+  // compras no crédito de um cartão que foi excluído: não têm fatura, ficam no crédito pelo mês da compra
+  const cardIds = new Set((Array.isArray(cards) ? cards : []).map((card) => card.id));
+  creditItems.push(...own.filter((entry) => !isPlannedEntry(entry) && isCreditEntry(entry) && !cardIds.has(entry.cardId)));
 
   const spent = group(spentItems, spentLines);
   const scheduled = group(scheduledItems);
@@ -78,4 +83,18 @@ export function monthGroups(finance, cards, month, { receivedIncome = 0, expecte
     base,
     baseSource: received > 0 ? "received" : expected > 0 ? "expected" : "none",
   };
+}
+
+// Meses com movimento: datas dos lançamentos e meses das faturas dos cartões (uma fatura paga pode
+// cair num mês sem nenhum lançamento datado nele).
+export function monthsWithActivity(finance, cards) {
+  const list = Array.isArray(finance) ? finance : [];
+  const months = new Set(list.filter((entry) => entry && entry.status !== "cancelado" && typeof entry.date === "string")
+    .map((entry) => entry.date.slice(0, 7)));
+  (Array.isArray(cards) ? cards : []).forEach((card) => {
+    buildCardInvoices(card, list).forEach((invoice) => {
+      if (invoice.total > 0 || invoice.purchases.length) months.add(invoice.month);
+    });
+  });
+  return [...months].filter((month) => /^\d{4}-\d{2}$/.test(month)).sort();
 }

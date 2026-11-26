@@ -16,7 +16,7 @@ import {
 import { countInWeek, normalizeTarget, numericGoalProgress, shiftDays, weekStartOf, weeklyMessage, weeklyStreak } from "./src/lib/workoutWeek.js";
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, monthSpendingStatus, summarizeFinanceMonth } from "./src/lib/financePlan.js";
-import { monthGroups } from "./src/lib/monthGroups.js";
+import { monthGroups, monthsWithActivity } from "./src/lib/monthGroups.js";
 import {
   actualExpenseAverages, buildFinanceAlerts, buildFinanceForecast, buildIntegratedFinance,
   cardInvoiceMonthForDate, cardInvoiceMonthForEntry, cardLimitSummary, createCardFinanceInstallments,
@@ -3129,11 +3129,14 @@ function monthLabel(m) {
 // Gráfico dos últimos meses: entradas = renda recebida; saídas = Gasto do mês (fora do cartão + faturas pagas).
 function financeChartMonths(finance, cards = []) {
   const map = {};
+  // todos os meses com movimento, inclusive o de uma fatura paga sem lançamento datado nele
+  monthsWithActivity(finance, cards).forEach((month) => {
+    map[month] = { month: monthLabel(month), _m: month, entrada: 0, saida: 0 };
+  });
   finance.forEach((entry) => {
     if (typeof entry.date !== "string" || entry.status === "cancelado") return;
     const month = entry.date.slice(0, 7);
-    map[month] = map[month] || { month: monthLabel(month), _m: month, entrada: 0, saida: 0 };
-    if (entry.type === "entrada" && (!entry.status || entry.status === "pago")) map[month].entrada += Number(entry.amount) || 0;
+    if (map[month] && entry.type === "entrada" && (!entry.status || entry.status === "pago")) map[month].entrada += Number(entry.amount) || 0;
   });
   return Object.values(map)
     .map((entry) => ({ ...entry, saida: monthGroups(finance, cards, entry._m).spent.total }))
@@ -3622,6 +3625,12 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     }
     setEditing({ ...original, status: "pago", date: todayStr(), _effecting: true });
   };
+  // Cancelar um previsto vencido: o lançamento fica cancelado (não some) e o card do procedimento vinculado acompanha.
+  const cancelPlanned = (entry) => {
+    const next = manualFinance.map((item) => (item.id === entry.id ? { ...item, status: "cancelado" } : item));
+    setFinance(next);
+    syncLinkedCard(next, { ...entry, status: "cancelado" });
+  };
   // Parcela: pergunta se a edição vale só para ela ou para todas as parcelas da compra.
   const [editScopeAsk, setEditScopeAsk] = useState(null);
   const openEdit = (entry) => {
@@ -4043,7 +4052,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
                     <button type="button" className="cr-btn cr-effect-btn" onClick={() => effect(f)}>Efetivar</button>
                     <button type="button" className="cr-btn ghost" style={{ padding: "4px 8px" }} onClick={() => openEdit(f)}>Ajustar data</button>
                     <button type="button" className="cr-btn ghost danger" style={{ padding: "4px 8px" }}
-                      onClick={() => setFinance(manualFinance.map((item) => (item.id === f.id ? { ...item, status: "cancelado" } : item)))}>Cancelar</button>
+                      onClick={() => cancelPlanned(f)}>Cancelar</button>
                   </span>
                 </div>
               ))}
@@ -9141,7 +9150,8 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
     categories: settings?.financeCategories || DEFAULT_SETTINGS.financeCategories,
     onOpenEntry: (entry) => { setEditing(null); if (onOpenFinanceEntry) onOpenFinanceEntry(entry); },
   };
-  // Revisão: procedimentos com valor que não têm lançamento em Finanças (nada é criado sozinho)
+  // Revisão: procedimentos com valor que não têm lançamento em Finanças. Os com sessão futura ganham o
+  // previsto automaticamente (8ª rodada); os que sobram aqui (sem sessão futura) não são criados sozinhos.
   const withoutFinance = beauty.filter((b) => !b.archived && !b.financeLink && (Number(b.cost) > 0 || procedureTotal(b) > 0));
   const [showMissing, setShowMissing] = useState(false);
   // Mescla um procedimento em outro (sessões da agenda, histórico e vínculo com Finanças vão para o destino).

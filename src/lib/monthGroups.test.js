@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isCreditEntry, isPlannedEntry, monthGroups } from "./monthGroups.js";
+import { isCreditEntry, isPlannedEntry, monthGroups, monthsWithActivity } from "./monthGroups.js";
 
 const card = { id: "c1", name: "Nubank", closingDay: 3, dueDay: 10 };
 const income = { receivedIncome: 5000 };
@@ -90,5 +90,26 @@ describe("monthGroups", () => {
     expect(isCreditEntry({ cardId: "c1" })).toBe(true);
     expect(isCreditEntry({ cardId: "c1", paymentMethod: "Pix" })).toBe(false);
     expect(isCreditEntry({ paymentMethod: "Crédito" })).toBe(false);
+  });
+});
+
+describe("pendências da revisão", () => {
+  it("crédito de cartão excluído entra em credit pelo mês da compra", () => {
+    const orphan = { id: "o1", type: "saida", status: "pago", paymentMethod: "Crédito", cardId: "apagado", amount: 75, date: "2026-11-15" };
+    const nov = monthGroups([orphan], [card], "2026-11", income);
+    expect(nov.credit.total).toBe(75);
+    expect(nov.total).toBe(75);
+  });
+
+  it("linha de fatura paga usa o total real, inclusive compra classificada como reserva", () => {
+    const reserve = { ...credit, id: "rv", amount: 100, expenseClass: "reserve" };
+    const paid = { ...card, invoices: { "2026-12": { month: "2026-12", status: "paga" } } };
+    const dez = monthGroups([credit, reserve], [paid], "2026-12", income);
+    expect(dez.spent.lines[0].amount).toBe(600);
+  });
+
+  it("meses com atividade incluem mês que só tem fatura paga", () => {
+    const paid = { ...card, invoices: { "2026-12": { month: "2026-12", status: "paga" } } };
+    expect(monthsWithActivity([credit], [paid])).toEqual(["2026-11", "2026-12"]);
   });
 });
