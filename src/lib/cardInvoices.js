@@ -45,8 +45,12 @@ export function invoiceStatus(record, total, paid) {
   return total > 0 && paid >= total - 0.005 ? "paga" : "aberta";
 }
 
+// Previsto no crédito ainda não aconteceu: aparece só na prévia da fatura, fora do total e do limite.
+const isPlannedCardEntry = (entry, card) => entry.cardId === card?.id && entry.type === "saida" && entry.status === "previsto"
+  && (!entry.paymentMethod || entry.paymentMethod === "Crédito");
+
 export function isCardPurchase(entry, card) {
-  return entry.cardId === card?.id && entry.type === "saida" && entry.status !== "cancelado"
+  return entry.cardId === card?.id && entry.type === "saida" && entry.status !== "cancelado" && entry.status !== "previsto"
     && (!entry.paymentMethod || entry.paymentMethod === "Crédito");
 }
 
@@ -55,7 +59,7 @@ export function buildCardInvoices(card, finance = []) {
   const list = Array.isArray(finance) ? finance : [];
   const byMonth = new Map();
   const bucket = (month) => {
-    if (!byMonth.has(month)) byMonth.set(month, { month, purchases: [] });
+    if (!byMonth.has(month)) byMonth.set(month, { month, purchases: [], planned: [] });
     return byMonth.get(month);
   };
   Object.keys(card.invoices || {}).forEach(bucket);
@@ -65,6 +69,11 @@ export function buildCardInvoices(card, finance = []) {
     if (!isCardPurchase(entry, card)) return;
     const month = cardInvoiceMonthForEntry(card, entry, list);
     if (month) bucket(month).purchases.push({ ...entry, targetInvoiceMonth: month });
+  });
+  list.forEach((entry) => {
+    if (!isPlannedCardEntry(entry, card)) return;
+    const month = cardInvoiceMonthForEntry(card, entry, list);
+    if (month) bucket(month).planned.push({ ...entry, targetInvoiceMonth: month });
   });
 
   return [...byMonth.values()]
@@ -80,6 +89,8 @@ export function buildCardInvoices(card, finance = []) {
       return {
         month: invoice.month,
         purchases: invoice.purchases.sort((a, b) => String(a.date).localeCompare(String(b.date))),
+        planned: invoice.planned.sort((a, b) => String(a.date).localeCompare(String(b.date))),
+        plannedTotal: invoice.planned.reduce((sum, entry) => sum + cents(entry.amount), 0) / 100,
         informed: informedCents / 100,
         total,
         payments,

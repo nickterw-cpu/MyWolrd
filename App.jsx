@@ -342,7 +342,7 @@ const LIST_REGISTRY = {
   accountType: { label: "Tipos de conta", kind: "strings", settingsKey: "accountTypes", usedBy: [["accounts", "type"]],
     defaults: ["conta bancária", "carteira", "outra"].map((n) => ({ id: n, name: n })) },
   financeStatus: { label: "Status dos lançamentos", usedBy: [["finance", "status"]],
-    defaults: [{ id: "pago", name: "Pago" }, { id: "pendente", name: "Pendente" }, { id: "agendado", name: "Agendado" }, { id: "cancelado", name: "Cancelado" }] },
+    defaults: [{ id: "pago", name: "Pago" }, { id: "pendente", name: "Pendente" }, { id: "agendado", name: "Agendado" }, { id: "previsto", name: "Previsto" }, { id: "cancelado", name: "Cancelado" }] },
   wishStatus: { label: "Status dos desejos da Wishlist", closedFlag: true, flagLabel: "já comprado ou cancelado", usedBy: [["shopping", "status", (it) => inferShoppingKind(it) === "desejo"]],
     defaults: [{ id: "desejado", name: "Desejado" }, { id: "comprado", name: "Comprado", closed: true }, { id: "ganhei", name: "Ganhei", closed: true }, { id: "recomprar", name: "Recomprar" }] },
   coursePriority: {
@@ -760,7 +760,8 @@ function reconcileLists(settings, collections) {
       : (Array.isArray(saved[key]) ? saved[key] : reg.defaults);
     const requiredDefaults = key === "wishStatus"
       ? reg.defaults.filter((option) => ["ganhei", "recomprar"].includes(option.id))
-      : key === "coursePriority" ? reg.defaults : [];
+      : key === "coursePriority" ? reg.defaults
+      : key === "financeStatus" ? reg.defaults.filter((option) => option.id === "previsto") : [];
     const missingDefaults = requiredDefaults.filter((option) => !current.some((entry) => entry.id === option.id));
     if (missingDefaults.length) {
       changed = true;

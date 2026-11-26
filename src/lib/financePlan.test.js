@@ -185,3 +185,13 @@ describe("monthSpendingStatus", () => {
   });
 });
 
+
+describe("previsto no resumo do mês", () => {
+  it("previsto não é compromisso, é estimativa", () => {
+    const summary = summarizeFinanceMonth([
+      { date: "2026-12-05", type: "saida", amount: 140, status: "previsto", paymentMethod: "Pix" },
+    ], { allocations: [] }, "2026-12");
+    expect(summary.commitments).toBe(0);
+    expect(summary.estimatedPurchases).toBe(140);
+  });
+});

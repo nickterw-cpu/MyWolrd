@@ -6,7 +6,7 @@ import {
   ensureInvoiceRecord,
   invoiceStatus,
 } from "./cardInvoices.js";
-import { cardInvoiceMonthForEntry, financeEntryWithInvoiceMonth } from "./financeIntegration.js";
+import { cardInvoiceMonthForEntry, cardLimitSummary, financeEntryWithInvoiceMonth } from "./financeIntegration.js";
 
 const card = { id: "c1", name: "Nubank", closingDay: 20, dueDay: 30, limit: 5000 };
 
@@ -95,5 +95,18 @@ describe("monthInstallments", () => {
     expect(dez).toMatchObject({ total: 600, count: 3 });
     expect(dez.items.some((e) => e.id === "gp:1")).toBe(true);
     expect(monthInstallments([card], finance, "2027-08")).toMatchObject({ total: 0, count: 0 });
+  });
+});
+
+describe("previsto no cartão", () => {
+  const card = { id: "c1", closingDay: 3, dueDay: 10, limit: 1000 };
+  const lash = { id: "l1", type: "saida", status: "previsto", paymentMethod: "Crédito", cardId: "c1", amount: 140, date: "2026-12-05" };
+  it("previsto no crédito não entra no total da fatura nem no limite", () => {
+    const invoice = buildCardInvoices(card, [lash]).find((entry) => entry.month === "2027-01");
+    expect(invoice.total).toBe(0);
+    expect(invoice.purchases).toHaveLength(0);
+    expect(invoice.planned).toHaveLength(1);
+    expect(invoice.plannedTotal).toBe(140);
+    expect(cardLimitSummary(card, [lash]).used).toBe(0);
   });
 });

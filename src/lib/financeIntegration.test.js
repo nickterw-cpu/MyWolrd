@@ -425,3 +425,20 @@ describe("finance forecast and controls", () => {
     expect(averages.yearly.sufficient).toBe(false);
   });
 });
+
+describe("procedimento vinculado e previsto", () => {
+  it("procedimento vinculado não gera estimativa", () => {
+    const records = buildIntegratedFinance({
+      finance: [],
+      beauty: [{ id: "b1", name: "Coloração", plannedDate: "2026-12-10", cost: 100, procStatus: "quero", financeLink: { key: "x" } }],
+      today: "2026-11-26",
+    });
+    expect(records.filter((entry) => entry.sourceKind === "previsao")).toHaveLength(0);
+  });
+  it("previsto manual aparece como despesa prevista nos alertas", () => {
+    const alerts = buildFinanceAlerts([
+      { id: "p", type: "saida", status: "previsto", desc: "Lash lifting", amount: 140, date: "2026-12-05" },
+    ], {}, "2026-11", "2026-11-26");
+    expect(alerts.some((alert) => alert.message.includes("Lash lifting"))).toBe(true);
+  });
+});

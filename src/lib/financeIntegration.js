@@ -90,7 +90,7 @@ export function cardLimitSummary(card, finance) {
 
   (Array.isArray(finance) ? finance : []).forEach((entry) => {
     if (entry.cardId !== card?.id || entry.type !== "saida" || entry.paymentMethod !== "Crédito"
-      || entry.status === "cancelado") return;
+      || entry.status === "cancelado" || entry.status === "previsto") return;
     const month = cardInvoiceMonthForEntry(card, entry, finance);
     if (!month) return;
     invoices.set(month, (invoices.get(month) || 0) + toCents(entry.amount));
@@ -277,6 +277,11 @@ function generateWishlistRecords(shopping, fromDate, untilDate) {
   return result;
 }
 
+// Previsto manual (status) ou estimativa automática das outras abas.
+function isPlanned(transaction) {
+  return transaction.sourceKind === "previsao" || transaction.status === "previsto";
+}
+
 function generateProcedureRecords(beauty, fromDate, untilDate) {
   const result = [];
   beauty.forEach((procedure) => {
@@ -289,6 +294,8 @@ function generateProcedureRecords(beauty, fromDate, untilDate) {
     });
     const status = String(procedure.procStatus || "").trim().toLowerCase();
     if (procedure.archived || status === "nunca" || status.startsWith("paus")) return;
+    // vinculado a Finanças: o lançamento (previsto ou real) já representa o gasto
+    if (procedure.financeLink?.key) return;
     if (!procedure.recurring && validDate(procedure.plannedDate) && procedure.plannedDate >= fromDate
       && procedure.plannedDate <= untilDate && !history.some((entry) => entry.date === procedure.plannedDate)) {
       const record = projectedRecord(
@@ -455,11 +462,11 @@ export function buildFinanceForecast(transactions, plan, fromMonth, horizonMonth
     const actualSpent = expenses.filter((transaction) => !transaction.status || transaction.status === "pago")
       .reduce((sum, transaction) => sum + positiveAmount(transaction.amount), 0);
     const committed = expenses.filter((transaction) => transaction.status && transaction.status !== "pago"
-      && transaction.sourceKind !== "previsao")
+      && !isPlanned(transaction))
       .reduce((sum, transaction) => sum + positiveAmount(transaction.amount), 0);
-    const estimated = expenses.filter((transaction) => transaction.sourceKind === "previsao")
+    const estimated = expenses.filter(isPlanned)
       .reduce((sum, transaction) => sum + positiveAmount(transaction.amount), 0);
-    const optionalEstimate = expenses.filter((transaction) => transaction.sourceKind === "previsao"
+    const optionalEstimate = expenses.filter((transaction) => isPlanned(transaction)
       && ["baixa", "low", "opcional"].includes(priorities(transaction)))
       .reduce((sum, transaction) => sum + positiveAmount(transaction.amount), 0);
     const salary = !hasReceiptSchedules && offset > 0 ? expectedIncome : 0;
@@ -524,19 +531,19 @@ export function buildFinanceAlerts(transactions, plan, month, today) {
     });
   }
   const soon = transactions.filter((transaction) => transaction.type === "saida"
-    && transaction.sourceKind === "previsao"
+    && isPlanned(transaction)
     && transaction.date >= today && transaction.date <= shiftDays(today, 30));
   soon.forEach((transaction) => alerts.push({
     id: `due:${transaction.id}`,
     level: "aviso",
-    message: `${transaction.sourceLabel}: compra ou despesa prevista para ${transaction.date}.`,
+    message: `${transaction.sourceLabel || transaction.desc || transaction.category || "Despesa"}: compra ou despesa prevista para ${transaction.date}.`,
   }));
   if (expectedMonthlyIncome > 0) {
     soon.filter((transaction) => positiveAmount(transaction.amount) >= expectedMonthlyIncome * 0.25)
       .forEach((transaction) => alerts.push({
         id: `large:${transaction.id}`,
         level: "aviso",
-        message: `${transaction.sourceLabel}: despesa prevista elevada (25% ou mais do líquido informado).`,
+        message: `${transaction.sourceLabel || transaction.desc || transaction.category || "Despesa"}: despesa prevista elevada (25% ou mais do líquido informado).`,
       }));
   }
   const knownIncome = allMonthEntries.filter((transaction) => transaction.type === "entrada"
@@ -548,7 +555,7 @@ export function buildFinanceAlerts(transactions, plan, month, today) {
     alerts.push({ id: "budget-risk", level: "alto", message: "Os gastos e compromissos deste mês superam a renda já recebida." });
   }
   const optionalEstimates = monthEntries.filter((transaction) =>
-    transaction.sourceKind === "previsao"
+    isPlanned(transaction)
     && ["baixa", "low", "opcional"].includes(String(transaction.sourcePriority || "").toLowerCase()));
   if (optionalEstimates.length > 0 && (
     (knownIncome > 0 && fixedAndPlanned > knownIncome)

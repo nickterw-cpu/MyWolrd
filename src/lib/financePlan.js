@@ -36,8 +36,8 @@ export function summarizeFinanceMonth(transactions, plan, month) {
     && tx.date.slice(0, 7) === month
     && tx.status !== "cancelado");
   const paid = (tx) => !tx.status || tx.status === "pago";
-  const pending = (tx) => tx.status && tx.status !== "pago" && tx.status !== "cancelado";
-  const projected = (tx) => tx.sourceKind === "previsao";
+  const projected = (tx) => tx.sourceKind === "previsao" || tx.status === "previsto";
+  const pending = (tx) => tx.status && tx.status !== "pago" && tx.status !== "cancelado" && !projected(tx);
   const incomeList = monthTransactions.filter((tx) => tx.type === "entrada" && paid(tx));
   const receivedIncome = sumOf(incomeList);
   const expenses = monthTransactions.filter((tx) => tx.type === "saida");
