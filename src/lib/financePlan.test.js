@@ -151,24 +151,36 @@ describe("summarizeFinanceMonth lists", () => {
 import { monthSpendingStatus } from "./financePlan.js";
 
 describe("monthSpendingStatus", () => {
+  const card = { id: "c1", name: "Nubank", closingDay: 3, dueDay: 10 };
   const base = [
     { date: "2026-11-05", type: "entrada", amount: 5000, status: "pago" },
-    { date: "2026-11-06", type: "saida", amount: 1000, status: "pago", expenseClass: "fixed" },
+    { date: "2026-11-06", type: "saida", amount: 1000, status: "pago", expenseClass: "fixed", paymentMethod: "Pix" },
   ];
   it("economizando bem com gastos baixos", () => {
-    expect(monthSpendingStatus(base, {}, "2026-11")).toMatchObject({ level: "good", spent: 1000, available: 4000 });
+    expect(monthSpendingStatus(base, {}, "2026-11", { cards: [card] })).toMatchObject({ level: "good", spent: 1000, available: 4000 });
   });
-  it("um valor alto no cartão muda a frase para alerta", () => {
-    const withCard = [...base, { date: "2026-11-10", type: "saida", amount: 4500, status: "agendado", paymentMethod: "Crédito", cardId: "c1" }];
-    const status = monthSpendingStatus(withCard, {}, "2026-11");
-    expect(status.level).toBe("over");
+  it("valor alto no cartão muda a frase", () => {
+    const withCard = [...base, { date: "2026-10-20", type: "saida", amount: 4500, status: "pago", paymentMethod: "Crédito", cardId: "c1" }];
+    const status = monthSpendingStatus(withCard, {}, "2026-11", { cards: [card] });
     expect(status.spent).toBe(5500);
+    expect(status.groups.spent.total).toBe(1000);
+    expect(status.groups.credit.total).toBe(4500);
+    expect(status.available).toBe(4000);
+    expect(status.level).toBe("over");
     expect(status.message).toMatch(/passou do orçamento/);
   });
-  it("saldo de fatura informado à mão também conta", () => {
-    const status = monthSpendingStatus(base, {}, "2026-11", { cards: [{ id: "c1", name: "Nubank", invoiceAmounts: { "2026-11": 3500 } }] });
+  it("saldo de fatura informado à mão também conta no total", () => {
+    const status = monthSpendingStatus(base, {}, "2026-11", { cards: [{ ...card, invoiceAmounts: { "2026-11": 3500 } }] });
     expect(status.spent).toBe(4500);
     expect(status.level).toBe("high");
+  });
+  it("previstos e agendados entram no total comprometido", () => {
+    const tx = [...base,
+      { date: "2026-11-25", type: "saida", amount: 80, status: "agendado", paymentMethod: "Boleto" },
+      { date: "2026-11-28", type: "saida", amount: 140, status: "previsto", paymentMethod: "Pix" }];
+    const status = monthSpendingStatus(tx, {}, "2026-11", { cards: [card] });
+    expect(status.spent).toBe(1220);
+    expect(status.available).toBe(4000);
   });
   it("usa a renda prevista quando nada foi recebido e avisa sem renda", () => {
     const noIncome = [{ date: "2026-11-06", type: "saida", amount: 300, status: "pago" }];
@@ -184,7 +196,6 @@ describe("monthSpendingStatus", () => {
     expect(monthSpendingStatus(tx, {}, "2026-11").level).toBe("aboveAverage");
   });
 });
-
 
 describe("previsto no resumo do mês", () => {
   it("previsto não é compromisso, é estimativa", () => {
