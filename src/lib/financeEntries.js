@@ -57,11 +57,13 @@ export function materializeFinanceEntries(form, { card, today, newId, groupId, e
     invoiceMonth: p.invoiceMonth,
     invoiceMonthExplicit: true,
     installmentGroup: { id: gid, index: p.index, total: p.total, totalAmount: total, purchaseDate: form.date, paidCount: paid },
-    status: p.paid || (paid === 0 && p.index === 1 && form.status === "pago" && p.date <= today)
-      ? "pago" : form.status === "cancelado" ? "cancelado" : "agendado",
+    // compra prevista (ainda não aconteceu): todas as parcelas ficam previstas
+    status: form.status === "previsto" ? "previsto"
+      : p.paid || (paid === 0 && p.index === 1 && form.status === "pago" && p.date <= today)
+        ? "pago" : form.status === "cancelado" ? "cancelado" : "agendado",
   }));
   // parcelas já pagas: o pagamento fica registrado na fatura do mês para não virar dívida
-  const payments = entries.filter((entry, index) => index < paid).map((entry) => ({
+  const payments = form.status === "previsto" ? [] : entries.filter((entry, index) => index < paid).map((entry) => ({
     id: newId(), invoiceMonth: entry.invoiceMonth, date: entry.date, amount: entry.amount, auto: true, installmentEntryId: entry.id,
   }));
   return { entries, payments };

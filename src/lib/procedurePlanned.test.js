@@ -76,3 +76,13 @@ describe("reprocessProcedurePlanned", () => {
     expect(second.finance).toBe(first.finance);
   });
 });
+
+describe("conversão só no primeiro carregamento", () => {
+  it("sem convertExisting, lançamento vinculado agendado (efetivado) não volta a previsto", () => {
+    const beauty = [{ id: "b9", name: "Coloração", cost: 200, scheduledDate: "2026-12-05", financeLink: { key: "f9", origin: "beauty" } }];
+    const finance = [{ id: "f9", type: "saida", amount: 200, date: "2026-12-05", status: "agendado", paymentMethod: "Boleto" }];
+    const out = reprocessProcedurePlanned(beauty, finance, { today, newId, creditCards: [], convertExisting: false });
+    expect(out.changed).toBe(false);
+    expect(out.finance[0].status).toBe("agendado");
+  });
+});

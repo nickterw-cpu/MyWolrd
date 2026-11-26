@@ -79,3 +79,12 @@ describe("procedimento futuro nasce previsto", () => {
     expect(s.entries.map((e) => e.status)).toEqual(["pago", "previsto"]);
   });
 });
+
+describe("previsto parcelado no crédito", () => {
+  it("todas as parcelas continuam previstas e sem pagamentos automáticos", () => {
+    const { entries, payments } = materializeFinanceEntries({ ...form, status: "previsto", amount: 300, date: "2026-12-05", installmentsCount: 3, paidCount: 1 },
+      { card, today, newId, groupId: "gp" });
+    expect(entries.map((e) => e.status)).toEqual(["previsto", "previsto", "previsto"]);
+    expect(payments).toEqual([]);
+  });
+});

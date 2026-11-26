@@ -4,7 +4,7 @@ import { getSupabase } from "./src/lib/supabase.js";
 import { localDateStr } from "./src/lib/localDate.js";
 import { habitStreak } from "./src/lib/habitStreak.js";
 import {
-  financeLinkKey, groupEntries, isProcedureExpense, linkedCardFor, planInstallments, procedureSessionCount,
+  financeLinkKey, financeUnregisterRequested, groupEntries, isProcedureExpense, linkedCardFor, planInstallments, procedureSessionCount,
   procedureTotal, shiftMonth as shiftMonthStr, syncCardFromFinance, syncFinanceFromCard,
 } from "./src/lib/procedureLink.js";
 import { cleanSelfCareTitle, syncSelfCareSessions } from "./src/lib/selfCareSync.js";
@@ -3829,7 +3829,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
     switch (key) {
       case "income": return { title: `Renda recebida · ${monthName}`, groups: [g("", L.income)], note: "Entradas com status pago neste mês." };
       case "spent": return { title: `Gastos realizados · ${monthName}`, groups: [g("", G.spent.items, 1, { lines: G.spent.lines })], note: MONTH_GROUP_META.spent.hint };
-      case "balance": return { title: `Saldo após gastos de consumo · ${monthName}`, groups: [g("Renda recebida", L.income), g("Gasto do mês", G.spent.items, -1, { lines: G.spent.lines })], totalLabel: "Saldo" };
+      case "balance": return { ...availableDetail(spendingStatus, L.income, selectedMonth), title: `Saldo após gastos de consumo · ${monthName}`, totalLabel: "Saldo" };
       case "commitments": return { title: `Comprometido (pendente) · ${monthName}`, groups: [g("", L.commitments)], note: "Saídas pendentes ou agendadas do mês, inclusive transferências; não inclui estimativas." };
       case "fixedCommitments": return { title: `Despesas fixas pendentes · ${monthName}`, groups: [g("", scheduledFixed)], note: "Agendados/Pendentes com classificação Fixo." };
       case "fixedSpent": return { title: `Gastos fixos realizados · ${monthName}`, groups: [g("", spentFixed)], note: "Gasto do mês com classificação Fixo." };
@@ -4073,7 +4073,7 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
           <div className="cr-grid cr-grid-3" style={{ marginBottom: 16 }}>
             <SummaryBlock label="Renda efetivamente recebida" value={fmtBRL(income)} onClick={() => showDetail("income")} />
             <SummaryBlock label="Gastos efetivamente realizados" value={fmtBRL(G.spent.total)} onClick={() => showDetail("spent")} />
-            <SummaryBlock label="Saldo após gastos de consumo" value={fmtBRL(income - G.spent.total)} valueStyle={{ color: income - G.spent.total >= 0 ? "#5C7A56" : "#A1493C" }} onClick={() => showDetail("balance")} />
+            <SummaryBlock label="Saldo após gastos de consumo" value={fmtBRL(G.available)} valueStyle={{ color: G.available >= 0 ? "#5C7A56" : "#A1493C" }} onClick={() => showDetail("balance")} />
             <SummaryBlock label="Despesas fixas pendentes" value={fmtBRL(sumOfItems(scheduledFixed))} onClick={() => showDetail("fixedCommitments")} />
             <SummaryBlock label="Gastos fixos realizados" value={fmtBRL(sumOfItems(spentFixed))} onClick={() => showDetail("fixedSpent")} />
             <SummaryBlock label="Gastos variáveis realizados" value={fmtBRL(sumOfItems(spentVariable, G.spent.lines))} onClick={() => showDetail("variableSpent")} />
@@ -9102,7 +9102,7 @@ function BeautyView({ beauty, setBeauty, places, setPlaces, settings, setSetting
     const settings = card.financeSettings || {};
     const linked = link ? nextFinance.filter((entry) => financeLinkKey(entry) === link.key) : [];
     const linkedIds = linked.map((entry) => entry.id);
-    if (link && clean.financeRegister === false) {
+    if (link && financeUnregisterRequested(clean)) {
       // desmarcou "Registrar em Finanças": o lançamento sai (e os pagamentos automáticos das parcelas)
       nextFinance = nextFinance.filter((entry) => !linkedIds.includes(entry.id));
       nextCards = applyCardInvoiceChanges(nextCards, { removedIds: linkedIds, today });
@@ -12371,15 +12371,20 @@ export default function App({ onSignOut }) {
   }, [loaded, gcal, beauty, setBeauty]);
   // Procedimentos agendados com valor → gastos previstos em Finanças (idempotente; não duplica).
   // A primeira vez que mudar algo (ou encontrar procedimentos sem valor), guarda o relatório para o aviso.
+  // A conversão dos já vinculados (agendado → previsto) roda só no primeiro carregamento; a criação de previstos
+  // para procedimentos novos é contínua. O relatório fica guardado dessa primeira execução.
   useEffect(() => {
     if (!loaded) return;
-    const result = reprocessProcedurePlanned(beauty, finance, { today: todayStr(), newId: uid, creditCards: cards });
+    const firstRun = !settings.plannedReprocessV8Done;
+    const result = reprocessProcedurePlanned(beauty, finance, { today: todayStr(), newId: uid, creditCards: cards, convertExisting: firstRun });
     if (result.changed) { setFinance(result.finance); setBeauty(result.beauty); }
-    const { converted, created, skipped } = result.report;
-    if (!settings.plannedReportV8 && (converted.length || created.length || skipped.length)) {
-      setSettings({ ...settings, plannedReportV8: { converted, created, skipped, at: todayStr(), dismissed: false } });
+    if (firstRun) {
+      const { converted, created, skipped } = result.report;
+      const hasReport = converted.length || created.length || skipped.length;
+      setSettings({ ...settings, plannedReprocessV8Done: true,
+        ...(hasReport ? { plannedReportV8: { converted, created, skipped, at: todayStr(), dismissed: false } } : {}) });
     }
-  }, [loaded, beauty, finance]);
+  }, [loaded, beauty, finance, cards, settings]);
   const setStudyAreas = useCallback((v) => { setStudyAreasState(v); return storageSet(KEYS.studyareas, v); }, []);
   const setPages = useCallback((v) => { setPagesState(v); return storageSet(KEYS.pages, v); }, []);
   const setPlaces = useCallback((v) => { setPlacesState(v); return storageSet(KEYS.places, v); }, []);

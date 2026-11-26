@@ -18,7 +18,9 @@ export function procedureNextDate(card, today) {
 const isCredit = (entry) => !!entry.cardId && (!entry.paymentMethod || entry.paymentMethod === "Crédito");
 const round2 = (value) => Math.round(value * 100) / 100;
 
-export function reprocessProcedurePlanned(beauty, finance, { today, newId, creditCards = [] }) {
+// convertExisting: regra 1 (vinculados agendado/pendente → previsto) só no primeiro carregamento;
+// depois disso, um lançamento efetivado como agendado não volta a previsto.
+export function reprocessProcedurePlanned(beauty, finance, { today, newId, creditCards = [], convertExisting = true }) {
   const cards = Array.isArray(beauty) ? beauty : [];
   let list = Array.isArray(finance) ? finance : [];
   const report = { converted: [], created: [], skipped: [] };
@@ -31,6 +33,7 @@ export function reprocessProcedurePlanned(beauty, finance, { today, newId, credi
     const next = procedureNextDate(card, today);
     if (!next) return card;
     if (card.financeLink?.key) {
+      if (!convertExisting) return card;
       // 1) vinculado: lançamentos futuros ainda "agendado/pendente" passam a previsto
       const ids = new Set(list.filter((entry) => financeLinkKey(entry) === card.financeLink.key
         && ["agendado", "pendente"].includes(entry.status) && entry.date > today

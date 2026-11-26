@@ -87,6 +87,12 @@ export function syncCardFromFinance(beauty, entries, { today, newId, previousKey
   return list.map((item) => item.id === existing.id ? patch : item);
 }
 
+// "Registrar em Finanças" desmarcado na ficha: só vale se a ficha já conhecia o vínculo
+// (uma ficha aberta antes de um vínculo automático não pode apagar o lançamento criado depois).
+export function financeUnregisterRequested(formData) {
+  return formData?.financeRegister === false && !!formData?.financeLink?.key;
+}
+
 export function cardLinkedDate(card) {
   return card?.dateDone || card?.scheduledDate || "";
 }

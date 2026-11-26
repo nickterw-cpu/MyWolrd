@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { financeEntriesForCard, isProcedureExpense, planInstallments, procedureTotal, syncCardFromFinance, syncFinanceFromCard } from "./procedureLink.js";
+import { financeEntriesForCard, financeUnregisterRequested, isProcedureExpense, planInstallments, procedureTotal, syncCardFromFinance, syncFinanceFromCard } from "./procedureLink.js";
 
 const today = "2026-11-24";
 let n = 0;
@@ -71,5 +71,13 @@ describe("procedimento criado na aba", () => {
     const many = financeEntriesForCard(card, { mode: "sessions", today, newId });
     expect(many.entries.map((e) => [e.date, e.amount])).toEqual([["2026-12-01", 200], ["2026-12-15", 200], ["2027-01-14", 200]]);
     expect(many.link).toMatchObject({ key: "sessions:b1", origin: "beauty", mode: "sessions", installments: 3 });
+  });
+});
+
+describe("pedido de tirar de Finanças", () => {
+  it("só vale quando a ficha conhecia o vínculo (ficha desatualizada não apaga)", () => {
+    expect(financeUnregisterRequested({ financeRegister: false, financeLink: { key: "x" } })).toBe(true);
+    expect(financeUnregisterRequested({ financeRegister: false })).toBe(false);
+    expect(financeUnregisterRequested({ financeRegister: true, financeLink: { key: "x" } })).toBe(false);
   });
 });
