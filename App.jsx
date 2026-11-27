@@ -17,6 +17,7 @@ import { countInWeek, normalizeTarget, numericGoalProgress, shiftDays, weekStart
 import { shareOrDownloadFile } from "./src/lib/shareFile.js";
 import { allocationValue, monthSpendingStatus, summarizeFinanceMonth } from "./src/lib/financePlan.js";
 import { monthGroups, monthsWithActivity } from "./src/lib/monthGroups.js";
+import { findDuplicateName, normalizeOptionName, remapField, unifyListOptions } from "./src/lib/listDedupe.js";
 import { investmentGoalFor, monthInvestments, setDefaultInvestmentGoal, setMonthInvestmentGoal } from "./src/lib/investmentGoals.js";
 import {
   actualExpenseAverages, buildFinanceAlerts, buildFinanceForecast, buildIntegratedFinance,
@@ -765,7 +766,9 @@ function reconcileLists(settings, collections) {
       ? reg.defaults.filter((option) => ["ganhei", "recomprar"].includes(option.id))
       : key === "coursePriority" ? reg.defaults
       : key === "financeStatus" ? reg.defaults.filter((option) => option.id === "previsto") : [];
-    const missingDefaults = requiredDefaults.filter((option) => !current.some((entry) => entry.id === option.id));
+    // nunca cria uma opção que já existe: compara pelo id e pelo nome (sem maiúsculas, acentos e espaços)
+    const missingDefaults = requiredDefaults.filter((option) => !current.some((entry) => entry.id === option.id
+      || normalizeOptionName(entry.name) === normalizeOptionName(option.name)));
     if (missingDefaults.length) {
       changed = true;
       current = [...current, ...missingDefaults];
@@ -894,15 +897,32 @@ function ListManagerModal({ listKey, items, setItems, usageCount, onDeleteItem, 
   const propsRef = useRef({});
   propsRef.current = { setItems, onRename, usageCount, onDeleteItem };
 
+  // nome repetido (sem diferenciar maiúsculas, acentos e espaços): avisa e não salva
+  const [dupWarn, setDupWarn] = useState(null);
+  const [dupGone, setDupGone] = useState("");
+  const dupMessage = /^status/i.test(reg.label) ? "Esse status já existe." : "Essa opção já existe.";
+  const savedRef = useRef(rows);
   const commit = (next) => {
     setRows(next);
     rowsRef.current = next;
-    propsRef.current.setItems(next.map(({ orig, ...rest }) => (isStrings ? { id: rest.name, name: rest.name } : rest)));
+    savedRef.current = next;
+    propsRef.current.setItems(next.map(({ orig, _new, ...rest }) => (isStrings ? { id: rest.name, name: rest.name } : rest)));
   };
   // listas cujo valor é o próprio nome (categorias de finanças): o rename vai para os lançamentos ao sair do campo
   const commitName = (idx) => {
     const r = rowsRef.current[idx];
     if (!r) return;
+    if (findDuplicateName(rowsRef.current, r.name, idx)) {
+      setDupWarn(idx);
+      // linha recém-adicionada com nome que já existe: não cria nada
+      if (r._new) { setDupWarn(null); setDupGone(r.name); commit(rowsRef.current.filter((_, i) => i !== idx)); return; }
+      // volta ao último nome salvo dessa linha
+      const saved = savedRef.current.find((x) => x.id === r.id) || savedRef.current[idx];
+      const back = rowsRef.current.map((x, i) => (i === idx ? { ...x, name: isStrings ? (x.orig || saved?.name || "") : (saved?.name || "") } : x));
+      setRows(back); rowsRef.current = back;
+      setDupWarn(idx);
+      return;
+    }
     if (isStrings && r.orig !== r.name) {
       if (propsRef.current.onRename && r.orig) propsRef.current.onRename(r.orig, r.name);
       commit(rowsRef.current.map((x, i) => (i === idx ? { ...x, orig: x.name } : x)));
@@ -911,7 +931,8 @@ function ListManagerModal({ listKey, items, setItems, usageCount, onDeleteItem, 
   useEffect(() => () => { rowsRef.current.forEach((_, i) => commitName(i)); }, []);
 
   const inputRefs = useRef([]);
-  const addRow = () => commit([...rows, { id: isStrings ? "Nova opção" : uid(), name: "Nova opção", orig: isStrings ? null : undefined, ...(reg.colorFlag ? { color: "#8C8177" } : {}) }]);
+  const newName = () => { let name = "Nova opção"; let n = 2; while (findDuplicateName(rows, name)) name = `Nova opção ${n++}`; return name; };
+  const addRow = () => { const name = newName(); commit([...rows, { id: isStrings ? name : uid(), name, orig: isStrings ? null : undefined, _new: true, ...(reg.colorFlag ? { color: "#8C8177" } : {}) }]); };
   const del = (idx) => {
     const r = rows[idx];
     const used = propsRef.current.usageCount ? propsRef.current.usageCount(r.orig) : 0;
@@ -932,6 +953,7 @@ function ListManagerModal({ listKey, items, setItems, usageCount, onDeleteItem, 
         <button className="cr-btn primary" onClick={addRow}><Plus size={13} /> Adicionar nova opção</button>
       </div>
       {rows.length === 0 && <p className="cr-empty">Nenhuma opção. Clique em "Adicionar nova opção".</p>}
+      {dupGone && <p role="alert" className="cr-sub" style={{ margin: "0 0 8px", color: "#A1493C", fontSize: 12.5 }}>{dupMessage} "{dupGone.trim()}" não foi adicionado de novo.</p>}
       {rows.map((r, i) => (
         <div className="cr-row" key={r.id + "-" + i} style={{ marginBottom: 6, flexWrap: "nowrap" }}>
           <button className="cr-btn ghost" style={{ padding: "4px 6px" }} disabled={i === 0} onClick={() => commit(moveItem(rows, i, -1))}>↑</button>
@@ -942,7 +964,13 @@ function ListManagerModal({ listKey, items, setItems, usageCount, onDeleteItem, 
               style={{ width: 34, height: 34, border: "none", background: "none", padding: 0, flexShrink: 0 }} />
           )}
           <input className="cr-input" value={r.name} ref={(el) => { inputRefs.current[i] = el; }}
-            onChange={(e) => { const next = rows.map((x, k) => (k === i ? { ...x, name: e.target.value } : x)); isStrings ? setRows(next) : commit(next); }}
+            aria-invalid={dupWarn === i} aria-describedby={dupWarn === i ? `dup-warn-${i}` : undefined}
+            onChange={(e) => {
+              const next = rows.map((x, k) => (k === i ? { ...x, name: e.target.value } : x));
+              const dup = findDuplicateName(rows, e.target.value, i);
+              setDupWarn(dup ? i : null);
+              if (isStrings || dup) { setRows(next); rowsRef.current = next; } else commit(next);
+            }}
             onBlur={() => commitName(i)} />
           {reg.closedFlag && (
             <label className="cr-chip" style={{ cursor: "pointer", whiteSpace: "nowrap" }} title="Marque se este status significa que o item terminou">
@@ -952,7 +980,7 @@ function ListManagerModal({ listKey, items, setItems, usageCount, onDeleteItem, 
           )}
           <button className="cr-btn ghost danger" onClick={() => del(i)}><Trash2 size={13} /></button>
         </div>
-      ))}
+      )).flatMap((row, i) => (dupWarn === i ? [row, <p key={`dup-${i}`} id={`dup-warn-${i}`} role="alert" className="cr-sub" style={{ margin: "-2px 0 8px", color: "#A1493C", fontSize: 12.5 }}>{dupMessage} Escolha outro nome.</p>] : [row]))}
       <button className="cr-btn" onClick={addRow}><Plus size={13} /> Adicionar nova opção</button>
       <div className="cr-row" style={{ justifyContent: "flex-end", marginTop: 14 }}>
         <button className="cr-btn primary" onClick={onClose}>Concluir</button>
@@ -4075,6 +4103,20 @@ function FinanceView({ finance: manualFinance, setFinance, shopping, setShopping
               </>
             );
           })()}
+          {settings.listUnifyReport && !settings.listUnifyReport.dismissed && (settings.listUnifyReport.items || []).length > 0 && (
+            <div className="cr-card cr-planned-report" style={{ marginBottom: 16 }}>
+              <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "nowrap", alignItems: "flex-start" }}>
+                <h3 className="cr-serif" style={{ margin: 0, fontSize: 15 }}>Opções repetidas unificadas</h3>
+                <button type="button" className="cr-btn ghost" aria-label="Fechar aviso" title="Fechar"
+                  onClick={() => setSettings({ ...settings, listUnifyReport: { ...settings.listUnifyReport, dismissed: true } })}><X size={15} /></button>
+              </div>
+              {settings.listUnifyReport.items.map((item, index) => (
+                <p key={index} className="cr-sub" style={{ margin: "4px 0 0" }}>
+                  {item.list} · <strong>{item.name}</strong>: {item.removed === 1 ? "1 repetido removido" : `${item.removed} repetidos removidos`}, {item.moved === 1 ? "1 item movido" : `${item.moved} itens movidos`} para o principal.
+                </p>
+              ))}
+            </div>
+          )}
           {settings.plannedReportV9 && !settings.plannedReportV9.dismissed && (
             <div className="cr-card cr-planned-report" style={{ marginBottom: 16 }}>
               <div className="cr-row" style={{ justifyContent: "space-between", flexWrap: "nowrap", alignItems: "flex-start" }}>
@@ -12432,6 +12474,46 @@ export default function App({ onSignOut }) {
       if (!notesGoneFlag) {
         finalSettings = { ...finalSettings, deletedPages: Array.from(new Set([...(finalSettings.deletedPages || []), "notes"])) };
         bg(storageSet(KEYS.settings, finalSettings)); bg(storageSet(NOTES_PAGE_REMOVED_FLAG_KEY, true));
+      }
+      // Opções repetidas nas listas (ex.: dois "Previsto"): une em uma só e move os itens para a principal.
+      // Em Status dos lançamentos, um status criado à mão com o nome de um do sistema passa a ser o do sistema.
+      {
+        const colls = { goals: finalGoals, beauty: finalBeauty, selfcare: finalSelfcare, hobbies: finalHobbies, career: finalCareer,
+          study: finalStudy, tasks: finalTasks, shopping: finalShopping, habits: finalHabits, finance: finalFinance };
+        const dirty = new Set();
+        const savedLists = { ...(finalSettings.lists || {}) };
+        const report = [];
+        let listsChanged = false;
+        Object.keys(LIST_REGISTRY).forEach((key) => {
+          const reg = LIST_REGISTRY[key];
+          if (reg.kind === "strings" || !Array.isArray(savedLists[key])) return;
+          const unified = unifyListOptions(savedLists[key], reg.defaults || [], { alignSystem: key === "financeStatus" });
+          if (unified.options === savedLists[key]) return;
+          savedLists[key] = unified.options;
+          listsChanged = true;
+          unified.merged.forEach((group) => {
+            const map = Object.fromEntries(group.from.map((id) => [id, group.to]));
+            let moved = 0;
+            (reg.usedBy || []).forEach(([coll, field, pred]) => {
+              const r = remapField(colls[coll], field, map, pred);
+              if (r.moved) { colls[coll] = r.items; dirty.add(coll); moved += r.moved; }
+            });
+            if (key === "financeStatus") {
+              // status escolhido na ficha financeira dos procedimentos
+              const r = remapField(colls.beauty, "financeSettings.status", map);
+              if (r.moved) { colls.beauty = r.items; dirty.add("beauty"); moved += r.moved; }
+            }
+            report.push({ list: reg.label, name: group.name, removed: group.from.length, moved });
+          });
+        });
+        if (listsChanged) {
+          ({ goals: finalGoals, beauty: finalBeauty, selfcare: finalSelfcare, hobbies: finalHobbies, career: finalCareer,
+            study: finalStudy, tasks: finalTasks, shopping: finalShopping, habits: finalHabits, finance: finalFinance } = colls);
+          dirty.forEach((coll) => bg(storageSet(KEYS[coll], colls[coll])));
+          finalSettings = { ...finalSettings, lists: savedLists,
+            ...(report.length ? { listUnifyReport: { items: [...((finalSettings.listUnifyReport || {}).items || []), ...report], at: todayStr(), dismissed: false } } : {}) };
+          bg(storageSet(KEYS.settings, finalSettings));
+        }
       }
       // Valores que já existem nos dados entram nas listas editáveis, assim nada some da tela
       { const rs = reconcileLists(finalSettings, { goals: finalGoals, beauty: finalBeauty, selfcare: finalSelfcare, hobbies: finalHobbies, career: finalCareer, study: finalStudy, tasks: finalTasks, shopping: finalShopping, habits: finalHabits });
